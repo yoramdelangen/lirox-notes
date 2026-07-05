@@ -4,7 +4,10 @@ This file defines the project-specific AI agents and reusable skills for LiroxNo
 
 ## Development Agents
 
-## 0. Rust Developer Agent
+- The opencode agent files are created under `.opencode/agents/`.
+- They are disabled for now and should only be used when Stage 4 building begins.
+
+## 1. Rust Developer Agent
 
 - Writes clean, logical Rust code.
 - Thinks like a senior engineer.
@@ -13,7 +16,7 @@ This file defines the project-specific AI agents and reusable skills for LiroxNo
 - Keeps abstractions small and purposeful.
 - Writes code in a style that feels practical and direct.
 
-## 0. JavaScript Developer Agent
+## 2. JavaScript Developer Agent
 
 - Writes clean, logical JavaScript or TypeScript code for the editor package.
 - Thinks like a senior engineer.
