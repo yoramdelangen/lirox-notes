@@ -10,6 +10,15 @@ These topics depend on the chosen stack, libraries, runtime limits, storage opti
 - The exact technical implementation depends on the chosen stack.
 - The implementation must account for PWA limitations, mobile browser limitations, Git gateway design, authentication, and provider access.
 
+## PWA Strategy
+
+- The frontend should be installable as a PWA.
+- The app shell should be cached for fast reloads and offline access.
+- Recent/open notes should be cached for offline viewing and editing.
+- Pending offline changes should be queued until sync is available.
+- The exact service worker and browser caching implementation is a technical decision.
+- The app should be network-first and fall back to cached data when offline.
+
 ## Local Lookup And Path Indexing
 
 - Notes are functionally identified by workspace-relative path.
@@ -62,6 +71,31 @@ These topics depend on the chosen stack, libraries, runtime limits, storage opti
 - The interface should cover clone, fetch, status, read file, list files, apply changes, merge, commit, push, and conflict inspection.
 - The first backend implementation uses command-based Git operations.
 - Candidate backend implementations include system Git CLI and gitoxide.
+
+## Layered Architecture
+
+- Git logic should live in its own testable layer separate from UI code.
+- Dioxus UI interaction should be separated from application logic.
+- Gateway request handling should be separated from Git fetch/commit/sync logic.
+- Querying information, fetching data, and responding to UI events should live in distinct layers where practical.
+- Core logic should be testable without the UI or HTTP server.
+
+## Sync Implementation
+
+- Initial sync should use a shallow clone.
+- Full repository history can be fetched later when needed.
+- Sync should pull remote changes before applying local pending changes.
+- Sync should commit once per workspace.
+- Sync should push after a successful commit.
+- Sync should keep pending local changes safe when a conflict occurs.
+- Commit message selection should happen before the sync operation runs.
+
+## Conflict Implementation
+
+- Conflicts should be detected from real Git state and/or merge results.
+- The gateway should surface conflict files as relative paths.
+- The gateway should provide enough data for the app conflict editor to render per-block choices.
+- Safe automatic merges should be attempted only when they are clearly conflict-free.
 
 ## Local Gateway Mode
 

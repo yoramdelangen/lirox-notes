@@ -6,6 +6,7 @@ This folder contains the staged planning and delivery notes for LiroxNotes.
 
 - `stage-1-functional-boundaries/` defines what the application should do.
 - `stage-2-technical-choices/` defines programming languages, dependencies, runtime choices, and technical tradeoffs.
+- `stage-2-technical-choices/` is finished.
 - `stage-3-data-structures-models/` defines application models, data structures, naming conventions, and domain definitions.
 - `stage-4-application-flows/` defines user flows, sync flows, conflict flows, and important application behavior sequences.
 - `stage-5-confirmation-review/` confirms that everything is connected, defined, and not missing important pieces.

@@ -30,6 +30,9 @@ This file contains security topics LiroxNotes must account for during technical 
 - SurrealDB can store users, sessions, repository connections, encrypted credential references, workspace metadata, and app settings.
 - Git remains the source of truth for notes, attachments, workspace config, trash, and history.
 - Repository URLs and credential references stored in SurrealDB should be encrypted at rest.
+- Secrets can be stored safely in SurrealDB using encryption.
+- Encryption keys for stored secrets must be managed separately from the secret data itself.
+- Secret encryption should support later rotation and revocation.
 
 ## Git Access Credentials
 
@@ -83,8 +86,41 @@ This file contains security topics LiroxNotes must account for during technical 
 - Session cookies should be secure, HTTP-only, and same-site where possible.
 - CSRF protection should be considered for state-changing gateway routes.
 - API requests should require authenticated sessions.
+- MVP uses email/password authentication.
+- A new account can be created during onboarding.
+- One account represents one person.
+- The same user account can be used for hosted mode and local mode.
+- Sessions use secure HTTP-only cookies.
+- Sessions last for 2 weeks by default.
+- Sessions can be refreshed.
+- Session refresh should not happen more than once per day.
+- Sessions have a hard maximum lifetime of 3 weeks without re-login.
+- After the hard maximum expires, sync and logout should require a new login.
+- Passkeys are a future goal and should be supported by the account model later.
 - Session expiration and revocation should be defined.
 - The app should avoid storing unnecessary long-lived device information.
+
+## Session Security Model
+
+- The recommended model is a sliding session with a hard maximum lifetime.
+- A session may be extended when the user is active, but not more than once per day.
+- The hard maximum lifetime prevents sessions from extending forever without re-authentication.
+- This is a reasonable balance between usability and security for MVP.
+- Refresh tokens or equivalent session renewal data should be protected like credentials.
+
+## Security Lifecycle Best Practices
+
+- Use least-privilege access for repository credentials and deploy keys.
+- Separate credential material from note content and from general metadata.
+- Support credential revocation.
+- Support session revocation.
+- Rotate encryption keys when needed.
+- Rotate or reissue deploy keys when repository access is compromised.
+- Keep access logs minimal and scrub sensitive values.
+- Treat repository caches as disposable and rebuildable.
+- Require re-login after the hard session lifetime expires.
+- Re-authenticate before sensitive actions if the session is stale.
+- Keep security-sensitive defaults conservative for MVP.
 
 ## Git Command Safety
 
@@ -147,13 +183,6 @@ This file contains security topics LiroxNotes must account for during technical 
 
 ## Open Security Questions
 
-- What authentication model should MVP use?
-- Should repository URLs be encrypted at rest on the server?
-- Should Git credentials be stored server-side, or should users provide them per session?
-- Should MVP use OAuth, deploy keys, SSH keys, personal access tokens, or a simpler manual setup?
-- Should the gateway generate deploy keys for repositories?
-- Should repository cache be encrypted at rest?
-- How long should repository caches be kept?
-- How should users revoke repository access?
-- How should secrets be rotated?
-- What deployment environment will provide filesystem encryption, secret storage, and process isolation?
+- Repository cache encryption at rest is a later enhancement, not required for MVP.
+- Secrets rotation and reissue are supported as a lifecycle requirement, but exact mechanics are implementation details.
+- The remaining deployment-environment specifics are implementation details for the chosen host/runtime.

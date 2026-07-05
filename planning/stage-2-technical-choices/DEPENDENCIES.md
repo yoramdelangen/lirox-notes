@@ -28,4 +28,6 @@ This file contains selected dependencies and why they were chosen.
 
 ## Development Dependencies
 
-- Undecided.
+- Testing dependencies should be chosen per package.
+- Rust testing should cover core logic and gateway integration.
+- Editor package testing should cover Vite/Bun-based JavaScript behavior.
