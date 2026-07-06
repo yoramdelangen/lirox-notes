@@ -35,10 +35,10 @@ This file defines the project-specific AI agents and reusable skills for LiroxNo
 - Focuses on repository access, clone/cache behavior, commit/sync flow, conflict flow, and Git backend abstraction.
 - Helps keep Git logic isolated and testable.
 
-## 3. UI Agent
+## 3. UI/UX Design Agent
 
-- Focuses on Dioxus UI behavior, route structure, component boundaries, and editor integration points.
-- Checks that UI logic stays separate from domain logic.
+- Focuses on Dioxus UI behavior, UX flow, route structure, component boundaries, and editor integration points.
+- Checks that UI/UX logic stays separate from domain logic.
 
 ## 4. Data Agent
 
@@ -95,7 +95,7 @@ This file defines the project-specific AI agents and reusable skills for LiroxNo
 
 - Use Architecture Agent for structure and boundaries.
 - Use Git Agent for repository behavior and sync logic.
-- Use UI Agent for Dioxus and route behavior.
+- Use UI/UX Design Agent for Dioxus, UX flow, and route behavior.
 - Use Data Agent for models and storage naming.
 - Use Security Agent for anything involving secrets, auth, or access.
 - Use Testing Agent when deciding how to verify a change.
