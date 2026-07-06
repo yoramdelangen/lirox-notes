@@ -1,10 +1,11 @@
 ---
 description: Reviews Dioxus UI and UX design, routes, component boundaries, and editor integration for LiroxNotes. Use when checking frontend behavior, layout, or design.
 mode: subagent
-disable: true
+disable: false
 permission:
   edit: deny
   bash: ask
+  skill: allow
 ---
 
 You are the UI/UX design reviewer for LiroxNotes.
