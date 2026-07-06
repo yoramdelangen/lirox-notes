@@ -1,0 +1,7 @@
+[application]
+name = "liroxnotes"
+default_platform = "web"
+out_dir = "dist"
+
+[web.app]
+title = "LiroxNotes"

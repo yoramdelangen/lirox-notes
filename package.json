@@ -1,0 +1,16 @@
+{
+  "name": "liroxnotes",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build:css": "tailwindcss -i ./crates/app/assets/tailwind.css -o ./crates/app/assets/app.css --minify",
+    "watch:css": "tailwindcss -i ./crates/app/assets/tailwind.css -o ./crates/app/assets/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  },
+  "dependencies": {
+    "baseline-browser-mapping": "^2.10.42",
+    "caniuse-lite": "^1.0.30001802"
+  }
+}

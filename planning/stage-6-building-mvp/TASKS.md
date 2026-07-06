@@ -2,10 +2,7 @@
 
 ## Backlog
 
-- Create Rust workspace layout with app, gateway, shared code, and editor package.
-- Add Dioxus app shell served by Actix.
 - Add Tailwind CSS and base theme tokens.
-- Add mock Zed/Bear-inspired workspace shell.
 - Add workspace selector in the top-left.
 - Add sidebar mode switcher for file tree, label tree, and all-notes overview.
 - Add bottom status bar for Git branch, sync state, changed count, and offline state.
@@ -46,8 +43,12 @@
 
 ## In Progress
 
-- None.
+- Add Markdown note open/edit/save flow.
 
 ## Done
 
 - Planning stages 1-5.
+- Create Rust workspace layout with app, gateway, shared code, and editor package.
+- Add Dioxus app shell served by Actix.
+- Add Tailwind CSS and base theme tokens.
+- Add mock Zed/Bear-inspired workspace shell.

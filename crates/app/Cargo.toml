@@ -1,0 +1,15 @@
+[package]
+name = "liroxnotes-app"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "liroxnotes-app"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dioxus = { workspace = true, features = ["web"] }
+liroxnotes-shared = { path = "../shared" }

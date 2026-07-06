@@ -1,0 +1,6 @@
+{
+  "name": "@liroxnotes/editor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Editor package placeholder for the MVP CodeMirror integration"
+}

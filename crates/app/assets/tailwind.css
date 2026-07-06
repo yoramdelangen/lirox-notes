@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --shell-bg: 13 17 23;
+    --shell-panel: 15 20 27;
+    --shell-editor: 11 15 20;
+    --shell-chrome: 12 16 22;
+    --shell-border: 31 41 55;
+    --theme-text: 226 232 240;
+    --theme-muted: 148 163 184;
+    --theme-subtle: 100 116 139;
+    --theme-surface: 15 23 42;
+    --theme-surface-alt: 30 41 59;
+    --theme-accent: 56 189 248;
+    --theme-accent-soft: 125 211 252;
+    --theme-warn: 251 191 36;
+  }
+
+  [data-theme="light"] {
+    color-scheme: light;
+    --shell-bg: 248 250 252;
+    --shell-panel: 241 245 249;
+    --shell-editor: 255 255 255;
+    --shell-chrome: 241 245 249;
+    --shell-border: 203 213 225;
+    --theme-text: 15 23 42;
+    --theme-muted: 71 85 105;
+    --theme-subtle: 100 116 139;
+    --theme-surface: 226 232 240;
+    --theme-surface-alt: 203 213 225;
+    --theme-accent: 2 132 199;
+    --theme-accent-soft: 14 165 233;
+    --theme-warn: 217 119 6;
+  }
+
+  html {
+    @apply bg-shell-bg text-theme-text antialiased;
+    font-size: 13px;
+  }
+
+  body {
+    @apply m-0 bg-shell-bg font-sans text-theme-text;
+  }
+
+  button {
+    font: inherit;
+  }
+
+  * {
+    scrollbar-color: rgb(var(--theme-muted)) rgb(var(--shell-panel));
+  }
+
+  ::selection {
+    @apply bg-theme-accent/30;
+  }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "liroxnotes-gateway"
+edition.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "liroxnotes-gateway"
+path = "src/main.rs"
+
+[dependencies]
+actix-files.workspace = true
+actix-web.workspace = true
+dioxus.workspace = true
+dioxus-ssr.workspace = true
+liroxnotes-app = { path = "../app" }
