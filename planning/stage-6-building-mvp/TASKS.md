@@ -6,8 +6,6 @@
 - Add workspace selector in the top-left.
 - Add sidebar mode switcher for file tree, label tree, and all-notes overview.
 - Add bottom status bar for Git branch, sync state, changed count, and offline state.
-- Add CodeMirror package with Bun/Vite build.
-- Define the Dioxus-to-CodeMirror adapter API.
 - Add Markdown note open/edit/save flow.
 - Add changed-state tracking in file tree and notes overview.
 - Add SurrealDB schema and migration runner.
@@ -44,6 +42,7 @@
 ## In Progress
 
 - Add Markdown note open/edit/save flow.
+- Integrate the initial Dioxus-to-CodeMirror adapter into the shell.
 
 ## Done
 
@@ -52,3 +51,5 @@
 - Add Dioxus app shell served by Actix.
 - Add Tailwind CSS and base theme tokens.
 - Add mock Zed/Bear-inspired workspace shell.
+- Add CodeMirror package with Bun/Vite build.
+- Define the Dioxus-to-CodeMirror adapter API.

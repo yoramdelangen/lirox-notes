@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiroxNotes Editor Develop</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --shell-bg: 13 17 23;
+        --shell-panel: 15 20 27;
+        --shell-editor: 11 15 20;
+        --shell-chrome: 12 16 22;
+        --shell-border: 31 41 55;
+        --theme-text: 226 232 240;
+        --theme-muted: 148 163 184;
+        --theme-subtle: 100 116 139;
+        --theme-surface: 15 23 42;
+        --theme-surface-alt: 30 41 59;
+        --theme-accent: 56 189 248;
+        --theme-accent-soft: 125 211 252;
+        --theme-warn: 251 191 36;
+        font-family: Inter, system-ui, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: rgb(var(--shell-bg)); color: rgb(var(--theme-text)); }
+      body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100vh; }
+      main { min-width: 0; border-right: 1px solid rgb(var(--shell-border)); background: rgb(var(--shell-editor)); }
+      aside { overflow: auto; background: rgb(var(--shell-panel)); }
+      #editor-root { height: 100%; }
+      .sidebar { padding: 16px; display: grid; gap: 16px; }
+      .card { border: 1px solid rgb(var(--shell-border)); border-radius: 10px; background: rgb(var(--theme-surface) / 0.6); padding: 12px; }
+      .label { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgb(var(--theme-subtle)); margin-bottom: 8px; }
+      .row { display: grid; gap: 6px; margin-bottom: 10px; }
+      input, textarea, select { width: 100%; border: 1px solid rgb(var(--shell-border)); border-radius: 8px; background: rgb(var(--shell-bg)); color: rgb(var(--theme-text)); padding: 8px 10px; font: inherit; }
+      textarea { min-height: 220px; resize: vertical; }
+      pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: rgb(var(--theme-muted)); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="editor-root"></div>
+    </main>
+    <aside>
+      <div class="sidebar">
+        <div class="card">
+          <div class="label">Scenario</div>
+          <div class="row">
+            <label for="doc">Initial markdown</label>
+            <textarea id="doc"># Markdown playground
+
+TL;DR: this note exercises headings, emphasis, links, code, quotes, lists, images, and separators.
+
+## Writing flow
+
+This editor should handle *italic*, **bold**, ***both***, inline `code`, and [links](https://example.com) without getting in the way.
+
+![Writing desk](https://images.unsplash.com/photo-1515879218367-8466d910aaa4?auto=format&fit=crop&w=1200&q=80)
+
+### Lists
+
+- Bullet one
+- Bullet two with **strong text**
+- Bullet three with `inline code`
+
+1. Ordered item one
+2. Ordered item two
+3. Ordered item three
+
+### Quote
+
+> A calm writing surface beats a clever editor.
+
+---
+
+#### Code block
+
+```javascript
+export function greet(name) {
+  const message = `hello ${name}`;
+  console.log(message);
+  return message;
+}
+```
+
+##### Closing note
+
+Finish with a final paragraph so normal body text is easy to inspect.</textarea>
+          </div>
+          <div class="row">
+            <label for="width">Writing width</label>
+            <select id="width">
+              <option value="650px" selected>650px</option>
+              <option value="680px">680px</option>
+              <option value="800px">800px</option>
+            </select>
+          </div>
+          <div class="row">
+            <label><input id="lineNumbers" type="checkbox" /> Show line numbers</label>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Editor State</div>
+          <pre id="events">Waiting for editor...</pre>
+        </div>
+      </div>
+    </aside>
+    <script type="module" src="/src/develop.ts"></script>
+  </body>
+  </html>

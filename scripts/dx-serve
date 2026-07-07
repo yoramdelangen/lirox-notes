@@ -2,11 +2,15 @@
 set -eu
 
 bun run build:css
+(cd packages/editor && bun run build)
 bun run watch:css &
 css_pid=$!
+(cd packages/editor && bun run dev) &
+editor_pid=$!
 
 cleanup() {
   kill "$css_pid" 2>/dev/null || true
+  kill "$editor_pid" 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM

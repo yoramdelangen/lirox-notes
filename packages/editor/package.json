@@ -2,5 +2,22 @@
   "name": "@liroxnotes/editor",
   "private": true,
   "version": "0.1.0",
-  "description": "Editor package placeholder for the MVP CodeMirror integration"
+  "description": "LiroxNotes CodeMirror editor bundle",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "develop": "vite"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/lang-markdown": "^6.3.4",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.6",
+    "codemirror": "^6.0.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
 }
