@@ -121,6 +121,53 @@ class HeadingLabelWidget extends WidgetType {
   }
 }
 
+type ToolbarMenuItem = {
+  label: string;
+  active?: boolean;
+  run: () => void;
+};
+
+const closeToolbarDropdowns = () => {
+  document.querySelectorAll(".cm-editor-toolbar-dropdown").forEach(el => el.remove());
+};
+
+const showToolbarDropdown = (anchor: HTMLElement, items: ToolbarMenuItem[]) => {
+  closeToolbarDropdowns();
+  const dropdown = document.createElement("div");
+  dropdown.className = "cm-editor-toolbar-dropdown";
+
+  for (const item of items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cm-editor-toolbar-dropdown-item";
+    if (item.active) {
+      button.classList.add("cm-editor-toolbar-dropdown-item-active");
+    }
+    button.textContent = item.label;
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      item.run();
+      dropdown.remove();
+    });
+    dropdown.append(button);
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  dropdown.style.position = "fixed";
+  dropdown.style.top = `${rect.bottom + 2}px`;
+  dropdown.style.left = `${rect.left}px`;
+
+  const close = (ev: MouseEvent) => {
+    if (!dropdown.contains(ev.target as Node)) {
+      dropdown.remove();
+      document.removeEventListener("click", close);
+    }
+  };
+
+  requestAnimationFrame(() => document.addEventListener("click", close));
+  document.body.append(dropdown);
+};
+
 const headingMarkerDecorations = StateField.define<DecorationSet>({
   create(state) {
     return buildHeadingMarkerDecorations(state);
@@ -169,10 +216,6 @@ const showHeadingDropdown = (
   end: number,
   currentLevel: number
 ) => {
-  document.querySelectorAll(".cm-editor-heading-dropdown").forEach(el => el.remove());
-  const dropdown = document.createElement("div");
-  dropdown.className = "cm-editor-heading-dropdown";
-
   const items = [
     { level: 0, label: "Paragraph" },
     { level: 1, label: "Heading 1" },
@@ -183,39 +226,18 @@ const showHeadingDropdown = (
     { level: 6, label: "Heading 6" },
   ];
 
-  for (const item of items) {
-    const button = document.createElement("button");
-    button.className = "cm-editor-heading-dropdown-item";
-    if (item.level === currentLevel) {
-      button.classList.add("cm-editor-heading-dropdown-item-active");
-    }
-    button.textContent = item.label;
-    button.addEventListener("click", (e) => {
-      e.stopPropagation();
+  showToolbarDropdown(anchor, items.map((item) => ({
+    label: item.label,
+    active: item.level === currentLevel,
+    run: () => {
       if (item.level === 0) {
         view.dispatch({ changes: { from: start, to: end, insert: "" } });
       } else {
         view.dispatch({ changes: { from: start, to: end, insert: "#".repeat(item.level) + " " } });
       }
       view.focus();
-      dropdown.remove();
-    });
-    dropdown.append(button);
-  }
-
-  const rect = anchor.getBoundingClientRect();
-  dropdown.style.position = "fixed";
-  dropdown.style.top = `${rect.bottom + 2}px`;
-  dropdown.style.left = `${rect.left}px`;
-
-  const close = (ev: MouseEvent) => {
-    if (!dropdown.contains(ev.target as Node)) {
-      dropdown.remove();
-      document.removeEventListener("click", close);
     }
-  };
-  requestAnimationFrame(() => document.addEventListener("click", close));
-  document.body.append(dropdown);
+  })));
 };
 
 const headingDecorations = StateField.define<DecorationSet>({
@@ -487,6 +509,38 @@ const wrapMainSelection = (view: EditorView, open: string, close = open) => {
   view.focus();
 };
 
+const insertAtLineStart = (view: EditorView, insert: string, cursorOffset = insert.length) => {
+  const range = view.state.selection.main;
+  const line = view.state.doc.lineAt(range.from);
+  view.dispatch({
+    changes: { from: line.from, to: line.from, insert },
+    selection: EditorSelection.cursor(line.from + cursorOffset)
+  });
+  view.focus();
+};
+
+const showListDropdown = (view: EditorView, anchor: HTMLElement) => {
+  showToolbarDropdown(anchor, [
+    { label: "Bullet list", run: () => insertAtLineStart(view, "- ") },
+    { label: "Numbered list", run: () => insertAtLineStart(view, "1. ") },
+    { label: "Task list", run: () => insertAtLineStart(view, "- [ ] ") }
+  ]);
+};
+
+const showFormatDropdown = (view: EditorView, anchor: HTMLElement) => {
+  showToolbarDropdown(anchor, [
+    { label: "Inline code", run: () => wrapMainSelection(view, "`") },
+    { label: "Code block", run: () => insertAtLineStart(view, "```javascript\n\n```", "```javascript\n".length) },
+    { label: "Quote", run: () => insertAtLineStart(view, "> ") }
+  ]);
+};
+
+const showMoreDropdown = (view: EditorView, anchor: HTMLElement) => {
+  showToolbarDropdown(anchor, [
+    { label: "Horizontal rule", run: () => insertAtLineStart(view, "---\n\n", 5) }
+  ]);
+};
+
 const getTitleText = (doc: string) => {
   const heading = splitHeading(doc);
   if (!heading.exists || !heading.title.trim()) {
@@ -528,11 +582,11 @@ const theme = EditorView.theme({
     height: "100%",
     backgroundColor: "transparent",
     color: "rgb(var(--theme-text))",
-    fontFamily: "inherit"
+    fontFamily: "Victor Mono, monospace"
   },
   ".cm-scroller": {
     overflow: "auto",
-    fontFamily: "inherit",
+    fontFamily: "Victor Mono, monospace",
     padding: "0 1.5rem 1.5rem"
   },
   ".cm-content, .cm-gutter": {
@@ -553,7 +607,7 @@ const theme = EditorView.theme({
   },
   ".cm-editor-heading-line": {
     position: "relative",
-    fontFamily: "Inter Nerd Font, Inter, sans-serif",
+    fontFamily: "Victor Mono, monospace",
     fontWeight: "600",
     lineHeight: "1.15",
     color: "rgb(var(--theme-text))"
@@ -652,20 +706,27 @@ const theme = EditorView.theme({
   ".cm-editor-toolbar-inner": {
     display: "flex",
     alignItems: "center",
-    gap: "0.375rem",
+    gap: "0.15rem",
     borderRadius: "0.5rem",
-    backgroundColor: "rgb(var(--theme-surface) / 0.9)",
-    padding: "0.25rem"
+    backgroundColor: "rgba(var(--shell-panel), 0.9)",
+    border: "1px solid rgb(var(--shell-border) / 0.65)",
+    padding: "0.35rem"
   },
   ".cm-editor-toolbar-button": {
     border: "0",
     backgroundColor: "transparent",
     color: "rgb(var(--theme-muted))",
-    padding: "0.35rem 0.5rem",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "0.15rem",
+    minWidth: "2rem",
+    padding: "0.4rem 0.55rem",
     borderRadius: "0.375rem",
-    fontSize: "11px",
+    fontSize: "14px",
     lineHeight: "1",
-    fontWeight: "600"
+    fontWeight: "600",
+    fontFamily: "inherit"
   },
   ".cm-editor-toolbar-button:hover": {
     backgroundColor: "rgb(var(--theme-surface-alt) / 0.85)",
@@ -673,6 +734,45 @@ const theme = EditorView.theme({
   },
   ".cm-editor-toolbar-button:disabled": {
     opacity: "0.45"
+  },
+  ".cm-editor-toolbar-button-active": {
+    backgroundColor: "rgb(var(--theme-surface-alt) / 0.95)",
+    color: "rgb(var(--theme-text))"
+  },
+  ".cm-editor-toolbar-button-arrow": {
+    fontSize: "0.72em",
+    transform: "translateY(-1px)"
+  },
+  ".cm-editor-toolbar-dropdown": {
+    position: "fixed",
+    zIndex: "100",
+    display: "flex",
+    flexDirection: "column",
+    minWidth: "160px",
+    backgroundColor: "rgb(var(--theme-surface))",
+    border: "1px solid rgb(var(--shell-border))",
+    borderRadius: "8px",
+    padding: "4px",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.3)"
+  },
+  ".cm-editor-toolbar-dropdown-item": {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "6px 12px",
+    border: "0",
+    backgroundColor: "transparent",
+    color: "rgb(var(--theme-text))",
+    fontSize: "13px",
+    borderRadius: "6px",
+    cursor: "pointer"
+  },
+  ".cm-editor-toolbar-dropdown-item:hover": {
+    backgroundColor: "rgb(var(--theme-surface-alt))"
+  },
+  ".cm-editor-toolbar-dropdown-item-active": {
+    fontWeight: "600",
+    color: "rgb(var(--theme-accent))"
   },
   ".cm-editor-link-icon": {
     display: "inline-block",
@@ -719,30 +819,57 @@ const toolbarPanel = (view: EditorView): Panel => {
   const inner = document.createElement("div");
   inner.className = "cm-editor-toolbar-inner";
 
-  const buttons: HTMLButtonElement[] = [];
-
-  const addButton = (label: string, run: () => void) => {
+  const addButton = (label: string, title: string, run: () => void, active = false) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "cm-editor-toolbar-button";
+    if (active) {
+      button.classList.add("cm-editor-toolbar-button-active");
+    }
+    button.title = title;
+    button.setAttribute("aria-label", title);
     button.textContent = label;
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", () => run());
-    buttons.push(button);
     inner.append(button);
   };
 
-  addButton("B", () => wrapMainSelection(view, "**"));
-  addButton("I", () => wrapMainSelection(view, "*"));
-  addButton("Code", () => wrapMainSelection(view, "`"));
-  addButton("Link", () => wrapMainSelection(view, "[", "](https://)"));
+  const addMenuButton = (label: string, title: string, run: (button: HTMLButtonElement) => void) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cm-editor-toolbar-button";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    const text = document.createElement("span");
+    text.textContent = label;
+    const arrow = document.createElement("span");
+    arrow.className = "cm-editor-toolbar-button-arrow";
+    arrow.textContent = "▾";
+    button.append(text, arrow);
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => run(button));
+    inner.append(button);
+  };
+
+  addMenuButton("H", "Headings", (button) => {
+    const range = view.state.selection.main;
+    const line = view.state.doc.lineAt(range.from);
+    const match = line.text.match(/^(#{1,6})\s+/);
+    showHeadingDropdown(view, button, line.from, line.to, match ? match[1].length : 0);
+  });
+
+  addButton("☑", "Task list", () => insertAtLineStart(view, "- [ ] "));
+  addMenuButton("•", "Lists", (button) => showListDropdown(view, button));
+  addButton("B", "Bold", () => wrapMainSelection(view, "**"));
+  addButton("I", "Italic", () => wrapMainSelection(view, "*"));
+  addMenuButton("✎", "Formatting", (button) => showFormatDropdown(view, button));
+  addButton("↗", "Link", () => wrapMainSelection(view, "[", "](https://)"));
+  addButton("▦", "Table", () => insertAtLineStart(view, "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |\n", "| Column 1 | Column 2 |\n| --- | --- |\n| ".length));
+  addButton("🖼", "Image", () => insertAtLineStart(view, "![](https://)", 4));
+  addMenuButton("⋮", "More", (button) => showMoreDropdown(view, button));
 
   const sync = () => {
-    const hasSelection = !view.state.selection.main.empty;
     dom.hidden = !view.hasFocus;
-    for (const button of buttons) {
-      button.disabled = !hasSelection;
-    }
   };
 
   dom.append(inner);
