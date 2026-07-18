@@ -1,11 +1,10 @@
 ---
 title: MVP Roadmap
-labels:
-  - planning
-  - roadmap
 ---
 
 # MVP Roadmap
+
+#planning #roadmap
 
 The loading path starts in [Welcome](notes/welcome.md) and points back to [Labels](reference/labels.md).
 

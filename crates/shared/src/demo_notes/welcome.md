@@ -1,11 +1,10 @@
 ---
 title: Welcome
-labels:
-  - welcome
-  - overview
 ---
 
 # Welcome
+
+#welcome #overview
 
 Start here: [MVP Roadmap](notes/roadmap.md) and [Loading Flow](reference/loading.md).
 

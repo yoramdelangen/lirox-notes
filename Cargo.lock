@@ -2062,7 +2062,10 @@ name = "liroxnotes-app"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "js-sys",
  "liroxnotes-shared",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

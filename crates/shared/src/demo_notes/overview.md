@@ -1,11 +1,10 @@
 ---
 title: Workspace Overview
-labels:
-  - overview
-  - workspace
 ---
 
 # Workspace Overview
+
+#overview #workspace
 
 This note ties together [Welcome](notes/welcome.md), [MVP Roadmap](notes/roadmap.md), and [Inbox Draft](drafts/inbox.md).
 

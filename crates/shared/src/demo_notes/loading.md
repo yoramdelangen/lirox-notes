@@ -1,11 +1,10 @@
 ---
 title: Loading Flow
-labels:
-  - loading
-  - demo
 ---
 
 # Loading Flow
+
+#loading #demo
 
 This page exercises nested note links:
 

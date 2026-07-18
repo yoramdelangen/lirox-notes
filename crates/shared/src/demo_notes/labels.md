@@ -1,11 +1,10 @@
 ---
 title: Labels
-labels:
-  - metadata
-  - labels
 ---
 
 # Labels
+
+#metadata #labels
 
 These examples use labels like `welcome`, `planning`, `workspace`, and `nested/ui`.
 

@@ -31,6 +31,17 @@ type HeadingSplit = {
   title: string;
 };
 
+type LiroxNotesEditorApi = {
+  mountAllLiroxNotesEditors: () => void;
+  updateLiroxNotesEditor: (root: EditorRoot, nextDoc?: string) => EditorView | undefined;
+};
+
+type MountedEditor = {
+  view: EditorView;
+};
+
+const mountedEditors = new WeakMap<EditorRoot, MountedEditor>();
+
 const parseBoolean = (value: string | undefined, fallback: boolean) => {
   if (value == null) {
     return fallback;
@@ -887,8 +898,9 @@ const toolbarPanel = (view: EditorView): Panel => {
 };
 
 export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => {
-  if (root.dataset.editorMounted === "true") {
-    return;
+  const mounted = mountedEditors.get(root);
+  if (mounted) {
+    return mounted.view;
   }
 
   const source = initialDoc ?? root.dataset.initialDoc ?? "";
@@ -936,13 +948,38 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
   emitEditorState(root, view);
 
   root.dataset.editorMounted = "true";
+  mountedEditors.set(root, { view });
   return view;
+};
+
+export const updateLiroxNotesEditor = (root: EditorRoot, nextDoc?: string) => {
+  const doc = nextDoc ?? root.dataset.initialDoc ?? "";
+  const mounted = mountedEditors.get(root);
+
+  if (!mounted) {
+    return mountLiroxNotesEditor(root, doc);
+  }
+
+  if (mounted.view.state.doc.toString() === doc) {
+    return mounted.view;
+  }
+
+  mounted.view.dispatch({
+    changes: { from: 0, to: mounted.view.state.doc.length, insert: doc }
+  });
+
+  return mounted.view;
 };
 
 export const mountAllLiroxNotesEditors = () => {
   document
     .querySelectorAll<EditorRoot>("[data-lirox-editor-root]")
     .forEach((root) => mountLiroxNotesEditor(root));
+};
+
+((globalThis as typeof globalThis & { LiroxNotesEditor?: LiroxNotesEditorApi })).LiroxNotesEditor = {
+  mountAllLiroxNotesEditors,
+  updateLiroxNotesEditor,
 };
 
 if (document.readyState === "loading") {

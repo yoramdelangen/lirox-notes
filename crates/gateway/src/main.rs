@@ -6,7 +6,7 @@ use liroxnotes_shared::mock_workspace_view;
 
 fn render_workspace(selected_note_path: &str) -> HttpResponse {
     let view = mock_workspace_view(selected_note_path);
-    let body = dioxus_ssr::render_element(rsx!(WorkspaceShell { view }));
+    let body = dioxus_ssr::render_element(rsx!(WorkspaceShell { view, on_select_note: |_| {} }));
 
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")

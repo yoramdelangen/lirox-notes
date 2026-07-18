@@ -99,7 +99,15 @@ pub fn mock_workspace_view(selected_note_path: &str) -> WorkspaceView {
     workspace_view(&DEMO_WORKSPACE, selected_note_path)
 }
 
+pub fn mock_workspace_view_with_body(selected_note_path: &str, selected_note_body: &str) -> WorkspaceView {
+    workspace_view_with_body(&DEMO_WORKSPACE, selected_note_path, selected_note_body)
+}
+
 pub fn workspace_view(workspace: &DemoWorkspace, selected_note_path: &str) -> WorkspaceView {
+    workspace_view_with_body(workspace, selected_note_path, "")
+}
+
+pub fn workspace_view_with_body(workspace: &DemoWorkspace, selected_note_path: &str, selected_note_body: &str) -> WorkspaceView {
     let active_path = workspace
         .notes
         .iter()
@@ -110,7 +118,15 @@ pub fn workspace_view(workspace: &DemoWorkspace, selected_note_path: &str) -> Wo
     let notes: Vec<NoteSummary> = workspace
         .notes
         .iter()
-        .map(|note| note_summary(note.path, note.body, active_path))
+        .map(|note| {
+            let body = if note.path == active_path && !selected_note_body.is_empty() {
+                selected_note_body
+            } else {
+                note.body
+            };
+
+            note_summary(note.path, body, active_path)
+        })
         .collect();
     let selected_note = notes
         .iter()
@@ -131,7 +147,13 @@ pub fn workspace_view(workspace: &DemoWorkspace, selected_note_path: &str) -> Wo
             .notes
             .iter()
             .find(|note| note.path == selected_note.path)
-            .map(|note| note.body.to_string())
+            .map(|note| {
+                if note.path == selected_note.path && !selected_note_body.is_empty() {
+                    selected_note_body.to_string()
+                } else {
+                    note.body.to_string()
+                }
+            })
             .unwrap_or_else(|| workspace.notes[0].body.to_string()),
         selected_note,
         tree,
@@ -150,7 +172,7 @@ fn note_summary(path: &str, body: &str, selected_note_path: &str) -> NoteSummary
     NoteSummary {
         path: path.to_string(),
         title,
-        labels: meta.labels,
+        labels: extract_labels(body),
         links: extract_links(body),
         active: path == selected_note_path,
     }
@@ -239,7 +261,6 @@ fn build_tree(notes: &[NoteSummary], selected_note_path: &str) -> Vec<TreeEntry>
 
 struct NoteMeta {
     title: Option<String>,
-    labels: Vec<String>,
 }
 
 fn parse_note_meta(body: &str) -> NoteMeta {
@@ -247,34 +268,15 @@ fn parse_note_meta(body: &str) -> NoteMeta {
     if lines.next().map(str::trim) != Some("---") {
         return NoteMeta {
             title: None,
-            labels: Vec::new(),
         };
     }
 
     let mut title = None;
-    let mut labels = Vec::new();
-    let mut in_labels = false;
 
     for line in lines {
         let trimmed = line.trim();
         if trimmed == "---" {
             break;
-        }
-
-        if in_labels {
-            if let Some(label) = trimmed.strip_prefix('-') {
-                let label = label.trim();
-                if !label.is_empty() {
-                    labels.push(normalize_label(label));
-                }
-                continue;
-            }
-
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            in_labels = false;
         }
 
         if let Some(rest) = trimmed.strip_prefix("title:") {
@@ -284,29 +286,29 @@ fn parse_note_meta(body: &str) -> NoteMeta {
             }
             continue;
         }
-
-        if let Some(rest) = trimmed.strip_prefix("labels:") {
-            let value = rest.trim();
-            if value.starts_with('[') {
-                labels.extend(parse_inline_labels(value));
-            } else {
-                in_labels = true;
-            }
-        }
     }
 
-    NoteMeta { title, labels }
+    NoteMeta { title }
 }
 
-fn parse_inline_labels(raw: &str) -> Vec<String> {
-    raw.trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .map(unquote)
-        .map(|label| normalize_label(&label))
-        .collect()
+fn extract_labels(body: &str) -> Vec<String> {
+    let content = strip_frontmatter(body);
+    let mut labels = BTreeSet::new();
+
+    for token in content.split_whitespace() {
+        let Some(raw) = token.strip_prefix('#') else {
+            continue;
+        };
+
+        let label = raw.trim_matches(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '/' | '_' | '-')));
+        if label.is_empty() {
+            continue;
+        }
+
+        labels.insert(normalize_label(label));
+    }
+
+    labels.into_iter().collect()
 }
 
 fn heading_title(body: &str) -> Option<String> {
@@ -405,7 +407,7 @@ mod tests {
         let meta = parse_note_meta(note);
 
         assert_eq!(meta.title.as_deref(), Some("Welcome"));
-        assert_eq!(meta.labels, vec!["welcome", "overview"]);
+        assert_eq!(extract_labels(note), vec!["overview", "welcome"]);
         assert!(extract_links(note).contains(&"notes/roadmap.md".to_string()));
     }
 
@@ -416,5 +418,13 @@ mod tests {
         assert_eq!(view.selected_note.path, "notes/roadmap.md");
         assert!(view.tree.iter().any(|row| row.label == "notes" && matches!(row.kind, TreeKind::Folder)));
         assert!(view.labels.iter().any(|label| label.name == "welcome"));
+    }
+
+    #[test]
+    fn overrides_selected_note_body_for_labels() {
+        let view = workspace_view_with_body(&DEMO_WORKSPACE, "notes/welcome.md", "# Welcome\n\n#alpha #beta");
+
+        assert!(view.selected_note.labels.contains(&"alpha".to_string()));
+        assert!(view.labels.iter().any(|label| label.name == "alpha"));
     }
 }
