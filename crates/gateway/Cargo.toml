@@ -13,3 +13,4 @@ actix-web.workspace = true
 dioxus.workspace = true
 dioxus-ssr.workspace = true
 liroxnotes-app = { path = "../app" }
+liroxnotes-shared = { path = "../shared" }
