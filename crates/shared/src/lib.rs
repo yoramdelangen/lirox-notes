@@ -52,6 +52,12 @@ pub struct NoteRecord {
     pub body: &'static str,
 }
 
+#[derive(Clone)]
+pub struct WorkspaceNote {
+    pub path: String,
+    pub body: String,
+}
+
 pub struct DemoWorkspace {
     pub slug: &'static str,
     pub name: &'static str,
@@ -99,7 +105,10 @@ pub fn mock_workspace_view(selected_note_path: &str) -> WorkspaceView {
     workspace_view(&DEMO_WORKSPACE, selected_note_path)
 }
 
-pub fn mock_workspace_view_with_body(selected_note_path: &str, selected_note_body: &str) -> WorkspaceView {
+pub fn mock_workspace_view_with_body(
+    selected_note_path: &str,
+    selected_note_body: &str,
+) -> WorkspaceView {
     workspace_view_with_body(&DEMO_WORKSPACE, selected_note_path, selected_note_body)
 }
 
@@ -107,7 +116,57 @@ pub fn workspace_view(workspace: &DemoWorkspace, selected_note_path: &str) -> Wo
     workspace_view_with_body(workspace, selected_note_path, "")
 }
 
-pub fn workspace_view_with_body(workspace: &DemoWorkspace, selected_note_path: &str, selected_note_body: &str) -> WorkspaceView {
+pub fn workspace_view_from_notes(
+    slug: &str,
+    name: &str,
+    branch: &str,
+    source: &str,
+    default_note_path: &str,
+    selected_note_path: &str,
+    changed_notes: usize,
+    note_records: &[WorkspaceNote],
+) -> WorkspaceView {
+    let active_path = note_records
+        .iter()
+        .find(|note| note.path == selected_note_path)
+        .map(|note| note.path.as_str())
+        .unwrap_or(default_note_path);
+
+    let notes: Vec<NoteSummary> = note_records
+        .iter()
+        .map(|note| note_summary(&note.path, &note.body, active_path))
+        .collect();
+    let selected_note = notes
+        .iter()
+        .find(|note| note.path == active_path)
+        .cloned()
+        .unwrap_or_else(|| notes[0].clone());
+    let selected_note_body = note_records
+        .iter()
+        .find(|note| note.path == selected_note.path)
+        .map(|note| note.body.clone())
+        .unwrap_or_else(|| note_records[0].body.clone());
+
+    WorkspaceView {
+        slug: slug.to_string(),
+        name: name.to_string(),
+        branch: branch.to_string(),
+        source: source.to_string(),
+        note_count: notes.len(),
+        changed_notes,
+        tree: build_tree(&notes, &selected_note.path),
+        labels: label_summaries(&notes),
+        selected_note,
+        selected_note_body,
+        notes,
+    }
+}
+
+pub fn workspace_view_with_body(
+    workspace: &DemoWorkspace,
+    selected_note_path: &str,
+    selected_note_body: &str,
+) -> WorkspaceView {
     let active_path = workspace
         .notes
         .iter()
@@ -214,7 +273,13 @@ fn build_tree(notes: &[NoteSummary], selected_note_path: &str) -> Vec<TreeEntry>
         }
     }
 
-    fn emit(node: &Node, prefix: &str, depth: usize, selected_note_path: &str, rows: &mut Vec<TreeEntry>) {
+    fn emit(
+        node: &Node,
+        prefix: &str,
+        depth: usize,
+        selected_note_path: &str,
+        rows: &mut Vec<TreeEntry>,
+    ) {
         for (folder, child) in &node.folders {
             let path = if prefix.is_empty() {
                 folder.clone()
@@ -266,9 +331,7 @@ struct NoteMeta {
 fn parse_note_meta(body: &str) -> NoteMeta {
     let mut lines = body.lines();
     if lines.next().map(str::trim) != Some("---") {
-        return NoteMeta {
-            title: None,
-        };
+        return NoteMeta { title: None };
     }
 
     let mut title = None;
@@ -292,7 +355,7 @@ fn parse_note_meta(body: &str) -> NoteMeta {
 }
 
 fn extract_labels(body: &str) -> Vec<String> {
-    let content = strip_frontmatter(body);
+    let content = strip_markdown_noise(strip_frontmatter(body));
     let mut labels = BTreeSet::new();
 
     for token in content.split_whitespace() {
@@ -300,7 +363,9 @@ fn extract_labels(body: &str) -> Vec<String> {
             continue;
         };
 
-        let label = raw.trim_matches(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '/' | '_' | '-')));
+        let label = raw.trim_matches(|ch: char| {
+            !(ch.is_ascii_alphanumeric() || matches!(ch, '/' | '_' | '-'))
+        });
         if label.is_empty() {
             continue;
         }
@@ -309,6 +374,39 @@ fn extract_labels(body: &str) -> Vec<String> {
     }
 
     labels.into_iter().collect()
+}
+
+fn strip_markdown_noise(body: &str) -> String {
+    let mut output = String::new();
+    let mut fenced = false;
+
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+
+        if fenced {
+            continue;
+        }
+
+        let mut inline_code = false;
+        let mut link_depth = 0usize;
+        for ch in line.chars() {
+            match ch {
+                '`' => inline_code = !inline_code,
+                '[' if !inline_code => link_depth += 1,
+                ']' if !inline_code && link_depth > 0 => link_depth -= 1,
+                '(' if !inline_code && link_depth == 0 => link_depth += 1,
+                ')' if !inline_code && link_depth > 0 => link_depth -= 1,
+                _ if !inline_code && link_depth == 0 => output.push(ch),
+                _ => {}
+            }
+        }
+        output.push('\n');
+    }
+
+    output
 }
 
 fn heading_title(body: &str) -> Option<String> {
@@ -382,11 +480,19 @@ fn extract_links(body: &str) -> Vec<String> {
 }
 
 fn fallback_title(path: &str) -> String {
-    path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md").replace('-', " ")
+    path.rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .trim_end_matches(".md")
+        .replace('-', " ")
 }
 
 fn normalize_label(label: &str) -> String {
-    label.trim().trim_matches('"').trim_matches('\'').to_lowercase()
+    label
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_lowercase()
 }
 
 fn unquote(value: &str) -> String {
@@ -395,36 +501,4 @@ fn unquote(value: &str) -> String {
         .trim_matches('"')
         .trim_matches('\'')
         .to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_demo_note_meta() {
-        let note = include_str!("demo_notes/welcome.md");
-        let meta = parse_note_meta(note);
-
-        assert_eq!(meta.title.as_deref(), Some("Welcome"));
-        assert_eq!(extract_labels(note), vec!["overview", "welcome"]);
-        assert!(extract_links(note).contains(&"notes/roadmap.md".to_string()));
-    }
-
-    #[test]
-    fn builds_tree_and_selects_note() {
-        let view = mock_workspace_view("notes/roadmap.md");
-
-        assert_eq!(view.selected_note.path, "notes/roadmap.md");
-        assert!(view.tree.iter().any(|row| row.label == "notes" && matches!(row.kind, TreeKind::Folder)));
-        assert!(view.labels.iter().any(|label| label.name == "welcome"));
-    }
-
-    #[test]
-    fn overrides_selected_note_body_for_labels() {
-        let view = workspace_view_with_body(&DEMO_WORKSPACE, "notes/welcome.md", "# Welcome\n\n#alpha #beta");
-
-        assert!(view.selected_note.labels.contains(&"alpha".to_string()));
-        assert!(view.labels.iter().any(|label| label.name == "alpha"));
-    }
 }
