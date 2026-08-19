@@ -3,14 +3,33 @@ use liroxnotes_shared::{
     workspace_view_with_body, LabelSummary, NoteSummary, TreeEntry, TreeKind, WorkspaceView,
     APP_NAME, DEMO_WORKSPACE,
 };
+#[cfg(target_arch = "wasm32")]
+use serde::Deserialize;
 use std::collections::BTreeSet;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 
 const APP_CSS: Asset = asset!("/assets/app.css");
 const EDITOR_JS: Asset = asset!("/assets/editor.js");
 const EDITOR_BRIDGE_JS: Asset = asset!("/assets/editor-bridge.js");
+
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+enum FrontendState {
+    Loading,
+    Login,
+    Setup,
+    Ready,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Deserialize)]
+struct AuthSession {
+    authenticated: bool,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FocusTarget {
@@ -60,10 +79,27 @@ impl AppAction {
 #[component]
 pub fn App() -> Element {
     let initial_note_path = selected_note_path().unwrap_or_else(|| "notes/welcome.md".to_string());
-    let mut selected_note = use_signal(|| initial_note_path.clone());
-    let mut selected_note_body = use_signal(|| {
-        workspace_view_with_body(&DEMO_WORKSPACE, &initial_note_path, "").selected_note_body
+    let frontend_state = use_signal(|| {
+        if cfg!(target_arch = "wasm32") {
+            FrontendState::Loading
+        } else {
+            FrontendState::Ready
+        }
     });
+    let mut login_user = use_signal(|| "local".to_string());
+    let mut workspace_path = use_signal(default_workspace_path);
+    let mut repo_url = use_signal(String::new);
+    let mut branch = use_signal(|| "main".to_string());
+    let status_message = use_signal(String::new);
+    let mut selected_note = use_signal(|| initial_note_path.clone());
+    let selected_note_body = use_signal(|| {
+        if cfg!(target_arch = "wasm32") {
+            String::new()
+        } else {
+            workspace_view_with_body(&DEMO_WORKSPACE, &initial_note_path, "").selected_note_body
+        }
+    });
+    let server_view = use_signal(|| None::<WorkspaceView>);
     let mut sidebar_mode = use_signal(|| SidebarMode::Tree);
     let mut focus_target = use_signal(|| FocusTarget::Sidebar);
     let mut browser_dir = use_signal(|| String::new());
@@ -72,17 +108,47 @@ pub fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             let window = web_sys::window().expect("window");
+            let mut frontend_state = frontend_state;
+            let mut status_message = status_message;
             let mut selected_note = selected_note;
             let mut selected_note_body = selected_note_body;
+            let mut server_view = server_view;
             let mut focus_target = focus_target;
             let mut browser_dir = browser_dir;
 
+            let initial_note_path_for_fetch = initial_note_path.clone();
+            spawn_local(async move {
+                match detect_frontend_state().await {
+                    FrontendState::Ready => {
+                        if let Some(view) = fetch_workspace_view(&initial_note_path_for_fetch).await {
+                            selected_note_body.set(view.selected_note_body.clone());
+                            selected_note.set(view.selected_note.path.clone());
+                            server_view.set(Some(view));
+                            frontend_state.set(FrontendState::Ready);
+                            status_message.set(String::new());
+                        } else {
+                            frontend_state.set(FrontendState::Setup);
+                            status_message.set("Could not load the configured workspace from the gateway.".to_string());
+                        }
+                    }
+                    FrontendState::Setup => frontend_state.set(FrontendState::Setup),
+                    FrontendState::Login => frontend_state.set(FrontendState::Login),
+                    FrontendState::Loading => frontend_state.set(FrontendState::Login),
+                }
+            });
+
             let popstate = Closure::wrap(Box::new(move |_event: web_sys::PopStateEvent| {
                 if let Some(path) = selected_note_path() {
-                    selected_note_body.set(
-                        workspace_view_with_body(&DEMO_WORKSPACE, &path, "").selected_note_body,
-                    );
-                    selected_note.set(path);
+                    let mut selected_note = selected_note;
+                    let mut selected_note_body = selected_note_body;
+                    let mut server_view = server_view;
+                    spawn_local(async move {
+                        if let Some(view) = fetch_workspace_view(&path).await {
+                            selected_note_body.set(view.selected_note_body.clone());
+                            selected_note.set(view.selected_note.path.clone());
+                            server_view.set(Some(view));
+                        }
+                    });
                 }
             }) as Box<dyn FnMut(web_sys::PopStateEvent)>);
 
@@ -159,11 +225,92 @@ pub fn App() -> Element {
 
     let selected_note_path = selected_note.read().clone();
     let selected_note_body_value = selected_note_body.read().clone();
-    let view = workspace_view_with_body(
-        &DEMO_WORKSPACE,
-        &selected_note_path,
-        &selected_note_body_value,
-    );
+
+    match frontend_state.read().clone() {
+        FrontendState::Loading => return rsx! { MvpFrame { title: "Loading", message: "Checking the gateway session..." } },
+        FrontendState::Login => {
+            return rsx! {
+                LoginScreen {
+                    user: login_user.read().clone(),
+                    message: status_message.read().clone(),
+                    on_user: move |value: String| login_user.set(value),
+                    on_login: move |_| {
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                        let user = login_user.read().clone();
+                        let mut frontend_state = frontend_state;
+                        let mut status_message = status_message;
+                        spawn_local(async move {
+                            status_message.set("Logging in...".to_string());
+                            if api_login(&user).await {
+                                frontend_state.set(detect_frontend_state().await);
+                                status_message.set(String::new());
+                            } else {
+                                status_message.set("Login failed. Is the gateway running on port 3000?".to_string());
+                            }
+                        });
+                        }
+                    }
+                }
+            };
+        }
+        FrontendState::Setup => {
+            return rsx! {
+                SetupScreen {
+                    workspace_path: workspace_path.read().clone(),
+                    repo_url: repo_url.read().clone(),
+                    branch: branch.read().clone(),
+                    message: status_message.read().clone(),
+                    on_workspace_path: move |value: String| workspace_path.set(value),
+                    on_repo_url: move |value: String| repo_url.set(value),
+                    on_branch: move |value: String| branch.set(value),
+                    on_setup: move |_| {
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                        let path = workspace_path.read().clone();
+                        let repo = repo_url.read().clone();
+                        let branch_value = branch.read().clone();
+                        let mut frontend_state = frontend_state;
+                        let mut status_message = status_message;
+                        let mut selected_note_body = selected_note_body;
+                        let mut selected_note = selected_note;
+                        let mut server_view = server_view;
+                        spawn_local(async move {
+                            status_message.set("Creating workspace...".to_string());
+                            if api_setup_workspace(&path, &repo, &branch_value).await {
+                                if let Some(view) = fetch_workspace_view("notes/welcome.md").await {
+                                    selected_note_body.set(view.selected_note_body.clone());
+                                    selected_note.set(view.selected_note.path.clone());
+                                    server_view.set(Some(view));
+                                    frontend_state.set(FrontendState::Ready);
+                                    status_message.set(String::new());
+                                } else {
+                                    frontend_state.set(FrontendState::Setup);
+                                    status_message.set("Workspace was saved, but the gateway did not return notes.".to_string());
+                                }
+                            } else {
+                                status_message.set("Workspace setup failed. Check the path and Git remote.".to_string());
+                            }
+                        });
+                        }
+                    }
+                }
+            };
+        }
+        FrontendState::Ready => {}
+    }
+
+    let view = match server_view.read().clone() {
+        Some(view) => view,
+        None if cfg!(target_arch = "wasm32") => {
+            return rsx! { MvpFrame { title: "Loading Workspace", message: "Waiting for the configured gateway workspace..." } };
+        }
+        None => workspace_view_with_body(
+            &DEMO_WORKSPACE,
+            &selected_note_path,
+            &selected_note_body_value,
+        ),
+    };
     let workspace_slug = view.slug.clone();
 
     rsx! {
@@ -201,12 +348,151 @@ pub fn App() -> Element {
                 }
             },
             on_select_note: move |path: String| {
-                selected_note_body.set(workspace_view_with_body(&DEMO_WORKSPACE, &path, "").selected_note_body);
                 selected_note.set(path.clone());
                 push_workspace_note(&workspace_slug, &path);
                 focus_target.set(FocusTarget::Editor);
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let mut selected_note = selected_note;
+                    let mut selected_note_body = selected_note_body;
+                    let mut server_view = server_view;
+                    spawn_local(async move {
+                        if let Some(view) = fetch_workspace_view(&path).await {
+                            selected_note_body.set(view.selected_note_body.clone());
+                            selected_note.set(view.selected_note.path.clone());
+                            server_view.set(Some(view));
+                        }
+                    });
+                }
             }
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_workspace_view(path: &str) -> Option<WorkspaceView> {
+    let window = web_sys::window()?;
+    let init = web_sys::RequestInit::new();
+    init.set_credentials(web_sys::RequestCredentials::Include);
+    let response = JsFuture::from(
+        window.fetch_with_str_and_init(&format!("{}/api/workspace/{path}", api_origin()), &init),
+    )
+    .await
+    .ok()?;
+    let response: web_sys::Response = response.dyn_into().ok()?;
+    if !response.ok() {
+        return None;
+    }
+    let text = JsFuture::from(response.text().ok()?)
+        .await
+        .ok()?
+        .as_string()?;
+    serde_json::from_str(&text).ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn detect_frontend_state() -> FrontendState {
+    let Some(response) = fetch_text("/api/auth", "GET", None).await else {
+        return FrontendState::Login;
+    };
+    let Ok(session) = serde_json::from_str::<AuthSession>(&response) else {
+        return FrontendState::Login;
+    };
+    if !session.authenticated {
+        return FrontendState::Login;
+    }
+
+    match fetch_status("/api/workspaces", "GET", None).await {
+        Some(200) => FrontendState::Ready,
+        Some(400) => FrontendState::Setup,
+        Some(401) => FrontendState::Login,
+        _ => FrontendState::Setup,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn api_login(user: &str) -> bool {
+    let body = format!(r#"{{"user":"{}"}}"#, json_escape(user));
+    fetch_status("/api/auth/login", "POST", Some(body)).await == Some(200)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn api_setup_workspace(workspace_path: &str, repo_url: &str, branch: &str) -> bool {
+    let body = format!(
+        r#"{{"workspace_path":"{}","repo_url":"{}","branch":"{}"}}"#,
+        json_escape(workspace_path),
+        json_escape(repo_url),
+        json_escape(branch)
+    );
+    fetch_status("/api/workspaces", "POST", Some(body)).await == Some(201)
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_status(path: &str, method: &str, body: Option<String>) -> Option<u16> {
+    let window = web_sys::window()?;
+    let init = request_init(method, body.as_deref());
+    let response = JsFuture::from(window.fetch_with_str_and_init(
+        &format!("{}{}", api_origin(), path),
+        &init,
+    ))
+    .await
+    .ok()?;
+    let response: web_sys::Response = response.dyn_into().ok()?;
+    Some(response.status())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn fetch_text(path: &str, method: &str, body: Option<String>) -> Option<String> {
+    let window = web_sys::window()?;
+    let init = request_init(method, body.as_deref());
+    let response = JsFuture::from(window.fetch_with_str_and_init(
+        &format!("{}{}", api_origin(), path),
+        &init,
+    ))
+    .await
+    .ok()?;
+    let response: web_sys::Response = response.dyn_into().ok()?;
+    JsFuture::from(response.text().ok()?)
+        .await
+        .ok()?
+        .as_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn request_init(method: &str, body: Option<&str>) -> web_sys::RequestInit {
+    let init = web_sys::RequestInit::new();
+    init.set_method(method);
+    init.set_credentials(web_sys::RequestCredentials::Include);
+    if let Some(body) = body {
+        let headers = web_sys::Headers::new().expect("headers");
+        headers.set("content-type", "application/json").expect("content-type");
+        init.set_headers(&headers);
+        init.set_body(&JsValue::from_str(body));
+    }
+    init
+}
+
+#[cfg(target_arch = "wasm32")]
+fn json_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn default_workspace_path() -> String {
+    ".lirox-runtime/workspace".to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn api_origin() -> String {
+    let Some(window) = web_sys::window() else {
+        return String::new();
+    };
+    let location = window.location();
+    let port = location.port().unwrap_or_default();
+    let host = location.hostname().unwrap_or_default();
+    if (host == "127.0.0.1" || host == "localhost") && port != "3000" {
+        format!("http://{host}:3000")
+    } else {
+        String::new()
     }
 }
 
@@ -246,13 +532,90 @@ pub fn workspace_note_path_from_location(path: &str) -> Option<&str> {
 }
 
 #[component]
+fn MvpFrame(title: &'static str, message: &'static str) -> Element {
+    rsx! {
+        div { class: "grid min-h-screen place-items-center bg-shell-bg px-4 text-theme-text",
+            section { class: "w-full max-w-md rounded-2xl border border-shell-border bg-shell-panel p-6 shadow-2xl",
+                div { class: "mb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-theme-subtle", "LiroxNotes" }
+                h1 { class: "text-2xl font-semibold", "{title}" }
+                p { class: "mt-2 text-sm text-theme-muted", "{message}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn LoginScreen(
+    user: String,
+    message: String,
+    on_user: EventHandler<String>,
+    on_login: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div { class: "grid min-h-screen place-items-center bg-shell-bg px-4 text-theme-text",
+            form { class: "w-full max-w-md rounded-2xl border border-shell-border bg-shell-panel p-6 shadow-2xl", onsubmit: move |event| { event.prevent_default(); on_login.call(()); },
+                div { class: "mb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-theme-subtle", "LiroxNotes MVP" }
+                h1 { class: "text-2xl font-semibold", "Log in" }
+                p { class: "mt-2 text-sm text-theme-muted", "Local session login for the gateway running on port 3000." }
+                label { class: "mt-5 block text-sm text-theme-muted",
+                    "Name"
+                    input { class: "mt-2 w-full rounded-lg border border-shell-border bg-shell-bg px-3 py-2 text-theme-text outline-none focus:border-theme-accent", value: "{user}", autocomplete: "username", oninput: move |event| on_user.call(event.value()) }
+                }
+                if !message.is_empty() {
+                    p { class: "mt-3 text-sm text-theme-warn", "{message}" }
+                }
+                button { class: "mt-5 w-full rounded-lg bg-theme-accent px-4 py-2 font-semibold text-shell-bg", type: "submit", "Continue" }
+            }
+        }
+    }
+}
+
+#[component]
+fn SetupScreen(
+    workspace_path: String,
+    repo_url: String,
+    branch: String,
+    message: String,
+    on_workspace_path: EventHandler<String>,
+    on_repo_url: EventHandler<String>,
+    on_branch: EventHandler<String>,
+    on_setup: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div { class: "grid min-h-screen place-items-center bg-shell-bg px-4 text-theme-text",
+            form { class: "w-full max-w-xl rounded-2xl border border-shell-border bg-shell-panel p-6 shadow-2xl", onsubmit: move |event| { event.prevent_default(); on_setup.call(()); },
+                div { class: "mb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-theme-subtle", "LiroxNotes MVP" }
+                h1 { class: "text-2xl font-semibold", "Set up workspace" }
+                p { class: "mt-2 text-sm text-theme-muted", "Choose a local notes directory. Saves write Markdown files and create real Git commits." }
+                label { class: "mt-5 block text-sm text-theme-muted",
+                    "Workspace path"
+                    input { class: "mt-2 w-full rounded-lg border border-shell-border bg-shell-bg px-3 py-2 text-theme-text outline-none focus:border-theme-accent", value: "{workspace_path}", oninput: move |event| on_workspace_path.call(event.value()) }
+                }
+                label { class: "mt-4 block text-sm text-theme-muted",
+                    "Git remote URL"
+                    input { class: "mt-2 w-full rounded-lg border border-shell-border bg-shell-bg px-3 py-2 text-theme-text outline-none focus:border-theme-accent", value: "{repo_url}", placeholder: "git@github.com:you/notes.git", oninput: move |event| on_repo_url.call(event.value()) }
+                }
+                label { class: "mt-4 block text-sm text-theme-muted",
+                    "Branch"
+                    input { class: "mt-2 w-full rounded-lg border border-shell-border bg-shell-bg px-3 py-2 text-theme-text outline-none focus:border-theme-accent", value: "{branch}", oninput: move |event| on_branch.call(event.value()) }
+                }
+                if !message.is_empty() {
+                    p { class: "mt-3 text-sm text-theme-warn", "{message}" }
+                }
+                button { class: "mt-5 w-full rounded-lg bg-theme-accent px-4 py-2 font-semibold text-shell-bg", type: "submit", "Create workspace" }
+            }
+        }
+    }
+}
+
+#[component]
 pub fn WorkspaceShell(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
     browser_dir: String,
-    on_action: EventHandler<AppAction>,
-    on_select_note: EventHandler<String>,
+    on_action: Option<EventHandler<AppAction>>,
+    on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let labels_notes = matches!(sidebar_mode, SidebarMode::LabelsNotes);
 
@@ -291,8 +654,8 @@ fn Sidebar(
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
     browser_dir: String,
-    on_action: EventHandler<AppAction>,
-    on_select_note: EventHandler<String>,
+    on_action: Option<EventHandler<AppAction>>,
+    on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let focused = matches!(focus, FocusTarget::Sidebar);
     let shell_classes = if focused {
@@ -328,7 +691,10 @@ fn Sidebar(
 }
 
 #[component]
-fn LabelsNotesSidebar(view: WorkspaceView, on_select_note: EventHandler<String>) -> Element {
+fn LabelsNotesSidebar(
+    view: WorkspaceView,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden lg:grid lg:gap-2", style: "grid-template-columns: max-content fit-content(24rem);",
             section { class: "min-w-0 w-fit",
@@ -355,8 +721,8 @@ fn LabelsNotesSidebar(view: WorkspaceView, on_select_note: EventHandler<String>)
 fn FilesSidebar(
     view: WorkspaceView,
     browser_dir: String,
-    on_action: EventHandler<AppAction>,
-    on_select_note: EventHandler<String>,
+    on_action: Option<EventHandler<AppAction>>,
+    on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let entries = directory_entries(&view.notes, &browser_dir);
     let has_parent = !browser_dir.is_empty();
@@ -372,7 +738,7 @@ fn FilesSidebar(
             ul { class: "list-none p-0 text-ui leading-6",
                 if has_parent {
                     li {
-                        button { class: "block w-full rounded px-2 py-1 text-left text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text", onclick: move |_| on_action.call(AppAction::GoUpDirectory), ".." }
+                        button { class: "block w-full rounded px-2 py-1 text-left text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text", onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::GoUpDirectory) }, ".." }
                     }
                 }
                 for entry in entries {
@@ -451,7 +817,7 @@ fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry
 }
 
 #[component]
-fn TreeRow(slug: String, row: TreeEntry, on_select_note: EventHandler<String>) -> Element {
+fn TreeRow(slug: String, row: TreeEntry, on_select_note: Option<EventHandler<String>>) -> Element {
     let indent = if row.depth == 0 { "pl-1" } else { "pl-4" };
     let classes = if row.active {
         "flex items-center rounded-md bg-theme-surface/90 text-theme-text"
@@ -469,7 +835,7 @@ fn TreeRow(slug: String, row: TreeEntry, on_select_note: EventHandler<String>) -
                 if row.kind == TreeKind::File {
                     a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &row.path), onclick: move |event| {
                         event.prevent_default();
-                        on_select_note.call(row.path.clone());
+                        if let Some(on_select_note) = &on_select_note { on_select_note.call(row.path.clone()); }
                     },
                         span { class: "w-3 shrink-0 text-theme-subtle", "{icon}" }
                         span { class: "truncate", "{row.label}" }
@@ -492,8 +858,8 @@ fn BrowserEntryRow(
     kind: TreeKind,
     path: String,
     label: String,
-    on_action: EventHandler<AppAction>,
-    on_select_note: EventHandler<String>,
+    on_action: Option<EventHandler<AppAction>>,
+    on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let path_for_action = path.clone();
     let path_for_lookup = path.clone();
@@ -502,7 +868,7 @@ fn BrowserEntryRow(
     match kind {
         TreeKind::Folder => rsx! {
             li {
-                button { class: "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text", onclick: move |_| on_action.call(AppAction::SetBrowserDir(path_for_action.clone())),
+                button { class: "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text", onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::SetBrowserDir(path_for_action.clone())) },
                     span { class: "w-4 shrink-0 text-theme-subtle", "󰉋" }
                     span { "{label}" }
                 }
@@ -530,7 +896,7 @@ fn BrowserEntryRow(
                 li {
                     a { class: format!("flex items-center gap-2 px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
                         event.prevent_default();
-                        on_select_note.call(note.path.clone());
+                        if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
                     },
                         span { class: "w-4 shrink-0 text-theme-subtle", "󰈔" }
                         span { class: "truncate font-medium", "{label}" }
@@ -542,7 +908,11 @@ fn BrowserEntryRow(
 }
 
 #[component]
-fn FileRow(slug: String, note: NoteSummary, on_select_note: EventHandler<String>) -> Element {
+fn FileRow(
+    slug: String,
+    note: NoteSummary,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
     let classes = if note.active {
         "rounded-md bg-theme-surface/90 text-theme-text"
     } else {
@@ -553,7 +923,7 @@ fn FileRow(slug: String, note: NoteSummary, on_select_note: EventHandler<String>
         li {
             a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
                 event.prevent_default();
-                on_select_note.call(note.path.clone());
+                if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
             },
                 div { class: "flex items-center justify-between gap-2",
                     span { class: "truncate font-medium", "{note.title}" }
@@ -580,7 +950,11 @@ fn LabelRow(label: LabelSummary) -> Element {
 }
 
 #[component]
-fn NoteRow(slug: String, note: NoteSummary, on_select_note: EventHandler<String>) -> Element {
+fn NoteRow(
+    slug: String,
+    note: NoteSummary,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
     let classes = if note.active {
         "rounded-md bg-theme-surface/90 text-theme-text"
     } else {
@@ -591,7 +965,7 @@ fn NoteRow(slug: String, note: NoteSummary, on_select_note: EventHandler<String>
         li {
             a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
                 event.prevent_default();
-                on_select_note.call(note.path.clone());
+                if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
             },
                 div { class: "flex items-center justify-between gap-2",
                     span { class: "truncate font-medium", "{note.title}" }
@@ -625,6 +999,10 @@ fn TopBar(workspace_name: String, note_title: String, source: String) -> Element
                 div { class: "flex shrink-0 items-center gap-2 text-[11px] text-theme-subtle",
                     button { class: "rounded bg-theme-surface/70 px-2 py-px text-theme-muted hover:text-theme-text", type: "button", "data-lirox-save-button": "true", "Saved" }
                     span { "data-lirox-save-state": "true", "Saved" }
+                    a { class: "rounded bg-theme-surface/70 px-2 py-px text-theme-muted hover:text-theme-text", href: "/onboarding", "Setup" }
+                    form { method: "post", action: "/logout",
+                        button { class: "rounded bg-theme-surface/70 px-2 py-px text-theme-muted hover:text-theme-text", type: "submit", "Logout" }
+                    }
                     span { "{source}" }
                 }
             }
@@ -633,7 +1011,7 @@ fn TopBar(workspace_name: String, note_title: String, source: String) -> Element
 }
 
 #[component]
-fn EditorPane(view: WorkspaceView, on_action: EventHandler<AppAction>) -> Element {
+fn EditorPane(view: WorkspaceView, on_action: Option<EventHandler<AppAction>>) -> Element {
     rsx! {
         section { class: "flex h-full min-h-0 flex-col bg-shell-editor",
             div {
@@ -659,7 +1037,7 @@ fn StatusBar(
     source: String,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
-    on_action: EventHandler<AppAction>,
+    on_action: Option<EventHandler<AppAction>>,
 ) -> Element {
     let focused = matches!(focus, FocusTarget::Sidebar);
     rsx! {
@@ -692,7 +1070,7 @@ fn ModeButton(
     title: &'static str,
     active: bool,
     action: AppAction,
-    on_action: EventHandler<AppAction>,
+    on_action: Option<EventHandler<AppAction>>,
 ) -> Element {
     let classes = if active {
         "flex h-6 w-6 items-center justify-center rounded bg-theme-surface-alt text-[10px] font-semibold text-theme-text"
@@ -701,7 +1079,7 @@ fn ModeButton(
     };
 
     rsx! {
-        button { class: classes, title: title, aria_label: title, onclick: move |_| on_action.call(action.clone()), "{label}" }
+        button { class: classes, title: title, aria_label: title, onclick: move |_| if let Some(on_action) = &on_action { on_action.call(action.clone()) }, "{label}" }
     }
 }
 

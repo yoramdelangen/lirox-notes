@@ -1,14 +1,15 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const APP_NAME: &str = "LiroxNotes";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeKind {
     Folder,
     File,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeEntry {
     pub kind: TreeKind,
     pub label: String,
@@ -17,13 +18,13 @@ pub struct TreeEntry {
     pub active: bool,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LabelSummary {
     pub name: String,
     pub count: usize,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoteSummary {
     pub path: String,
     pub title: String,
@@ -32,7 +33,7 @@ pub struct NoteSummary {
     pub active: bool,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceView {
     pub slug: String,
     pub name: String,
@@ -136,6 +137,28 @@ pub fn workspace_view_from_notes(
         .iter()
         .map(|note| note_summary(&note.path, &note.body, active_path))
         .collect();
+    if notes.is_empty() {
+        let selected_note = NoteSummary {
+            path: default_note_path.to_string(),
+            title: fallback_title(default_note_path),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: true,
+        };
+        return WorkspaceView {
+            slug: slug.to_string(),
+            name: name.to_string(),
+            branch: branch.to_string(),
+            source: source.to_string(),
+            note_count: 0,
+            changed_notes,
+            selected_note,
+            selected_note_body: String::new(),
+            tree: Vec::new(),
+            labels: Vec::new(),
+            notes: Vec::new(),
+        };
+    }
     let selected_note = notes
         .iter()
         .find(|note| note.path == active_path)

@@ -9,7 +9,8 @@ let activeRoot = null;
 let leader = null;
 
 const editorApi = () => window.LiroxNotesEditor;
-const noteApiUrl = (root) => root.dataset.notePath ? `/api/notes/${encodeURI(root.dataset.notePath)}` : null;
+const apiOrigin = () => ["127.0.0.1", "localhost"].includes(window.location.hostname) && window.location.port !== "3000" ? `http://${window.location.hostname}:3000` : "";
+const noteApiUrl = (root) => root.dataset.notePath ? `${apiOrigin()}/api/notes/${encodeURI(root.dataset.notePath)}` : null;
 
 const retryRefresh = (root) => {
   requestAnimationFrame(() => {
@@ -40,6 +41,17 @@ const syncChrome = (root, detail) => {
 
   root.dataset.dirty = String(dirty);
   document.title = dirty ? `${title} • Unsaved` : title;
+};
+
+const showSaveError = (root, detail, error) => {
+  syncChrome(root, detail);
+  setText(root, saveStateSelector, `Error: ${error.message || error}`);
+
+  const button = document.querySelector(saveButtonSelector);
+  if (button) {
+    button.textContent = "Retry";
+    button.disabled = false;
+  }
 };
 
 const pushEditorChange = (detail) => {
@@ -130,6 +142,7 @@ const saveCurrentDoc = async (root) => {
     try {
       const response = await fetch(apiUrl, {
         method: "PUT",
+        credentials: "include",
         headers: { "content-type": "text/plain; charset=utf-8" },
         body: state.detail.doc
       });
@@ -138,8 +151,7 @@ const saveCurrentDoc = async (root) => {
         throw new Error(`${response.status} ${response.statusText}${message ? `: ${message}` : ""}`);
       }
     } catch (error) {
-      syncChrome(root, state.detail);
-      window.alert(`Could not save to Git.\n\n${error}`);
+      showSaveError(root, state.detail, error);
       return;
     }
   }

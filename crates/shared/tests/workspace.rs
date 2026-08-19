@@ -1,4 +1,7 @@
-use liroxnotes_shared::{mock_workspace_view, workspace_view_with_body, TreeKind, DEMO_WORKSPACE};
+use liroxnotes_shared::{
+    mock_workspace_view, workspace_view_from_notes, workspace_view_with_body, TreeKind,
+    DEMO_WORKSPACE,
+};
 
 #[test]
 fn parses_demo_note_meta() {
@@ -45,4 +48,23 @@ fn ignores_labels_in_code_and_links() {
     );
 
     assert_eq!(view.selected_note.labels, vec!["done", "real"]);
+}
+
+#[test]
+fn empty_workspace_has_empty_selected_note() {
+    let view = workspace_view_from_notes(
+        "demo",
+        "Empty Workspace",
+        "main",
+        "local git",
+        "notes/welcome.md",
+        "notes/welcome.md",
+        0,
+        &[],
+    );
+
+    assert_eq!(view.note_count, 0);
+    assert_eq!(view.selected_note.path, "notes/welcome.md");
+    assert_eq!(view.selected_note_body, "");
+    assert!(view.notes.is_empty());
 }

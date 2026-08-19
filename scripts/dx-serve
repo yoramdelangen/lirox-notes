@@ -3,14 +3,13 @@ set -eu
 
 bun run build:css
 (cd packages/editor && bun run build)
-bun run watch:css &
-css_pid=$!
-(cd packages/editor && bun run dev) &
-editor_pid=$!
+
+gateway_port="${LIROX_GATEWAY_PORT:-3000}"
+LIROX_DEV_CORS=1 cargo run -p liroxnotes-gateway -- --port "$gateway_port" &
+gateway_pid=$!
 
 cleanup() {
-  kill "$css_pid" 2>/dev/null || true
-  kill "$editor_pid" 2>/dev/null || true
+  kill "$gateway_pid" 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM
