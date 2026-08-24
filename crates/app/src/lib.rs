@@ -1,9 +1,5 @@
 use dioxus::prelude::*;
-use liroxnotes_shared::{
-    workspace_view_with_body, LabelSummary, NoteSummary, TreeEntry, TreeKind, WorkspaceView,
-    APP_NAME, DEMO_WORKSPACE,
-};
-#[cfg(target_arch = "wasm32")]
+use liroxnotes_shared::{LabelSummary, NoteSummary, TreeEntry, TreeKind, WorkspaceView, APP_NAME};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
@@ -16,27 +12,60 @@ const APP_CSS: Asset = asset!("/assets/app.css");
 const EDITOR_JS: Asset = asset!("/assets/editor.js");
 const EDITOR_BRIDGE_JS: Asset = asset!("/assets/editor-bridge.js");
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-enum FrontendState {
+pub enum FrontendState {
     Loading,
+    Install,
     Login,
     Setup,
     Ready,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Deserialize)]
 struct AuthSession {
+    installed: bool,
     authenticated: bool,
+    user: String,
+    auth_mode: String,
+    workspace_required: bool,
+    workspace_root: String,
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn frontend_state_from_auth(session: &AuthSession) -> FrontendState {
+    frontend_state_from_auth_flags(
+        session.installed,
+        session.authenticated,
+        session.workspace_required,
+    )
+}
+
+pub fn frontend_state_from_auth_flags(
+    installed: bool,
+    authenticated: bool,
+    workspace_required: bool,
+) -> FrontendState {
+    if !installed {
+        FrontendState::Install
+    } else if !authenticated {
+        FrontendState::Login
+    } else if workspace_required {
+        FrontendState::Setup
+    } else {
+        FrontendState::Ready
+    }
+}
+
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FocusTarget {
     Sidebar,
     Editor,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SidebarMode {
     Tree,
@@ -44,6 +73,7 @@ pub enum SidebarMode {
     Files,
 }
 
+#[allow(dead_code)]
 impl SidebarMode {
     fn next(self) -> Self {
         match self {
@@ -54,6 +84,7 @@ impl SidebarMode {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq)]
 pub enum AppAction {
     FocusSidebar,
@@ -64,6 +95,7 @@ pub enum AppAction {
     GoUpDirectory,
 }
 
+#[allow(dead_code)]
 #[cfg(target_arch = "wasm32")]
 impl AppAction {
     fn from_str(action: &str) -> Option<Self> {
@@ -78,7 +110,6 @@ impl AppAction {
 
 #[component]
 pub fn App() -> Element {
-    let initial_note_path = selected_note_path().unwrap_or_else(|| "notes/welcome.md".to_string());
     let frontend_state = use_signal(|| {
         if cfg!(target_arch = "wasm32") {
             FrontendState::Loading
@@ -87,280 +118,144 @@ pub fn App() -> Element {
         }
     });
     let mut login_user = use_signal(|| "local".to_string());
+    let mut login_password = use_signal(String::new);
+    let mut auth_mode = use_signal(|| "passwordless".to_string());
+    let mut repo_mode = use_signal(|| "new".to_string());
+    let mut workspace_slug = use_signal(String::new);
+    let mut workspace_slug_manual = use_signal(|| false);
+    let mut workspace_name = use_signal(|| "My Workspace".to_string());
     let mut workspace_path = use_signal(default_workspace_path);
     let mut repo_url = use_signal(String::new);
     let mut branch = use_signal(|| "main".to_string());
     let status_message = use_signal(String::new);
-    let mut selected_note = use_signal(|| initial_note_path.clone());
-    let selected_note_body = use_signal(|| {
-        if cfg!(target_arch = "wasm32") {
-            String::new()
-        } else {
-            workspace_view_with_body(&DEMO_WORKSPACE, &initial_note_path, "").selected_note_body
-        }
-    });
-    let server_view = use_signal(|| None::<WorkspaceView>);
-    let mut sidebar_mode = use_signal(|| SidebarMode::Tree);
-    let mut focus_target = use_signal(|| FocusTarget::Sidebar);
-    let mut browser_dir = use_signal(|| String::new());
 
     use_effect(move || {
         #[cfg(target_arch = "wasm32")]
         {
-            let window = web_sys::window().expect("window");
             let mut frontend_state = frontend_state;
+            let mut login_user = login_user;
+            let mut auth_mode = auth_mode;
+            let mut workspace_path = workspace_path;
             let mut status_message = status_message;
-            let mut selected_note = selected_note;
-            let mut selected_note_body = selected_note_body;
-            let mut server_view = server_view;
-            let mut focus_target = focus_target;
-            let mut browser_dir = browser_dir;
-
-            let initial_note_path_for_fetch = initial_note_path.clone();
             spawn_local(async move {
-                match detect_frontend_state().await {
-                    FrontendState::Ready => {
-                        if let Some(view) = fetch_workspace_view(&initial_note_path_for_fetch).await {
-                            selected_note_body.set(view.selected_note_body.clone());
-                            selected_note.set(view.selected_note.path.clone());
-                            server_view.set(Some(view));
-                            frontend_state.set(FrontendState::Ready);
-                            status_message.set(String::new());
-                        } else {
-                            frontend_state.set(FrontendState::Setup);
-                            status_message.set("Could not load the configured workspace from the gateway.".to_string());
-                        }
-                    }
-                    FrontendState::Setup => frontend_state.set(FrontendState::Setup),
-                    FrontendState::Login => frontend_state.set(FrontendState::Login),
-                    FrontendState::Loading => frontend_state.set(FrontendState::Login),
+                if let Some(session) = fetch_auth_session().await {
+                    login_user.set(session.user.clone());
+                    auth_mode.set(session.auth_mode.clone());
+                    workspace_path.set(session.workspace_root.clone());
+                    frontend_state.set(frontend_state_from_auth(&session));
+                } else {
+                    frontend_state.set(FrontendState::Login);
                 }
+                status_message.set(String::new());
             });
-
-            let popstate = Closure::wrap(Box::new(move |_event: web_sys::PopStateEvent| {
-                if let Some(path) = selected_note_path() {
-                    let mut selected_note = selected_note;
-                    let mut selected_note_body = selected_note_body;
-                    let mut server_view = server_view;
-                    spawn_local(async move {
-                        if let Some(view) = fetch_workspace_view(&path).await {
-                            selected_note_body.set(view.selected_note_body.clone());
-                            selected_note.set(view.selected_note.path.clone());
-                            server_view.set(Some(view));
-                        }
-                    });
-                }
-            }) as Box<dyn FnMut(web_sys::PopStateEvent)>);
-
-            let editor_change = Closure::wrap(Box::new(move |event: web_sys::Event| {
-                let Ok(custom_event) = event.dyn_into::<web_sys::CustomEvent>() else {
-                    return;
-                };
-
-                let detail = custom_event.detail();
-                let doc = js_sys::Reflect::get(&detail, &JsValue::from_str("doc"))
-                    .ok()
-                    .and_then(|value| value.as_string());
-
-                if let Some(doc) = doc {
-                    selected_note_body.set(doc);
-                }
-            }) as Box<dyn FnMut(web_sys::Event)>);
-
-            let app_action = Closure::wrap(Box::new(move |event: web_sys::Event| {
-                let Ok(custom_event) = event.dyn_into::<web_sys::CustomEvent>() else {
-                    return;
-                };
-
-                let detail = custom_event.detail();
-                let action = js_sys::Reflect::get(&detail, &JsValue::from_str("action"))
-                    .ok()
-                    .and_then(|value| value.as_string());
-
-                let Some(action) = action.and_then(|action| AppAction::from_str(&action)) else {
-                    return;
-                };
-
-                match action {
-                    AppAction::FocusSidebar => {
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                    AppAction::FocusEditor => {
-                        focus_target.set(FocusTarget::Editor);
-                    }
-                    AppAction::CycleSidebarMode => {
-                        let next_mode = sidebar_mode.read().next();
-                        sidebar_mode.set(next_mode);
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                    AppAction::SetSidebarMode(_) => {}
-                    AppAction::SetBrowserDir(dir) => {
-                        browser_dir.set(dir);
-                    }
-                    AppAction::GoUpDirectory => {
-                        let current = browser_dir.read().clone();
-                        browser_dir.set(parent_directory(&current).unwrap_or("").to_string());
-                    }
-                }
-            }) as Box<dyn FnMut(web_sys::Event)>);
-
-            window.set_onpopstate(Some(popstate.as_ref().unchecked_ref()));
-            window
-                .add_event_listener_with_callback(
-                    "lirox-notes-editor-change",
-                    editor_change.as_ref().unchecked_ref(),
-                )
-                .expect("editor listener");
-            window
-                .add_event_listener_with_callback(
-                    "liroxnotes-action",
-                    app_action.as_ref().unchecked_ref(),
-                )
-                .expect("action listener");
-            popstate.forget();
-            editor_change.forget();
-            app_action.forget();
         }
     });
 
-    let selected_note_path = selected_note.read().clone();
-    let selected_note_body_value = selected_note_body.read().clone();
-
-    match frontend_state.read().clone() {
-        FrontendState::Loading => return rsx! { MvpFrame { title: "Loading", message: "Checking the gateway session..." } },
-        FrontendState::Login => {
-            return rsx! {
-                LoginScreen {
-                    user: login_user.read().clone(),
-                    message: status_message.read().clone(),
-                    on_user: move |value: String| login_user.set(value),
-                    on_login: move |_| {
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                        let user = login_user.read().clone();
-                        let mut frontend_state = frontend_state;
-                        let mut status_message = status_message;
-                        spawn_local(async move {
-                            status_message.set("Logging in...".to_string());
-                            if api_login(&user).await {
-                                frontend_state.set(detect_frontend_state().await);
-                                status_message.set(String::new());
-                            } else {
-                                status_message.set("Login failed. Is the gateway running on port 3000?".to_string());
-                            }
-                        });
-                        }
-                    }
-                }
-            };
-        }
-        FrontendState::Setup => {
-            return rsx! {
-                SetupScreen {
-                    workspace_path: workspace_path.read().clone(),
-                    repo_url: repo_url.read().clone(),
-                    branch: branch.read().clone(),
-                    message: status_message.read().clone(),
-                    on_workspace_path: move |value: String| workspace_path.set(value),
-                    on_repo_url: move |value: String| repo_url.set(value),
-                    on_branch: move |value: String| branch.set(value),
-                    on_setup: move |_| {
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                        let path = workspace_path.read().clone();
-                        let repo = repo_url.read().clone();
-                        let branch_value = branch.read().clone();
-                        let mut frontend_state = frontend_state;
-                        let mut status_message = status_message;
-                        let mut selected_note_body = selected_note_body;
-                        let mut selected_note = selected_note;
-                        let mut server_view = server_view;
-                        spawn_local(async move {
-                            status_message.set("Creating workspace...".to_string());
-                            if api_setup_workspace(&path, &repo, &branch_value).await {
-                                if let Some(view) = fetch_workspace_view("notes/welcome.md").await {
-                                    selected_note_body.set(view.selected_note_body.clone());
-                                    selected_note.set(view.selected_note.path.clone());
-                                    server_view.set(Some(view));
-                                    frontend_state.set(FrontendState::Ready);
-                                    status_message.set(String::new());
-                                } else {
-                                    frontend_state.set(FrontendState::Setup);
-                                    status_message.set("Workspace was saved, but the gateway did not return notes.".to_string());
-                                }
-                            } else {
-                                status_message.set("Workspace setup failed. Check the path and Git remote.".to_string());
-                            }
-                        });
-                        }
-                    }
-                }
-            };
-        }
-        FrontendState::Ready => {}
-    }
-
-    let view = match server_view.read().clone() {
-        Some(view) => view,
-        None if cfg!(target_arch = "wasm32") => {
-            return rsx! { MvpFrame { title: "Loading Workspace", message: "Waiting for the configured gateway workspace..." } };
-        }
-        None => workspace_view_with_body(
-            &DEMO_WORKSPACE,
-            &selected_note_path,
-            &selected_note_body_value,
-        ),
-    };
-    let workspace_slug = view.slug.clone();
+    let state = frontend_state.read().clone();
+    let clone_target = workspace_clone_target(&workspace_path.read(), &workspace_slug.read());
 
     rsx! {
-            WorkspaceShell {
-                view,
-                focus: *focus_target.read(),
-                sidebar_mode: *sidebar_mode.read(),
-                browser_dir: browser_dir.read().clone(),
-            on_action: move |action: AppAction| {
-                match action {
-                    AppAction::FocusSidebar => {
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                    AppAction::FocusEditor => {
-                        focus_target.set(FocusTarget::Editor);
-                    }
-                    AppAction::CycleSidebarMode => {
-                        let next_mode = sidebar_mode.read().next();
-                        sidebar_mode.set(next_mode);
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                    AppAction::SetSidebarMode(mode) => {
-                        sidebar_mode.set(mode);
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                    AppAction::SetBrowserDir(dir) => {
-                        browser_dir.set(dir);
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                    AppAction::GoUpDirectory => {
-                        let current = browser_dir.read().clone();
-                        browser_dir.set(parent_directory(&current).unwrap_or("").to_string());
-                        focus_target.set(FocusTarget::Sidebar);
-                    }
-                }
-            },
-            on_select_note: move |path: String| {
-                selected_note.set(path.clone());
-                push_workspace_note(&workspace_slug, &path);
-                focus_target.set(FocusTarget::Editor);
+        WorkflowShell {
+            state,
+            message: status_message.read().clone(),
+            user: login_user.read().clone(),
+            password: login_password.read().clone(),
+            auth_mode: auth_mode.read().clone(),
+            repo_mode: repo_mode.read().clone(),
+            workspace_slug: workspace_slug.read().clone(),
+            workspace_name: workspace_name.read().clone(),
+            workspace_path: workspace_path.read().clone(),
+            clone_target,
+            repo_url: repo_url.read().clone(),
+            branch: branch.read().clone(),
+            on_install: move |_| {
                 #[cfg(target_arch = "wasm32")]
                 {
-                    let mut selected_note = selected_note;
-                    let mut selected_note_body = selected_note_body;
-                    let mut server_view = server_view;
+                    let user = login_user.read().clone();
+                    let password = login_password.read().clone();
+                    let mode = auth_mode.read().clone();
+                    let root = workspace_path.read().clone();
+                    let mut frontend_state = frontend_state;
+                    let mut login_user = login_user;
+                    let mut auth_mode = auth_mode;
+                    let mut workspace_path = workspace_path;
+                    let mut status_message = status_message;
                     spawn_local(async move {
-                        if let Some(view) = fetch_workspace_view(&path).await {
-                            selected_note_body.set(view.selected_note_body.clone());
-                            selected_note.set(view.selected_note.path.clone());
-                            server_view.set(Some(view));
+                        status_message.set("Installing...".to_string());
+                        if let Some(session) = api_install(&root, &user, &mode, &password).await {
+                            login_user.set(session.user.clone());
+                            auth_mode.set(session.auth_mode.clone());
+                            workspace_path.set(session.workspace_root.clone());
+                            frontend_state.set(frontend_state_from_auth(&session));
+                            status_message.set(String::new());
+                        } else {
+                            status_message.set("Installation failed. Is the gateway running on port 3000?".to_string());
+                        }
+                    });
+                }
+            },
+            on_user: move |value: String| login_user.set(value),
+            on_password: move |value: String| login_password.set(value),
+            on_auth_mode: move |value: String| auth_mode.set(value),
+            on_login: move |_| {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let user = login_user.read().clone();
+                    let password = login_password.read().clone();
+                    let mut frontend_state = frontend_state;
+                    let mut login_user = login_user;
+                    let mut auth_mode = auth_mode;
+                    let mut workspace_path = workspace_path;
+                    let mut status_message = status_message;
+                    spawn_local(async move {
+                        status_message.set("Logging in...".to_string());
+                        if let Some(session) = api_login(&user, &password).await {
+                            login_user.set(session.user.clone());
+                            auth_mode.set(session.auth_mode.clone());
+                            workspace_path.set(session.workspace_root.clone());
+                            frontend_state.set(frontend_state_from_auth(&session));
+                            status_message.set(String::new());
+                        } else {
+                            status_message.set("Login failed. Is the gateway running on port 3000?".to_string());
+                        }
+                    });
+                }
+            },
+            on_repo_mode: move |value: String| repo_mode.set(value),
+            on_workspace_slug: move |value: String| {
+                workspace_slug_manual.set(true);
+                workspace_slug.set(value);
+            },
+            on_workspace_name: move |value: String| workspace_name.set(value),
+            on_workspace_path: move |value: String| workspace_path.set(value),
+            on_repo_url: move |value: String| {
+                if repo_mode.read().as_str() == "remote" && !*workspace_slug_manual.read() {
+                    workspace_slug.set(workspace_slug_from_repo_url(&value).unwrap_or_default());
+                }
+                repo_url.set(value);
+            },
+            on_branch: move |value: String| branch.set(value),
+            on_setup: move |_| {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let repo_mode_value = repo_mode.read().clone();
+                    let slug = workspace_slug.read().clone();
+                    let name = workspace_name.read().clone();
+                    let repo = repo_url.read().clone();
+                    let branch_value = branch.read().clone();
+                    let mut frontend_state = frontend_state;
+                    let mut workspace_path = workspace_path;
+                    let mut status_message = status_message;
+                    spawn_local(async move {
+                        status_message.set("Creating workspace...".to_string());
+                        if api_setup_workspace(&repo_mode_value, &slug, &name, &repo, &branch_value).await {
+                            if let Some(session) = fetch_auth_session().await {
+                                workspace_path.set(session.workspace_root.clone());
+                                frontend_state.set(frontend_state_from_auth(&session));
+                            }
+                            status_message.set(String::new());
+                        } else {
+                            status_message.set("Workspace setup failed. Check the path and Git remote.".to_string());
                         }
                     });
                 }
@@ -369,58 +264,217 @@ pub fn App() -> Element {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-async fn fetch_workspace_view(path: &str) -> Option<WorkspaceView> {
-    let window = web_sys::window()?;
-    let init = web_sys::RequestInit::new();
-    init.set_credentials(web_sys::RequestCredentials::Include);
-    let response = JsFuture::from(
-        window.fetch_with_str_and_init(&format!("{}/api/workspace/{path}", api_origin()), &init),
-    )
-    .await
-    .ok()?;
-    let response: web_sys::Response = response.dyn_into().ok()?;
-    if !response.ok() {
-        return None;
+#[component]
+fn WorkflowShell(
+    state: FrontendState,
+    message: String,
+    user: String,
+    password: String,
+    auth_mode: String,
+    repo_mode: String,
+    workspace_slug: String,
+    workspace_name: String,
+    workspace_path: String,
+    clone_target: String,
+    repo_url: String,
+    branch: String,
+    on_install: EventHandler<()>,
+    on_user: EventHandler<String>,
+    on_password: EventHandler<String>,
+    on_auth_mode: EventHandler<String>,
+    on_repo_mode: EventHandler<String>,
+    on_workspace_slug: EventHandler<String>,
+    on_workspace_name: EventHandler<String>,
+    on_login: EventHandler<()>,
+    on_workspace_path: EventHandler<String>,
+    on_repo_url: EventHandler<String>,
+    on_branch: EventHandler<String>,
+    on_setup: EventHandler<()>,
+) -> Element {
+    rsx! {
+        document::Link { rel: "icon", href: "data:," }
+        document::Stylesheet { href: APP_CSS }
+        div { class: "grid min-h-screen place-items-center bg-shell-bg px-4 text-theme-text",
+            main { class: "w-full max-w-2xl rounded-3xl border border-shell-border bg-shell-panel p-6 shadow-2xl lg:p-8",
+                div {
+                    p { class: "text-[10px] font-medium uppercase tracking-[0.18em] text-theme-subtle", "{APP_NAME}" }
+                    match state {
+                        FrontendState::Loading => rsx! {
+                            section { class: "mt-3 space-y-4",
+                                h1 { class: "text-3xl font-semibold", "Checking session" }
+                                p { class: "text-sm text-theme-muted", if message.is_empty() { "Checking the gateway session..." } else { "{message}" } }
+                            }
+                        },
+                        FrontendState::Install => rsx! {
+                            section { class: "mt-3 max-w-xl",
+                                h1 { class: "text-3xl font-semibold", "Install LiroxNotes" }
+                                p { class: "mt-2 text-sm text-theme-muted", "Configure the application root, create the first user, then continue to workspace setup." }
+                                div { class: "mt-6 space-y-4",
+                                    label { class: "block text-sm text-theme-muted",
+                                        "Workspace root"
+                                        input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{workspace_path}", oninput: move |event| on_workspace_path.call(event.value()) }
+                                    }
+                                    label { class: "block text-sm text-theme-muted",
+                                        "Username"
+                                        input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{user}", autocomplete: "username", oninput: move |event| on_user.call(event.value()) }
+                                    }
+                                    fieldset { class: "grid gap-3 rounded-2xl border border-shell-border bg-shell-bg p-4",
+                                        legend { class: "px-2 text-sm text-theme-muted", "Login method" }
+                                        label { class: "flex items-center gap-3 text-sm text-theme-text",
+                                            input { r#type: "radio", name: "auth_mode", checked: auth_mode == "passwordless", onchange: move |_| on_auth_mode.call("passwordless".to_string()) }
+                                            span { "Passwordless for now" }
+                                        }
+                                        label { class: "flex items-center gap-3 text-sm text-theme-text",
+                                            input { r#type: "radio", name: "auth_mode", checked: auth_mode == "password", onchange: move |_| on_auth_mode.call("password".to_string()) }
+                                            span { "Use a password" }
+                                        }
+                                    }
+                                    if auth_mode == "password" {
+                                        label { class: "block text-sm text-theme-muted",
+                                            "Password"
+                                            input { r#type: "password", class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{password}", autocomplete: "new-password", oninput: move |event| on_password.call(event.value()) }
+                                        }
+                                    }
+                                }
+                                if !message.is_empty() {
+                                    p { class: "mt-4 rounded-2xl border border-theme-warn/30 bg-theme-warn/10 px-4 py-3 text-sm text-theme-warn", "{message}" }
+                                }
+                                button { class: "mt-6 rounded-2xl bg-theme-accent px-4 py-3 font-semibold text-shell-bg", type: "button", onclick: move |_| on_install.call(()), "Install" }
+                            }
+                        },
+                        FrontendState::Login => rsx! {
+                            section { class: "mt-3 max-w-xl",
+                                h1 { class: "text-3xl font-semibold", "Log in" }
+                                p { class: "mt-2 text-sm text-theme-muted", "Use a local session to continue." }
+                                form { class: "mt-6 space-y-4", onsubmit: move |event| { event.prevent_default(); on_login.call(()); },
+                                    label { class: "block text-sm text-theme-muted",
+                                        "Name"
+                                        input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{user}", autocomplete: "username", oninput: move |event| on_user.call(event.value()) }
+                                    }
+                                    if auth_mode == "password" {
+                                        label { class: "block text-sm text-theme-muted",
+                                            "Password"
+                                            input { r#type: "password", class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{password}", autocomplete: "current-password", oninput: move |event| on_password.call(event.value()) }
+                                        }
+                                    }
+                                    if !message.is_empty() {
+                                        p { class: "rounded-2xl border border-theme-warn/30 bg-theme-warn/10 px-4 py-3 text-sm text-theme-warn", "{message}" }
+                                    }
+                                    button { class: "rounded-2xl bg-theme-accent px-4 py-3 font-semibold text-shell-bg", type: "submit", "Continue" }
+                                }
+                            }
+                        },
+                        FrontendState::Setup => rsx! {
+                            section { class: "mt-3 max-w-2xl",
+                                h1 { class: "text-3xl font-semibold", "Set up workspace" }
+                                p { class: "mt-2 text-sm text-theme-muted", "Choose whether to clone an existing remote or create a new local repository." }
+                                form { class: "mt-6 grid gap-4", onsubmit: move |event| { event.prevent_default(); on_setup.call(()); },
+                                    fieldset { class: "grid gap-3 rounded-2xl border border-shell-border bg-shell-bg p-4",
+                                        legend { class: "px-2 text-sm text-theme-muted", "Repository source" }
+                                        label { class: "flex items-center gap-3 text-sm text-theme-text",
+                                            input { r#type: "radio", name: "repo_mode", checked: repo_mode == "new", onchange: move |_| on_repo_mode.call("new".to_string()) }
+                                            span { "Create new repository" }
+                                        }
+                                        label { class: "flex items-center gap-3 text-sm text-theme-text",
+                                            input { r#type: "radio", name: "repo_mode", checked: repo_mode == "remote", onchange: move |_| on_repo_mode.call("remote".to_string()) }
+                                            span { "Use existing remote" }
+                                        }
+                                    }
+                                    label { class: "block text-sm text-theme-muted",
+                                        "Workspace slug"
+                                        input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{workspace_slug}", placeholder: "notes", oninput: move |event| on_workspace_slug.call(event.value()) }
+                                    }
+                                    label { class: "block text-sm text-theme-muted",
+                                        "Workspace name"
+                                        input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{workspace_name}", oninput: move |event| on_workspace_name.call(event.value()) }
+                                    }
+                                    p { class: "text-sm text-theme-subtle", if repo_mode == "remote" { "Clone target: {clone_target}" } else { "Repository path: {clone_target}" } }
+                                    if repo_mode == "remote" {
+                                        label { class: "block text-sm text-theme-muted",
+                                            "Git remote URL"
+                                            input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{repo_url}", placeholder: "git@github.com:you/notes.git", oninput: move |event| on_repo_url.call(event.value()) }
+                                        }
+                                    }
+                                    label { class: "block text-sm text-theme-muted",
+                                        "Branch"
+                                        input { class: "mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent", value: "{branch}", oninput: move |event| on_branch.call(event.value()) }
+                                    }
+                                    if !message.is_empty() {
+                                        p { class: "rounded-2xl border border-theme-warn/30 bg-theme-warn/10 px-4 py-3 text-sm text-theme-warn", "{message}" }
+                                    }
+                                    button { class: "w-fit rounded-2xl bg-theme-accent px-4 py-3 font-semibold text-shell-bg", type: "submit", "Create workspace" }
+                                }
+                            }
+                        },
+                        FrontendState::Ready => rsx! {
+                            section { class: "mt-3 space-y-4",
+                                h1 { class: "text-3xl font-semibold", "Workspace ready" }
+                                p { class: "text-sm text-theme-muted", "Authentication and onboarding are complete." }
+                            }
+                        },
+                    }
+                }
+            }
+        }
     }
-    let text = JsFuture::from(response.text().ok()?)
-        .await
-        .ok()?
-        .as_string()?;
-    serde_json::from_str(&text).ok()
 }
 
 #[cfg(target_arch = "wasm32")]
 async fn detect_frontend_state() -> FrontendState {
-    let Some(response) = fetch_text("/api/auth", "GET", None).await else {
-        return FrontendState::Login;
-    };
-    let Ok(session) = serde_json::from_str::<AuthSession>(&response) else {
-        return FrontendState::Login;
-    };
-    if !session.authenticated {
-        return FrontendState::Login;
-    }
-
-    match fetch_status("/api/workspaces", "GET", None).await {
-        Some(200) => FrontendState::Ready,
-        Some(400) => FrontendState::Setup,
-        Some(401) => FrontendState::Login,
-        _ => FrontendState::Setup,
-    }
+    fetch_auth_session()
+        .await
+        .map(|session| frontend_state_from_auth(&session))
+        .unwrap_or(FrontendState::Login)
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn api_login(user: &str) -> bool {
-    let body = format!(r#"{{"user":"{}"}}"#, json_escape(user));
-    fetch_status("/api/auth/login", "POST", Some(body)).await == Some(200)
+async fn fetch_auth_session() -> Option<AuthSession> {
+    let response = fetch_text("/api/auth", "GET", None).await?;
+    serde_json::from_str::<AuthSession>(&response).ok()
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn api_setup_workspace(workspace_path: &str, repo_url: &str, branch: &str) -> bool {
+async fn api_install(
+    workspace_root: &str,
+    user: &str,
+    auth_mode: &str,
+    password: &str,
+) -> Option<AuthSession> {
     let body = format!(
-        r#"{{"workspace_path":"{}","repo_url":"{}","branch":"{}"}}"#,
-        json_escape(workspace_path),
+        r#"{{"workspace_root":"{}","user":"{}","auth_mode":"{}","password":"{}"}}"#,
+        json_escape(workspace_root),
+        json_escape(user),
+        json_escape(auth_mode),
+        json_escape(password)
+    );
+    let response = fetch_text("/api/setup", "POST", Some(body)).await?;
+    serde_json::from_str::<AuthSession>(&response).ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn api_login(user: &str, password: &str) -> Option<AuthSession> {
+    let body = format!(
+        r#"{{"user":"{}","password":"{}"}}"#,
+        json_escape(user),
+        json_escape(password)
+    );
+    let response = fetch_text("/api/auth/login", "POST", Some(body)).await?;
+    serde_json::from_str::<AuthSession>(&response).ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn api_setup_workspace(
+    repo_mode: &str,
+    workspace_slug: &str,
+    workspace_name: &str,
+    repo_url: &str,
+    branch: &str,
+) -> bool {
+    let body = format!(
+        r#"{{"repo_mode":"{}","workspace_slug":"{}","workspace_name":"{}","repo_url":"{}","branch":"{}"}}"#,
+        json_escape(repo_mode),
+        json_escape(workspace_slug),
+        json_escape(workspace_name),
         json_escape(repo_url),
         json_escape(branch)
     );
@@ -431,12 +485,10 @@ async fn api_setup_workspace(workspace_path: &str, repo_url: &str, branch: &str)
 async fn fetch_status(path: &str, method: &str, body: Option<String>) -> Option<u16> {
     let window = web_sys::window()?;
     let init = request_init(method, body.as_deref());
-    let response = JsFuture::from(window.fetch_with_str_and_init(
-        &format!("{}{}", api_origin(), path),
-        &init,
-    ))
-    .await
-    .ok()?;
+    let response =
+        JsFuture::from(window.fetch_with_str_and_init(&format!("{}{}", api_origin(), path), &init))
+            .await
+            .ok()?;
     let response: web_sys::Response = response.dyn_into().ok()?;
     Some(response.status())
 }
@@ -445,12 +497,10 @@ async fn fetch_status(path: &str, method: &str, body: Option<String>) -> Option<
 async fn fetch_text(path: &str, method: &str, body: Option<String>) -> Option<String> {
     let window = web_sys::window()?;
     let init = request_init(method, body.as_deref());
-    let response = JsFuture::from(window.fetch_with_str_and_init(
-        &format!("{}{}", api_origin(), path),
-        &init,
-    ))
-    .await
-    .ok()?;
+    let response =
+        JsFuture::from(window.fetch_with_str_and_init(&format!("{}{}", api_origin(), path), &init))
+            .await
+            .ok()?;
     let response: web_sys::Response = response.dyn_into().ok()?;
     JsFuture::from(response.text().ok()?)
         .await
@@ -465,7 +515,9 @@ fn request_init(method: &str, body: Option<&str>) -> web_sys::RequestInit {
     init.set_credentials(web_sys::RequestCredentials::Include);
     if let Some(body) = body {
         let headers = web_sys::Headers::new().expect("headers");
-        headers.set("content-type", "application/json").expect("content-type");
+        headers
+            .set("content-type", "application/json")
+            .expect("content-type");
         init.set_headers(&headers);
         init.set_body(&JsValue::from_str(body));
     }
@@ -479,6 +531,45 @@ fn json_escape(value: &str) -> String {
 
 fn default_workspace_path() -> String {
     ".lirox-runtime/workspace".to_string()
+}
+
+fn workspace_slug_from_repo_url(repo_url: &str) -> Option<String> {
+    let tail = repo_url
+        .trim()
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()?;
+    let repo = tail.strip_suffix(".git").unwrap_or(tail);
+    slugify(repo)
+}
+
+fn slugify(value: &str) -> Option<String> {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in value.chars() {
+        let normalized = ch.to_ascii_lowercase();
+        if normalized.is_ascii_alphanumeric() {
+            slug.push(normalized);
+            last_dash = false;
+        } else if !slug.is_empty() && !last_dash {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    (!slug.is_empty()).then_some(slug)
+}
+
+fn workspace_clone_target(workspace_root: &str, workspace_slug: &str) -> String {
+    if workspace_root.is_empty() {
+        return workspace_slug.to_string();
+    }
+    if workspace_slug.is_empty() {
+        return workspace_root.to_string();
+    }
+    format!("{workspace_root}/{workspace_slug}")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -496,41 +587,14 @@ fn api_origin() -> String {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-fn selected_note_path() -> Option<String> {
-    let path = web_sys::window()?.location().pathname().ok()?;
-    workspace_note_path_from_location(&path).map(str::to_string)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn selected_note_path() -> Option<String> {
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn push_workspace_note(slug: &str, path: &str) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-
-    let Ok(history) = window.history() else {
-        return;
-    };
-
-    let _ = history.push_state_with_url(
-        &JsValue::NULL,
-        "",
-        Some(&format!("/workspace/{slug}/note/{path}")),
-    );
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn push_workspace_note(_slug: &str, _path: &str) {}
-
 pub fn workspace_note_path_from_location(path: &str) -> Option<&str> {
-    path.strip_prefix("/workspace/demo/note/")
+    let prefix = "/workspace/";
+    let rest = path.strip_prefix(prefix)?;
+    let (_, note_path) = rest.split_once("/note/")?;
+    Some(note_path)
 }
 
+#[allow(dead_code)]
 #[component]
 fn MvpFrame(title: &'static str, message: &'static str) -> Element {
     rsx! {
@@ -544,6 +608,7 @@ fn MvpFrame(title: &'static str, message: &'static str) -> Element {
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn LoginScreen(
     user: String,
@@ -570,6 +635,7 @@ fn LoginScreen(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn SetupScreen(
     workspace_path: String,
@@ -608,6 +674,7 @@ fn SetupScreen(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 pub fn WorkspaceShell(
     view: WorkspaceView,
@@ -644,10 +711,12 @@ pub fn WorkspaceShell(
     }
 }
 
+#[allow(dead_code)]
 fn note_href(slug: &str, path: &str) -> String {
     format!("/workspace/{slug}/note/{path}")
 }
 
+#[allow(dead_code)]
 #[component]
 fn Sidebar(
     view: WorkspaceView,
@@ -690,6 +759,7 @@ fn Sidebar(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn LabelsNotesSidebar(
     view: WorkspaceView,
@@ -717,6 +787,7 @@ fn LabelsNotesSidebar(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn FilesSidebar(
     view: WorkspaceView,
@@ -749,6 +820,7 @@ fn FilesSidebar(
     }
 }
 
+#[allow(dead_code)]
 fn parent_directory(path: &str) -> Option<&str> {
     if path.is_empty() {
         None
@@ -757,6 +829,7 @@ fn parent_directory(path: &str) -> Option<&str> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 struct BrowserEntry {
     kind: TreeKind,
@@ -764,6 +837,7 @@ struct BrowserEntry {
     path: String,
 }
 
+#[allow(dead_code)]
 fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry> {
     let mut folders = BTreeSet::new();
     let mut files = Vec::new();
@@ -816,6 +890,7 @@ fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry
     entries
 }
 
+#[allow(dead_code)]
 #[component]
 fn TreeRow(slug: String, row: TreeEntry, on_select_note: Option<EventHandler<String>>) -> Element {
     let indent = if row.depth == 0 { "pl-1" } else { "pl-4" };
@@ -851,6 +926,7 @@ fn TreeRow(slug: String, row: TreeEntry, on_select_note: Option<EventHandler<Str
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn BrowserEntryRow(
     slug: String,
@@ -907,6 +983,7 @@ fn BrowserEntryRow(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn FileRow(
     slug: String,
@@ -934,6 +1011,7 @@ fn FileRow(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn LabelRow(label: LabelSummary) -> Element {
     let depth = label.name.matches('/').count();
@@ -949,6 +1027,7 @@ fn LabelRow(label: LabelSummary) -> Element {
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn NoteRow(
     slug: String,
@@ -981,6 +1060,7 @@ fn NoteRow(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn TopBar(workspace_name: String, note_title: String, source: String) -> Element {
     rsx! {
@@ -1010,6 +1090,7 @@ fn TopBar(workspace_name: String, note_title: String, source: String) -> Element
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn EditorPane(view: WorkspaceView, on_action: Option<EventHandler<AppAction>>) -> Element {
     rsx! {
@@ -1028,6 +1109,7 @@ fn EditorPane(view: WorkspaceView, on_action: Option<EventHandler<AppAction>>) -
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn StatusBar(
     note_path: String,
@@ -1064,6 +1146,7 @@ fn StatusBar(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn ModeButton(
     label: &'static str,
@@ -1083,6 +1166,7 @@ fn ModeButton(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn StatusPill(icon: &'static str, label: String) -> Element {
     rsx! {

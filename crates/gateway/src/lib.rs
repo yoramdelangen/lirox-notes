@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 use liroxnotes_app::WorkspaceShell;
 use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote, DEMO_WORKSPACE};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     env, fs,
@@ -32,6 +33,8 @@ pub struct RuntimePaths {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GatewayConfig {
+    pub workspace_slug: String,
+    pub workspace_name: String,
     pub workspace_path: PathBuf,
     pub repo_url: String,
     pub branch: String,
@@ -50,8 +53,12 @@ struct ErrorResponse {
 
 #[derive(Serialize)]
 struct SessionResponse {
+    installed: bool,
     authenticated: bool,
     user: String,
+    auth_mode: String,
+    workspace_required: bool,
+    workspace_root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,14 +80,34 @@ struct WorkspaceResponse {
 
 #[derive(Deserialize)]
 struct WorkspaceRequest {
-    workspace_path: Option<String>,
+    repo_mode: Option<String>,
+    workspace_slug: Option<String>,
+    workspace_name: Option<String>,
     repo_url: Option<String>,
     branch: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+struct InstallRequest {
+    workspace_root: Option<String>,
+    user: Option<String>,
+    auth_mode: Option<String>,
+    password: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct LoginRequest {
     user: Option<String>,
+    password: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UserRecord {
+    user: String,
+    auth_mode: String,
+    salt: String,
+    password_hash: String,
 }
 
 #[derive(Serialize)]
@@ -183,7 +210,26 @@ pub fn parse_config(input: &str) -> Option<GatewayConfig> {
         return None;
     }
 
+    let workspace_slug = values
+        .get("workspace_slug")
+        .copied()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            values
+                .get("repo_url")
+                .and_then(|value| workspace_slug_from_repo_url(value))
+        })
+        .unwrap_or_else(|| "workspace".to_string());
+
     Some(GatewayConfig {
+        workspace_slug,
+        workspace_name: values
+            .get("workspace_name")
+            .copied()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("My Workspace")
+            .to_string(),
         workspace_path: PathBuf::from(workspace_path),
         repo_url: values
             .get("repo_url")
@@ -201,7 +247,9 @@ pub fn parse_config(input: &str) -> Option<GatewayConfig> {
 
 pub fn format_config(config: &GatewayConfig) -> String {
     format!(
-        "workspace_path={}\nrepo_url={}\nbranch={}\n",
+        "workspace_slug={}\nworkspace_name={}\nworkspace_path={}\nrepo_url={}\nbranch={}\n",
+        config.workspace_slug,
+        config.workspace_name,
         config.workspace_path.display(),
         config.repo_url,
         config.branch
@@ -225,6 +273,160 @@ pub fn save_config(path: &Path, config: &GatewayConfig) -> std::io::Result<()> {
 
 fn session_file(paths: &RuntimePaths) -> PathBuf {
     paths.config_file.with_file_name("session")
+}
+
+fn install_file(paths: &RuntimePaths) -> PathBuf {
+    paths.config_file.with_file_name("install")
+}
+
+fn user_file(paths: &RuntimePaths) -> PathBuf {
+    paths.config_file.with_file_name("user")
+}
+
+fn default_workspace_root(paths: &RuntimePaths) -> PathBuf {
+    paths.default_workspace.clone()
+}
+
+fn app_workspace_root(paths: &RuntimePaths) -> std::io::Result<PathBuf> {
+    match fs::read_to_string(install_file(paths)) {
+        Ok(contents) => {
+            for line in contents.lines() {
+                let Some((key, value)) = line.split_once('=') else {
+                    continue;
+                };
+                if key.trim() == "workspace_root" && !value.trim().is_empty() {
+                    return Ok(PathBuf::from(value.trim()));
+                }
+            }
+            Ok(default_workspace_root(paths))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(config) = load_config(&paths.config_file)? {
+                Ok(config
+                    .workspace_path
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| default_workspace_root(paths)))
+            } else {
+                Ok(default_workspace_root(paths))
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn is_installed(paths: &RuntimePaths) -> std::io::Result<bool> {
+    Ok(fs::metadata(install_file(paths)).is_ok() || load_config(&paths.config_file)?.is_some())
+}
+
+fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Result<()> {
+    let path = install_file(paths);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        path,
+        format!(
+            "installed=true\nworkspace_root={}\n",
+            workspace_root.display()
+        ),
+    )
+}
+
+fn parse_user_record(input: &str) -> Option<UserRecord> {
+    let mut user = None;
+    let mut auth_mode = None;
+    let mut salt = None;
+    let mut password_hash = None;
+    for line in input.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "user" => user = Some(value.trim().to_string()),
+            "auth_mode" => auth_mode = Some(value.trim().to_string()),
+            "salt" => salt = Some(value.trim().to_string()),
+            "password_hash" => password_hash = Some(value.trim().to_string()),
+            _ => {}
+        }
+    }
+    Some(UserRecord {
+        user: user.filter(|value| !value.is_empty())?,
+        auth_mode: auth_mode.unwrap_or_else(|| "passwordless".to_string()),
+        salt: salt.filter(|value| !value.is_empty())?,
+        password_hash: password_hash.filter(|value| !value.is_empty())?,
+    })
+}
+
+fn load_user_record(paths: &RuntimePaths) -> std::io::Result<Option<UserRecord>> {
+    match fs::read_to_string(user_file(paths)) {
+        Ok(contents) => Ok(parse_user_record(&contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn hash_password(user: &str, password: &str, salt: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(user.as_bytes());
+    hasher.update(b":");
+    hasher.update(password.as_bytes());
+    hasher.update(b":");
+    hasher.update(salt.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn save_user_record(
+    paths: &RuntimePaths,
+    user: &str,
+    auth_mode: &str,
+    password: &str,
+) -> std::io::Result<()> {
+    let user = user.trim();
+    let auth_mode = if auth_mode == "password" {
+        "password"
+    } else {
+        "passwordless"
+    };
+    let password = password.trim();
+    if user.is_empty() || (auth_mode == "password" && password.is_empty()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "user and password are required",
+        ));
+    }
+    let salt = format!(
+        "{:x}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let password_hash = hash_password(user, password, &salt);
+    let path = user_file(paths);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        path,
+        format!(
+            "user={}\nauth_mode={}\nsalt={}\npassword_hash={}\n",
+            user, auth_mode, salt, password_hash
+        ),
+    )
+}
+
+fn validate_credentials(paths: &RuntimePaths, user: &str, password: &str) -> std::io::Result<bool> {
+    let Some(record) = load_user_record(paths)? else {
+        return Ok(false);
+    };
+    if record.user != user.trim() {
+        return Ok(false);
+    }
+    if record.auth_mode == "passwordless" {
+        return Ok(true);
+    }
+    Ok(record.password_hash == hash_password(&record.user, password.trim(), &record.salt))
 }
 
 fn parse_session(input: &str) -> Option<Session> {
@@ -333,21 +535,137 @@ fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
     }
 }
 
+fn clone_git(repo_url: &str, branch: &str, destination: &Path) -> std::io::Result<()> {
+    let output = Command::new("git")
+        .args(["clone", "--branch", branch, "--single-branch", repo_url])
+        .arg(destination)
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else if String::from_utf8_lossy(&output.stderr).contains("Remote branch") {
+        let fallback = Command::new("git")
+            .args(["clone", repo_url])
+            .arg(destination)
+            .output()?;
+        if fallback.status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                String::from_utf8_lossy(&fallback.stderr).trim().to_string(),
+            ))
+        }
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
+    }
+}
+
+fn workspace_slug_from_repo_url(repo_url: &str) -> Option<String> {
+    let tail = repo_url
+        .trim()
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()?;
+    let repo = tail.strip_suffix(".git").unwrap_or(tail);
+    slugify(repo)
+}
+
+pub fn slugify(value: &str) -> Option<String> {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in value.chars() {
+        let normalized = ch.to_ascii_lowercase();
+        if normalized.is_ascii_alphanumeric() {
+            slug.push(normalized);
+            last_dash = false;
+        } else if !slug.is_empty() && !last_dash {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    (!slug.is_empty()).then_some(slug)
+}
+
+fn workspace_has_user_files(workspace: &Path) -> std::io::Result<bool> {
+    for entry in fs::read_dir(workspace)? {
+        let entry = entry?;
+        if entry.file_name().to_str() == Some(".git") {
+            continue;
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn seed_welcome_files_if_empty(workspace: &Path) -> std::io::Result<()> {
+    if workspace_has_user_files(workspace)? {
+        return Ok(());
+    }
+
+    let welcome = workspace.join("notes/welcome.md");
+    if let Some(parent) = welcome.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        &welcome,
+        "# Welcome\n\nYour workspace is ready. Start writing notes here.\n",
+    )?;
+    run_git(workspace, &["config", "user.name", "LiroxNotes"])?;
+    run_git(
+        workspace,
+        &["config", "user.email", "liroxnotes@example.local"],
+    )?;
+    run_git(workspace, &["add", "."])?;
+    let _ = run_git(workspace, &["commit", "-m", "Initial notes"]);
+    Ok(())
+}
+
 pub fn ensure_workspace(workspace: &Path) -> std::io::Result<()> {
     fs::create_dir_all(workspace)?;
 
     if run_git(workspace, &["rev-parse", "--is-inside-work-tree"]).is_err() {
         run_git(workspace, &["init"])?;
-        run_git(workspace, &["config", "user.name", "LiroxNotes"])?;
-        run_git(
-            workspace,
-            &["config", "user.email", "liroxnotes@example.local"],
-        )?;
-        run_git(workspace, &["add", "."])?;
-        let _ = run_git(workspace, &["commit", "-m", "Initial notes"]);
     }
 
+    seed_welcome_files_if_empty(workspace)?;
+
     Ok(())
+}
+
+fn ensure_workspace_for_config(config: &GatewayConfig) -> std::io::Result<()> {
+    if config.repo_url.trim().is_empty() {
+        return ensure_workspace(&config.workspace_path);
+    }
+
+    if run_git(
+        &config.workspace_path,
+        &["rev-parse", "--is-inside-work-tree"],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+
+    if config.workspace_path.exists() {
+        let mut entries = fs::read_dir(&config.workspace_path)?;
+        if entries.next().is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "workspace directory already exists and is not empty",
+            ));
+        }
+    } else if let Some(parent) = config.workspace_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    clone_git(&config.repo_url, &config.branch, &config.workspace_path)?;
+    seed_welcome_files_if_empty(&config.workspace_path)
 }
 
 fn read_notes(root: &Path, dir: &Path, notes: &mut Vec<WorkspaceNote>) -> std::io::Result<()> {
@@ -493,8 +811,9 @@ fn api_error(status: actix_web::http::StatusCode, message: &str) -> HttpResponse
 
 fn workspace_summary(config: &GatewayConfig) -> std::io::Result<WorkspaceResponse> {
     let view = workspace_view_for_config(config, DEMO_WORKSPACE.default_note_path)?;
+
     Ok(WorkspaceResponse {
-        slug: "demo".to_string(),
+        slug: config.workspace_slug.clone(),
         name: view.name,
         path: config.workspace_path.to_string_lossy().to_string(),
         branch: view.branch,
@@ -506,15 +825,15 @@ fn workspace_summary(config: &GatewayConfig) -> std::io::Result<WorkspaceRespons
 
 fn repository_summary(config: &GatewayConfig) -> RepositoryResponse {
     RepositoryResponse {
-        id: "demo".to_string(),
+        id: config.workspace_slug.clone(),
         repo_url: config.repo_url.clone(),
         branch: config.branch.clone(),
         connected: !config.repo_url.trim().is_empty(),
     }
 }
 
-fn require_demo_workspace(workspace: &str) -> Option<HttpResponse> {
-    (workspace != "demo").then(|| {
+fn require_configured_workspace(config: &GatewayConfig, workspace: &str) -> Option<HttpResponse> {
+    (workspace != config.workspace_slug).then(|| {
         api_error(
             actix_web::http::StatusCode::NOT_FOUND,
             "workspace not found",
@@ -522,8 +841,8 @@ fn require_demo_workspace(workspace: &str) -> Option<HttpResponse> {
     })
 }
 
-fn require_demo_repository(repo_id: &str) -> Option<HttpResponse> {
-    (repo_id != "demo").then(|| {
+fn require_configured_repository(config: &GatewayConfig, repo_id: &str) -> Option<HttpResponse> {
+    (repo_id != config.workspace_slug).then(|| {
         api_error(
             actix_web::http::StatusCode::NOT_FOUND,
             "repository not found",
@@ -542,16 +861,21 @@ fn onboarding_page(paths: &RuntimePaths, error: Option<&str>) -> HttpResponse {
 <form method="post" action="/onboarding" style="width:min(100%,42rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
 <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7c8796;">LiroxNotes MVP</div>
 <h1 style="margin:0;font-size:1.7rem;">Set up your notes workspace</h1>
-<p style="margin:0;color:#9aa4b2;">Choose the local folder that LiroxNotes should read and commit Markdown files into.</p>
+<p style="margin:0;color:#9aa4b2;">Choose whether to clone an existing remote or create a new local repository.</p>
 {error}
-<label style="color:#9aa4b2;">Workspace path<br><input name="workspace_path" value="{}" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
+<fieldset style="display:grid;gap:.75rem;border:1px solid #3a4655;border-radius:.75rem;padding:1rem;">
+<legend style="padding:0 .5rem;color:#9aa4b2;">Repository source</legend>
+<label><input type="radio" name="repo_mode" value="new" checked> Create new repository</label>
+<label><input type="radio" name="repo_mode" value="remote"> Use existing remote</label>
+</fieldset>
+<label style="color:#9aa4b2;">Workspace slug<br><input name="workspace_slug" placeholder="notes" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
+<label style="color:#9aa4b2;">Workspace name<br><input name="workspace_name" value="My Workspace" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
 <label style="color:#9aa4b2;">Git remote URL<br><input name="repo_url" placeholder="git@github.com:you/notes.git" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
 <label style="color:#9aa4b2;">Branch<br><input name="branch" value="main" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
 <button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Save configuration</button>
 <p style="margin:0;color:#7c8796;font-size:.85rem;">Config file: {}</p>
 </form>
 </main>"#,
-            html_escape(&paths.default_workspace.to_string_lossy()),
             html_escape(&paths.config_file.to_string_lossy())
         ),
     )
@@ -567,9 +891,10 @@ fn login_page(error: Option<&str>) -> HttpResponse {
             r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
 <form method="post" action="/login" style="width:min(100%,28rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;">
 <h1 style="margin:0;font-size:1.7rem;">Log in</h1>
-<p style="margin:0;color:#9aa4b2;">Local MVP login. Pick a display name to unlock this gateway on this machine.</p>
+<p style="margin:0;color:#9aa4b2;">Log in with the local account created during setup.</p>
 {error}
 <label>Name<br><input name="user" value="local" autocomplete="username" style="width:100%;box-sizing:border-box;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
+<label>Password<br><input type="password" name="password" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
 <button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Continue</button>
 </form>
 </main>"#,
@@ -592,6 +917,43 @@ fn require_auth_api(
     paths: &RuntimePaths,
 ) -> std::io::Result<Option<HttpResponse>> {
     Ok((!is_authenticated(req, paths)?).then(unauthorized))
+}
+
+fn workspace_required(paths: &RuntimePaths) -> std::io::Result<bool> {
+    Ok(load_config(&paths.config_file)?.is_none())
+}
+
+fn repo_mode_is_remote(mode: Option<&str>) -> bool {
+    mode == Some("remote")
+}
+
+fn install_page(paths: &RuntimePaths) -> HttpResponse {
+    html_page(
+        "Install LiroxNotes",
+        &format!(
+            r#"<main style="min-height:100vh;display:grid;place-items:center;padding:1rem;background:#0d1117;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;">
+<form method="post" action="/install" style="width:min(100%,32rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
+<div style="font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:#8b949e;">LiroxNotes</div>
+<h1 style="margin:0;font-size:1.7rem;">Install application</h1>
+<p style="margin:0;color:#9aa4b2;line-height:1.6;">Initialize the local application, create the first user, then continue to workspace setup.</p>
+<label style="color:#9aa4b2;">Workspace root<br><input name="workspace_root" value="{}" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
+<label style="color:#9aa4b2;">Username<br><input name="user" value="local" autocomplete="username" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
+<fieldset style="display:grid;gap:.75rem;border:1px solid #3a4655;border-radius:.75rem;padding:1rem;">
+<legend style="padding:0 .5rem;color:#9aa4b2;">Login method</legend>
+<label><input type="radio" name="auth_mode" value="passwordless" checked> Passwordless for now</label>
+<label><input type="radio" name="auth_mode" value="password"> Use a password</label>
+</fieldset>
+<label style="color:#9aa4b2;">Password<br><input type="password" name="password" autocomplete="new-password" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
+<button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.6rem;background:#38bdf8;color:#081018;font-weight:700;cursor:pointer;">Install</button>
+</form>
+</main>"#,
+            html_escape(
+                &app_workspace_root(paths)
+                    .unwrap_or_else(|_| default_workspace_root(paths))
+                    .to_string_lossy()
+            )
+        ),
+    )
 }
 
 fn html_escape(value: &str) -> String {
@@ -622,6 +984,74 @@ fn form_decode(input: &str) -> String {
     String::from_utf8_lossy(&output).to_string()
 }
 
+fn parse_install_form(body: &str, default_workspace: &Path) -> (PathBuf, String, String, String) {
+    let mut workspace_root = default_workspace.to_path_buf();
+    let mut user = String::new();
+    let mut auth_mode = "passwordless".to_string();
+    let mut password = String::new();
+    for pair in body.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let key = form_decode(key);
+        let value = form_decode(value);
+        match key.as_str() {
+            "workspace_root" if !value.trim().is_empty() => {
+                workspace_root = PathBuf::from(value.trim())
+            }
+            "user" => user = value.trim().to_string(),
+            "auth_mode" if value == "password" => auth_mode = value,
+            "password" => password = value,
+            _ => {}
+        }
+    }
+    (workspace_root, user, auth_mode, password)
+}
+
+fn parse_login_form(body: &str) -> (String, String) {
+    let mut user = String::new();
+    let mut password = String::new();
+    for pair in body.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        match form_decode(key).as_str() {
+            "user" => user = form_decode(value).trim().to_string(),
+            "password" => password = form_decode(value),
+            _ => {}
+        }
+    }
+    (user, password)
+}
+
+fn login_error(message: &str) -> std::io::Result<HttpResponse> {
+    let mut response = HttpResponse::Unauthorized().json(ErrorResponse {
+        error: message.to_string(),
+    });
+    cors(&mut response);
+    Ok(response)
+}
+
+fn build_session_response(
+    paths: &RuntimePaths,
+    session: Option<&Session>,
+) -> std::io::Result<SessionResponse> {
+    let workspace_root = app_workspace_root(paths)?;
+    let auth_mode = load_user_record(paths)?
+        .map(|record| record.auth_mode)
+        .unwrap_or_else(|| "passwordless".to_string());
+    Ok(SessionResponse {
+        installed: is_installed(paths)?,
+        authenticated: session.is_some(),
+        user: session
+            .map(|session| session.user.clone())
+            .unwrap_or_default(),
+        auth_mode,
+        workspace_required: workspace_required(paths)?,
+        workspace_root: workspace_root.to_string_lossy().to_string(),
+    })
+}
+
 pub fn parse_onboarding_form(body: &str, default_workspace: &Path) -> GatewayConfig {
     let mut fields = HashMap::new();
     for pair in body.split('&') {
@@ -631,15 +1061,29 @@ pub fn parse_onboarding_form(body: &str, default_workspace: &Path) -> GatewayCon
         fields.insert(form_decode(key), form_decode(value));
     }
 
-    let workspace_path = fields
-        .get("workspace_path")
+    let repo_mode = fields.get("repo_mode").map(String::as_str);
+    let repo_url = if repo_mode_is_remote(repo_mode) {
+        fields.get("repo_url").cloned().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let workspace_slug = fields
+        .get("workspace_slug")
         .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_workspace.to_path_buf());
+        .and_then(|value| slugify(value))
+        .or_else(|| workspace_slug_from_repo_url(&repo_url))
+        .unwrap_or_else(|| "workspace".to_string());
+    let workspace_path = default_workspace.join(&workspace_slug);
 
     GatewayConfig {
+        workspace_slug,
+        workspace_name: fields
+            .get("workspace_name")
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| "My Workspace".to_string()),
         workspace_path,
-        repo_url: fields.get("repo_url").cloned().unwrap_or_default(),
+        repo_url,
         branch: fields
             .get("branch")
             .filter(|value| !value.trim().is_empty())
@@ -648,27 +1092,12 @@ pub fn parse_onboarding_form(body: &str, default_workspace: &Path) -> GatewayCon
     }
 }
 
-fn parse_login_form(body: &str) -> String {
-    for pair in body.split('&') {
-        let Some((key, value)) = pair.split_once('=') else {
-            continue;
-        };
-        if form_decode(key) == "user" {
-            let user = form_decode(value).trim().to_string();
-            if !user.is_empty() {
-                return user;
-            }
-        }
-    }
-    "local".to_string()
-}
-
 pub fn configured_profile(paths: &RuntimePaths) -> std::io::Result<Option<GatewayConfig>> {
     let Some(config) = load_config(&paths.config_file)? else {
         return Ok(None);
     };
 
-    ensure_workspace(&config.workspace_path)?;
+    ensure_workspace_for_config(&config)?;
     configure_git_remote(&config)?;
     Ok(Some(config))
 }
@@ -694,8 +1123,8 @@ pub fn workspace_view_for_config(
         .unwrap_or(DEMO_WORKSPACE.default_note_path);
 
     Ok(workspace_view_from_notes(
-        "demo",
-        "MVP Git Workspace",
+        &config.workspace_slug,
+        &config.workspace_name,
         &current_branch(&config.workspace_path, config),
         if config.repo_url.is_empty() {
             "local git"
@@ -732,6 +1161,17 @@ fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpRes
 
 #[get("/")]
 async fn index(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
+    match is_installed(&state.paths) {
+        Ok(false) => return install_page(&state.paths),
+        Ok(true) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
+    match workspace_required(&state.paths) {
+        Ok(true) => return onboarding_page(&state.paths, None),
+        Ok(false) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
+
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
@@ -751,7 +1191,10 @@ async fn login() -> impl Responder {
 
 #[post("/login")]
 async fn save_login(state: web::Data<AppState>, body: String) -> Result<HttpResponse> {
-    let user = parse_login_form(&body);
+    let (user, password) = parse_login_form(&body);
+    if !validate_credentials(&state.paths, &user, &password)? {
+        return Ok(login_page(Some("Invalid username or password.")));
+    }
     let session = save_session(&state.paths, &user)?;
     Ok(HttpResponse::SeeOther()
         .append_header(("location", "/"))
@@ -779,12 +1222,26 @@ async fn logout(state: web::Data<AppState>) -> Result<HttpResponse> {
 
 #[get("/onboarding")]
 async fn onboarding(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
+    match is_installed(&state.paths) {
+        Ok(false) => return install_page(&state.paths),
+        Ok(true) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
+    match workspace_required(&state.paths) {
+        Ok(true) => return onboarding_page(&state.paths, None),
+        Ok(false) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
+
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
-    onboarding_page(&state.paths, None)
+
+    HttpResponse::SeeOther()
+        .append_header(("location", "/"))
+        .finish()
 }
 
 #[post("/onboarding")]
@@ -793,11 +1250,16 @@ async fn save_onboarding(
     req: HttpRequest,
     body: String,
 ) -> Result<HttpResponse> {
-    if !is_authenticated(&req, &state.paths)? {
+    if !is_installed(&state.paths)? {
+        return Ok(HttpResponse::SeeOther()
+            .append_header(("location", "/install"))
+            .finish());
+    }
+    if !workspace_required(&state.paths)? && !is_authenticated(&req, &state.paths)? {
         return Ok(login_redirect());
     }
-    let config = parse_onboarding_form(&body, &state.paths.default_workspace);
-    if let Err(error) = ensure_workspace(&config.workspace_path)
+    let config = parse_onboarding_form(&body, &app_workspace_root(&state.paths)?);
+    if let Err(error) = ensure_workspace_for_config(&config)
         .and_then(|_| configure_git_remote(&config))
         .and_then(|_| save_config(&state.paths.config_file, &config))
     {
@@ -806,19 +1268,54 @@ async fn save_onboarding(
     }
 
     Ok(HttpResponse::SeeOther()
-        .append_header(("location", "/workspace/demo"))
+        .append_header(("location", format!("/workspace/{}", config.workspace_slug)))
         .finish())
 }
 
-#[get("/workspace/demo")]
-async fn workspace_page(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
+#[get("/install")]
+async fn install(state: web::Data<AppState>) -> impl Responder {
+    install_page(&state.paths)
+}
+
+#[post("/install")]
+async fn save_install(state: web::Data<AppState>, body: String) -> Result<HttpResponse> {
+    let (workspace_root, user, auth_mode, password) =
+        parse_install_form(&body, &default_workspace_root(&state.paths));
+    mark_installed(&state.paths, &workspace_root)?;
+    save_user_record(&state.paths, &user, &auth_mode, &password)?;
+    let session = save_session(&state.paths, &user)?;
+    Ok(HttpResponse::SeeOther()
+        .append_header(("location", "/onboarding"))
+        .append_header((
+            "set-cookie",
+            format!(
+                "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
+                session.token
+            ),
+        ))
+        .finish())
+}
+
+#[get("/workspace/{workspace}")]
+async fn workspace_page(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    workspace: web::Path<String>,
+) -> impl Responder {
+    let workspace = workspace.into_inner();
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
     match configured(&state) {
-        Ok(Some(config)) => render_workspace(&config, DEMO_WORKSPACE.default_note_path),
+        Ok(Some(config)) => {
+            if let Some(response) = require_configured_workspace(&config, &workspace) {
+                response
+            } else {
+                render_workspace(&config, DEMO_WORKSPACE.default_note_path)
+            }
+        }
         Ok(None) => HttpResponse::SeeOther()
             .append_header(("location", "/onboarding"))
             .finish(),
@@ -826,19 +1323,26 @@ async fn workspace_page(state: web::Data<AppState>, req: HttpRequest) -> impl Re
     }
 }
 
-#[get("/workspace/demo/note/{path:.*}")]
+#[get("/workspace/{workspace}/note/{path:.*}")]
 async fn note_page(
     state: web::Data<AppState>,
     req: HttpRequest,
-    path: web::Path<String>,
+    route: web::Path<(String, String)>,
 ) -> impl Responder {
+    let (workspace, path) = route.into_inner();
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
     match configured(&state) {
-        Ok(Some(config)) => render_workspace(&config, &path.into_inner()),
+        Ok(Some(config)) => {
+            if let Some(response) = require_configured_workspace(&config, &workspace) {
+                response
+            } else {
+                render_workspace(&config, &path)
+            }
+        }
         Ok(None) => HttpResponse::SeeOther()
             .append_header(("location", "/onboarding"))
             .finish(),
@@ -848,10 +1352,7 @@ async fn note_page(
 
 fn auth_response(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<HttpResponse> {
     let session = request_session(req, paths)?;
-    let mut response = HttpResponse::Ok().json(SessionResponse {
-        authenticated: session.is_some(),
-        user: session.map(|session| session.user).unwrap_or_default(),
-    });
+    let mut response = HttpResponse::Ok().json(build_session_response(paths, session.as_ref())?);
     cors(&mut response);
     Ok(response)
 }
@@ -876,11 +1377,13 @@ async fn auth_login_api(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("local");
+    let password = request.password.as_deref().unwrap_or_default();
+    if !validate_credentials(&state.paths, user, password)? {
+        return Ok(login_error("invalid username or password")?);
+    }
     let session = save_session(&state.paths, user)?;
-    let mut response = HttpResponse::Ok().json(SessionResponse {
-        authenticated: true,
-        user: session.user,
-    });
+    let mut response =
+        HttpResponse::Ok().json(build_session_response(&state.paths, Some(&session))?);
     response.headers_mut().insert(
         actix_web::http::header::SET_COOKIE,
         HeaderValue::from_str(&format!(
@@ -896,13 +1399,41 @@ async fn auth_login_api(
 #[post("/api/auth/logout")]
 async fn auth_logout_api(state: web::Data<AppState>) -> Result<HttpResponse> {
     clear_session(&state.paths)?;
-    let mut response = HttpResponse::Ok().json(SessionResponse {
-        authenticated: false,
-        user: String::new(),
-    });
+    let mut response = HttpResponse::Ok().json(build_session_response(&state.paths, None)?);
     response.headers_mut().insert(
         actix_web::http::header::SET_COOKIE,
         HeaderValue::from_static("lirox_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"),
+    );
+    cors(&mut response);
+    Ok(response)
+}
+
+#[post("/api/setup")]
+async fn install_api(
+    state: web::Data<AppState>,
+    request: web::Json<InstallRequest>,
+) -> Result<HttpResponse> {
+    let workspace_root = request
+        .workspace_root
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_workspace_root(&state.paths));
+    let user = request.user.as_deref().unwrap_or("local");
+    let auth_mode = request.auth_mode.as_deref().unwrap_or("passwordless");
+    let password = request.password.as_deref().unwrap_or_default();
+    mark_installed(&state.paths, &workspace_root)?;
+    save_user_record(&state.paths, user, auth_mode, password)?;
+    let session = save_session(&state.paths, user)?;
+    let mut response =
+        HttpResponse::Created().json(build_session_response(&state.paths, Some(&session))?);
+    response.headers_mut().insert(
+        actix_web::http::header::SET_COOKIE,
+        HeaderValue::from_str(&format!(
+            "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
+            session.token
+        ))
+        .unwrap(),
     );
     cors(&mut response);
     Ok(response)
@@ -930,24 +1461,46 @@ async fn create_workspace_api(
     req: HttpRequest,
     request: web::Json<WorkspaceRequest>,
 ) -> Result<HttpResponse> {
-    if let Some(response) = require_auth_api(&req, &state.paths)? {
-        return Ok(response);
+    if !is_installed(&state.paths)? {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "application is not installed",
+        ));
     }
+    if !workspace_required(&state.paths)? {
+        if let Some(response) = require_auth_api(&req, &state.paths)? {
+            return Ok(response);
+        }
+    }
+    let repo_url = if repo_mode_is_remote(request.repo_mode.as_deref()) {
+        request.repo_url.clone().unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let workspace_slug = request
+        .workspace_slug
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|value| slugify(&value))
+        .or_else(|| workspace_slug_from_repo_url(&repo_url))
+        .unwrap_or_else(|| "workspace".to_string());
+    let workspace_root = app_workspace_root(&state.paths)?;
     let config = GatewayConfig {
-        workspace_path: request
-            .workspace_path
-            .as_deref()
+        workspace_slug: workspace_slug.clone(),
+        workspace_name: request
+            .workspace_name
+            .clone()
             .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| state.paths.default_workspace.clone()),
-        repo_url: request.repo_url.clone().unwrap_or_default(),
+            .unwrap_or_else(|| "My Workspace".to_string()),
+        workspace_path: workspace_root.join(workspace_slug),
+        repo_url,
         branch: request
             .branch
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "main".to_string()),
     };
-    ensure_workspace(&config.workspace_path)?;
+    ensure_workspace_for_config(&config)?;
     configure_git_remote(&config)?;
     save_config(&state.paths.config_file, &config)?;
 
@@ -965,15 +1518,15 @@ async fn workspace_resource_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_workspace(&workspace) {
-        return Ok(response);
-    }
     let Some(config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
     let mut response = HttpResponse::Ok().json(workspace_summary(&config)?);
     cors(&mut response);
     Ok(response)
@@ -988,15 +1541,15 @@ async fn sync_workspace_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_workspace(&workspace) {
-        return Ok(response);
-    }
     let Some(config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
 
     let (pulled, pushed, message) = if config.repo_url.trim().is_empty() {
         (false, false, "local workspace has no remote".to_string())
@@ -1032,15 +1585,15 @@ async fn get_workspace_file_api(
         return Ok(response);
     }
     let (workspace, path) = route.into_inner();
-    if let Some(response) = require_demo_workspace(&workspace) {
-        return Ok(response);
-    }
     let Some(config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
     let Some(relative) = safe_note_path(&path) else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
@@ -1064,15 +1617,15 @@ async fn put_workspace_file_api(
         return Ok(response);
     }
     let (workspace, path) = route.into_inner();
-    if let Some(response) = require_demo_workspace(&workspace) {
-        return Ok(response);
-    }
     let Some(config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
     let committed = match save_note_body(&config, &path, body) {
         Ok(committed) => committed,
         Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
@@ -1101,15 +1654,15 @@ async fn delete_workspace_file_api(
         return Ok(response);
     }
     let (workspace, path) = route.into_inner();
-    if let Some(response) = require_demo_workspace(&workspace) {
-        return Ok(response);
-    }
     let Some(config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
     let Some(relative) = safe_note_path(&path) else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
@@ -1140,7 +1693,13 @@ async fn conflicts_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_workspace(&workspace) {
+    let Some(config) = configured(&state)? else {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "workspace is not configured",
+        ));
+    };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
         return Ok(response);
     }
     let mut response = HttpResponse::Ok().json(EmptyListResponse::<String> { items: vec![] });
@@ -1157,7 +1716,13 @@ async fn trash_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_workspace(&workspace) {
+    let Some(config) = configured(&state)? else {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "workspace is not configured",
+        ));
+    };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
         return Ok(response);
     }
     let mut response = HttpResponse::Ok().json(EmptyListResponse::<String> { items: vec![] });
@@ -1190,15 +1755,15 @@ async fn repository_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_repository(&repo_id) {
-        return Ok(response);
-    }
     let Some(config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_repository(&config, &repo_id) {
+        return Ok(response);
+    }
     let mut response = HttpResponse::Ok().json(repository_summary(&config));
     cors(&mut response);
     Ok(response)
@@ -1214,15 +1779,15 @@ async fn connect_repository_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_repository(&repo_id) {
-        return Ok(response);
-    }
     let Some(mut config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_repository(&config, &repo_id) {
+        return Ok(response);
+    }
     config.repo_url = request.repo_url.clone();
     if let Some(branch) = &request.branch {
         if !branch.trim().is_empty() {
@@ -1245,15 +1810,15 @@ async fn disconnect_repository_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    if let Some(response) = require_demo_repository(&repo_id) {
-        return Ok(response);
-    }
     let Some(mut config) = configured(&state)? else {
         return Ok(api_error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "workspace is not configured",
         ));
     };
+    if let Some(response) = require_configured_repository(&config, &repo_id) {
+        return Ok(response);
+    }
     let _ = run_git(&config.workspace_path, &["remote", "remove", "origin"]);
     config.repo_url.clear();
     save_config(&state.paths.config_file, &config)?;
@@ -1355,6 +1920,8 @@ pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
             .service(login)
             .service(save_login)
             .service(logout)
+            .service(install)
+            .service(save_install)
             .service(onboarding)
             .service(save_onboarding)
             .service(workspace_page)
@@ -1363,6 +1930,7 @@ pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
             .service(auth_login_api)
             .service(auth_logout_api)
             .service(auth_api)
+            .service(install_api)
             .service(workspaces_api)
             .service(create_workspace_api)
             .service(workspace_resource_api)

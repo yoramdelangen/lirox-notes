@@ -15,3 +15,4 @@ dioxus-ssr.workspace = true
 liroxnotes-app = { path = "../app" }
 liroxnotes-shared = { path = "../shared" }
 serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
