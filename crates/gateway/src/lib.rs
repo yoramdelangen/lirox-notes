@@ -20,6 +20,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod components;
+mod layouts;
+mod routes;
+
 #[derive(Clone)]
 struct AppState {
     paths: RuntimePaths,
@@ -772,12 +776,6 @@ pub fn configure_git_remote(config: &GatewayConfig) -> std::io::Result<()> {
     Ok(())
 }
 
-fn html_page(title: &str, body: &str) -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(format!("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title><link rel=\"stylesheet\" href=\"/assets/app.css\"></head><body>{body}</body></html>"))
-}
-
 fn cors(response: &mut HttpResponse) {
     if !cfg!(debug_assertions) && env::var("LIROX_DEV_CORS").is_err() {
         return;
@@ -851,55 +849,14 @@ fn require_configured_repository(config: &GatewayConfig, repo_id: &str) -> Optio
 }
 
 fn onboarding_page(paths: &RuntimePaths, error: Option<&str>) -> HttpResponse {
-    let error = error
-        .map(|message| format!("<p style=\"color:#ff8f40\">{message}</p>"))
-        .unwrap_or_default();
-    html_page(
+    layouts::html_page(
         "Set Up LiroxNotes",
-        &format!(
-            r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
-<form method="post" action="/onboarding" style="width:min(100%,42rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
-<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7c8796;">LiroxNotes MVP</div>
-<h1 style="margin:0;font-size:1.7rem;">Set up your notes workspace</h1>
-<p style="margin:0;color:#9aa4b2;">Choose whether to clone an existing remote or create a new local repository.</p>
-{error}
-<fieldset style="display:grid;gap:.75rem;border:1px solid #3a4655;border-radius:.75rem;padding:1rem;">
-<legend style="padding:0 .5rem;color:#9aa4b2;">Repository source</legend>
-<label><input type="radio" name="repo_mode" value="new" checked> Create new repository</label>
-<label><input type="radio" name="repo_mode" value="remote"> Use existing remote</label>
-</fieldset>
-<label style="color:#9aa4b2;">Workspace slug<br><input name="workspace_slug" placeholder="notes" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label style="color:#9aa4b2;">Workspace name<br><input name="workspace_name" value="My Workspace" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label style="color:#9aa4b2;">Git remote URL<br><input name="repo_url" placeholder="git@github.com:you/notes.git" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label style="color:#9aa4b2;">Branch<br><input name="branch" value="main" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Save configuration</button>
-<p style="margin:0;color:#7c8796;font-size:.85rem;">Config file: {}</p>
-</form>
-</main>"#,
-            html_escape(&paths.config_file.to_string_lossy())
-        ),
+        &components::onboarding_page_body(paths, error),
     )
 }
 
 fn login_page(error: Option<&str>) -> HttpResponse {
-    let error = error
-        .map(|message| format!("<p style=\"color:#ff8f40\">{message}</p>"))
-        .unwrap_or_default();
-    html_page(
-        "Log In To LiroxNotes",
-        &format!(
-            r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
-<form method="post" action="/login" style="width:min(100%,28rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;">
-<h1 style="margin:0;font-size:1.7rem;">Log in</h1>
-<p style="margin:0;color:#9aa4b2;">Log in with the local account created during setup.</p>
-{error}
-<label>Name<br><input name="user" value="local" autocomplete="username" style="width:100%;box-sizing:border-box;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label>Password<br><input type="password" name="password" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Continue</button>
-</form>
-</main>"#,
-        ),
-    )
+    layouts::html_page("Log In To LiroxNotes", &components::login_page_body(error))
 }
 
 fn login_redirect() -> HttpResponse {
@@ -928,32 +885,7 @@ fn repo_mode_is_remote(mode: Option<&str>) -> bool {
 }
 
 fn install_page(paths: &RuntimePaths) -> HttpResponse {
-    html_page(
-        "Install LiroxNotes",
-        &format!(
-            r#"<main style="min-height:100vh;display:grid;place-items:center;padding:1rem;background:#0d1117;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;">
-<form method="post" action="/install" style="width:min(100%,32rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
-<div style="font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:#8b949e;">LiroxNotes</div>
-<h1 style="margin:0;font-size:1.7rem;">Install application</h1>
-<p style="margin:0;color:#9aa4b2;line-height:1.6;">Initialize the local application, create the first user, then continue to workspace setup.</p>
-<label style="color:#9aa4b2;">Workspace root<br><input name="workspace_root" value="{}" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label style="color:#9aa4b2;">Username<br><input name="user" value="local" autocomplete="username" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<fieldset style="display:grid;gap:.75rem;border:1px solid #3a4655;border-radius:.75rem;padding:1rem;">
-<legend style="padding:0 .5rem;color:#9aa4b2;">Login method</legend>
-<label><input type="radio" name="auth_mode" value="passwordless" checked> Passwordless for now</label>
-<label><input type="radio" name="auth_mode" value="password"> Use a password</label>
-</fieldset>
-<label style="color:#9aa4b2;">Password<br><input type="password" name="password" autocomplete="new-password" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.6rem;background:#38bdf8;color:#081018;font-weight:700;cursor:pointer;">Install</button>
-</form>
-</main>"#,
-            html_escape(
-                &app_workspace_root(paths)
-                    .unwrap_or_else(|_| default_workspace_root(paths))
-                    .to_string_lossy()
-            )
-        ),
-    )
+    layouts::html_page("Install LiroxNotes", &components::install_page_body(paths))
 }
 
 fn html_escape(value: &str) -> String {
@@ -1156,7 +1088,7 @@ fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpRes
         on_select_note: None
     }));
 
-    html_page("LiroxNotes", &body)
+    layouts::html_page("LiroxNotes", &body)
 }
 
 #[get("/")]
@@ -1916,39 +1848,7 @@ pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
-            .service(index)
-            .service(login)
-            .service(save_login)
-            .service(logout)
-            .service(install)
-            .service(save_install)
-            .service(onboarding)
-            .service(save_onboarding)
-            .service(workspace_page)
-            .service(note_page)
-            .service(auth_root_api)
-            .service(auth_login_api)
-            .service(auth_logout_api)
-            .service(auth_api)
-            .service(install_api)
-            .service(workspaces_api)
-            .service(create_workspace_api)
-            .service(workspace_resource_api)
-            .service(sync_workspace_api)
-            .service(get_workspace_file_api)
-            .service(put_workspace_file_api)
-            .service(delete_workspace_file_api)
-            .service(conflicts_api)
-            .service(trash_api)
-            .service(repositories_api)
-            .service(repository_api)
-            .service(connect_repository_api)
-            .service(disconnect_repository_api)
-            .service(save_note)
-            .service(notes_preflight)
-            .service(workspace_api)
-            .service(workspace_preflight)
-            .service(api_preflight)
+            .configure(routes::configure)
             .service(Files::new("/assets", "crates/app/assets"))
     })
     .bind(("127.0.0.1", port))?

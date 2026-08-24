@@ -59,3 +59,121 @@
     @apply bg-theme-accent/30;
   }
 }
+
+@layer components {
+  .screen-shell {
+    @apply grid min-h-screen place-items-center bg-shell-bg px-4 text-theme-text;
+  }
+
+  .panel-card {
+    @apply w-full rounded-2xl border border-shell-border bg-shell-panel p-6 shadow-2xl;
+  }
+
+  .panel-card-lg {
+    @apply max-w-2xl rounded-3xl lg:p-8;
+  }
+
+  .panel-card-md {
+    @apply max-w-md;
+  }
+
+  .panel-card-xl {
+    @apply max-w-xl;
+  }
+
+  .app-eyebrow {
+    @apply mb-2 text-[10px] font-medium uppercase tracking-[0.18em] text-theme-subtle;
+  }
+
+  .sidebar-heading {
+    @apply mb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-theme-subtle;
+  }
+
+  .section-copy {
+    @apply mt-2 text-sm text-theme-muted;
+  }
+
+  .field-label {
+    @apply block text-sm text-theme-muted;
+  }
+
+  .field-input {
+    @apply mt-2 w-full rounded-2xl border border-shell-border bg-shell-bg px-4 py-3 text-theme-text outline-none focus:border-theme-accent;
+  }
+
+  .field-input-compact {
+    @apply mt-2 w-full rounded-lg border border-shell-border bg-shell-bg px-3 py-2 text-theme-text outline-none focus:border-theme-accent;
+  }
+
+  .choice-group {
+    @apply grid gap-3 rounded-2xl border border-shell-border bg-shell-bg p-4;
+  }
+
+  .choice-legend {
+    @apply px-2 text-sm text-theme-muted;
+  }
+
+  .choice-option {
+    @apply flex items-center gap-3 text-sm text-theme-text;
+  }
+
+  .warning-banner {
+    @apply rounded-2xl border border-theme-warn/30 bg-theme-warn/10 px-4 py-3 text-sm text-theme-warn;
+  }
+
+  .primary-button {
+    @apply rounded-2xl bg-theme-accent px-4 py-3 font-semibold text-shell-bg;
+  }
+
+  .primary-button-block {
+    @apply mt-5 w-full rounded-lg bg-theme-accent px-4 py-2 font-semibold text-shell-bg;
+  }
+
+  .sidebar-list {
+    @apply list-none p-0 text-ui leading-6;
+  }
+
+  .sidebar-nav-button {
+    @apply block w-full rounded px-2 py-1 text-left text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text;
+  }
+
+  .sidebar-item-button {
+    @apply flex w-full items-center gap-2 rounded px-2 py-1 text-left text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text;
+  }
+
+  .sidebar-item-active {
+    @apply rounded-md bg-theme-surface/90 text-theme-text;
+  }
+
+  .sidebar-item-idle {
+    @apply rounded-md text-theme-muted hover:bg-theme-surface/60 hover:text-theme-text;
+  }
+
+  .note-path {
+    @apply shrink-0 text-[10px] text-theme-subtle;
+  }
+
+  .note-label-chip {
+    @apply rounded bg-theme-surface px-1.5 py-px text-[10px] text-theme-subtle;
+  }
+
+  .topbar-shell {
+    @apply grid h-11 grid-cols-1 border-b border-shell-border bg-shell-bg lg:grid-cols-[18rem_1fr];
+  }
+
+  .topbar-workspace-button {
+    @apply flex h-7 min-w-0 items-center gap-2 rounded-md bg-theme-surface/70 px-2 text-[11px] text-theme-muted;
+  }
+
+  .topbar-action {
+    @apply rounded bg-theme-surface/70 px-2 py-px text-theme-muted hover:text-theme-text;
+  }
+
+  .statusbar-shell {
+    @apply grid h-9 grid-cols-1 border-t border-shell-border bg-shell-chrome text-[11px] lg:grid-cols-[18rem_1fr];
+  }
+
+  .status-pill {
+    @apply flex items-center gap-1 rounded px-2 py-px text-theme-muted;
+  }
+}
