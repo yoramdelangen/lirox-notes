@@ -1,0 +1,27 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### get file
+GET {{host}}/api/workspaces/{{workspace}}/files/{{note}}
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### invalid path
+GET {{host}}/api/workspaces/{{workspace}}/files/%2E%2E/secret.md
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### non-markdown path
+GET {{host}}/api/workspaces/{{workspace}}/files/notes/manual-test.txt
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### missing workspace
+GET {{host}}/api/workspaces/missing/files/{{note}}
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+GET {{host}}/api/workspaces/{{workspace}}/files/{{note}}
+Cookie: lirox_session=invalid

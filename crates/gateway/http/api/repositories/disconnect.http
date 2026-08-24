@@ -1,0 +1,19 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### disconnect repository
+POST {{host}}/api/repositories/{{repo}}/disconnect
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### missing repository
+POST {{host}}/api/repositories/missing/disconnect
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+POST {{host}}/api/repositories/{{repo}}/disconnect
+Cookie: lirox_session=invalid

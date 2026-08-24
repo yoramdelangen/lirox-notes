@@ -1,0 +1,37 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### update note through legacy route
+PUT {{host}}/api/notes/{{note}}
+Content-Type: text/markdown
+Cookie: {{login.response.headers.Set-Cookie}}
+
+# Manual Legacy Test
+
+Updated through /api/notes.
+
+### invalid path
+PUT {{host}}/api/notes/%2E%2E/secret.md
+Content-Type: text/markdown
+Cookie: {{login.response.headers.Set-Cookie}}
+
+# Should fail
+
+### non-markdown path
+PUT {{host}}/api/notes/notes/manual-legacy.txt
+Content-Type: text/plain
+Cookie: {{login.response.headers.Set-Cookie}}
+
+Should fail
+
+### unauthenticated
+PUT {{host}}/api/notes/{{note}}
+Content-Type: text/markdown
+Cookie: lirox_session=invalid
+
+# Should fail

@@ -1,0 +1,21 @@
+### login as local
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### login with blank user falls back to local
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": ""
+}
+
+### login with empty JSON falls back to local
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{}

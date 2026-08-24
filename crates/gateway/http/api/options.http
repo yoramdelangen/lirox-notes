@@ -1,0 +1,11 @@
+### generic api preflight
+OPTIONS {{host}}/api/workspaces
+Origin: http://localhost:8989
+Access-Control-Request-Method: GET
+Access-Control-Request-Headers: content-type
+
+### generic api preflight for nested route
+OPTIONS {{host}}/api/repositories/demo/connect
+Origin: http://localhost:8989
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: content-type

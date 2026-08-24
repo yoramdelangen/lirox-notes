@@ -1,0 +1,27 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### delete file
+DELETE {{host}}/api/workspaces/{{workspace}}/files/{{note}}
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### delete missing file is ok
+DELETE {{host}}/api/workspaces/{{workspace}}/files/notes/missing.md
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### invalid path
+DELETE {{host}}/api/workspaces/{{workspace}}/files/%2E%2E/secret.md
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### missing workspace
+DELETE {{host}}/api/workspaces/missing/files/{{note}}
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+DELETE {{host}}/api/workspaces/{{workspace}}/files/{{note}}
+Cookie: lirox_session=invalid

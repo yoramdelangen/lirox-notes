@@ -1,0 +1,19 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### get default workspace view
+GET {{host}}/api/workspace/
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### get selected note workspace view
+GET {{host}}/api/workspace/{{note}}
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+GET {{host}}/api/workspace/{{note}}
+Cookie: lirox_session=invalid

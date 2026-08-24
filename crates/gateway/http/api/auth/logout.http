@@ -1,0 +1,15 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### logout current session
+POST {{host}}/api/auth/logout
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### logout again is idempotent
+POST {{host}}/api/auth/logout
+Cookie: {{login.response.headers.Set-Cookie}}

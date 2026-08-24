@@ -1,0 +1,19 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### sync workspace
+POST {{host}}/api/workspaces/{{workspace}}/sync
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### missing workspace
+POST {{host}}/api/workspaces/missing/sync
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+POST {{host}}/api/workspaces/{{workspace}}/sync
+Cookie: lirox_session=invalid

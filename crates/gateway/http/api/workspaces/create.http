@@ -1,0 +1,34 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### create local workspace
+POST {{host}}/api/workspaces
+Content-Type: application/json
+Cookie: {{login.response.headers.Set-Cookie}}
+
+{
+  "workspace_path": "{{workspacePath}}",
+  "repo_url": "",
+  "branch": "main"
+}
+
+### create workspace with default path
+POST {{host}}/api/workspaces
+Content-Type: application/json
+Cookie: {{login.response.headers.Set-Cookie}}
+
+{}
+
+### unauthenticated
+POST {{host}}/api/workspaces
+Content-Type: application/json
+Cookie: lirox_session=invalid
+
+{
+  "workspace_path": "{{workspacePath}}"
+}

@@ -1,0 +1,15 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### arbitrary auth path uses same session response
+GET {{host}}/api/auth/session
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### nested arbitrary auth path
+GET {{host}}/api/auth/local/profile
+Cookie: {{login.response.headers.Set-Cookie}}

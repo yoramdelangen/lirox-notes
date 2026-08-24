@@ -1,0 +1,5 @@
+### workspace preflight
+OPTIONS {{host}}/api/workspace/{{note}}
+Origin: http://localhost:8989
+Access-Control-Request-Method: GET
+Access-Control-Request-Headers: content-type

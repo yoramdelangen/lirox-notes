@@ -1,0 +1,19 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### list conflicts
+GET {{host}}/api/workspaces/{{workspace}}/conflicts
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### missing workspace
+GET {{host}}/api/workspaces/missing/conflicts
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+GET {{host}}/api/workspaces/{{workspace}}/conflicts
+Cookie: lirox_session=invalid

@@ -1,0 +1,45 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### connect repository
+POST {{host}}/api/repositories/{{repo}}/connect
+Content-Type: application/json
+Cookie: {{login.response.headers.Set-Cookie}}
+
+{
+  "repo_url": "git@example.com:me/notes.git",
+  "branch": "main"
+}
+
+### connect with blank branch keeps existing/default branch
+POST {{host}}/api/repositories/{{repo}}/connect
+Content-Type: application/json
+Cookie: {{login.response.headers.Set-Cookie}}
+
+{
+  "repo_url": "git@example.com:me/notes.git",
+  "branch": ""
+}
+
+### missing repository
+POST {{host}}/api/repositories/missing/connect
+Content-Type: application/json
+Cookie: {{login.response.headers.Set-Cookie}}
+
+{
+  "repo_url": "git@example.com:me/notes.git"
+}
+
+### unauthenticated
+POST {{host}}/api/repositories/{{repo}}/connect
+Content-Type: application/json
+Cookie: lirox_session=invalid
+
+{
+  "repo_url": "git@example.com:me/notes.git"
+}

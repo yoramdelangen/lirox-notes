@@ -1,0 +1,15 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### list workspaces
+GET {{host}}/api/workspaces
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### unauthenticated
+GET {{host}}/api/workspaces
+Cookie: lirox_session=invalid

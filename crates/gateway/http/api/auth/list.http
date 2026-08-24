@@ -1,0 +1,18 @@
+# @name login
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "user": "local"
+}
+
+### authenticated session
+GET {{host}}/api/auth
+Cookie: {{login.response.headers.Set-Cookie}}
+
+### current session
+GET {{host}}/api/auth
+
+### current session with cookies disabled/manual check
+GET {{host}}/api/auth
+Cookie: lirox_session=invalid
