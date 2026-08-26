@@ -1,6 +1,5 @@
 use crate::{FrontendState, APP_CSS};
 use dioxus::prelude::*;
-use liroxnotes_shared::APP_NAME;
 
 use super::super::layouts::WorkflowLayout;
 use super::authenticating::AuthenticatingRoute;
@@ -38,7 +37,6 @@ pub(crate) fn WorkflowShell(
         document::Stylesheet { href: APP_CSS }
         WorkflowLayout {
             div {
-                p { class: "app-eyebrow", "{APP_NAME}" }
                 match state {
                     FrontendState::Loading => rsx! {
                         AuthenticatingRoute { message }

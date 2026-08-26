@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use liroxnotes_shared::WorkspaceView;
 use serde::Deserialize;
 
 #[cfg(target_arch = "wasm32")]
@@ -271,6 +272,20 @@ pub fn App() -> Element {
 async fn fetch_auth_session() -> Option<AuthSession> {
     let response = fetch_text("/api/auth", "GET", None).await?;
     serde_json::from_str::<AuthSession>(&response).ok()
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[cfg(target_arch = "wasm32")]
+async fn fetch_workspace_view(selected_note_path: Option<&str>) -> Option<WorkspaceView> {
+    let path = selected_note_path.unwrap_or("");
+    let response = fetch_text(&format!("/api/workspace/{path}"), "GET", None).await?;
+    serde_json::from_str::<WorkspaceView>(&response).ok()
+}
+
+#[allow(dead_code)]
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_workspace_view(_: Option<&str>) -> Option<WorkspaceView> {
+    None
 }
 
 #[cfg(target_arch = "wasm32")]

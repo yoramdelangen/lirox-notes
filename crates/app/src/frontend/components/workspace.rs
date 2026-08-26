@@ -352,7 +352,6 @@ fn NoteRow(
     }
 }
 
-#[allow(dead_code)]
 #[component]
 pub(crate) fn TopBar(workspace_name: String, note_title: String, source: String) -> Element {
     rsx! {
@@ -365,16 +364,14 @@ pub(crate) fn TopBar(workspace_name: String, note_title: String, source: String)
             }
             div { class: "flex min-w-0 items-center justify-between gap-3 px-3 lg:px-4",
                 div { class: "flex min-w-0 items-center gap-2 text-ui",
-                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-theme-warn" }
-                    h1 { class: "truncate font-medium text-theme-text", "data-lirox-note-title": "true", "{note_title}" }
+                    // span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-theme-warn" }
+                    // h1 { class: "truncate font-medium text-theme-text", "data-lirox-note-title": "true", "{note_title}" }
                 }
                 div { class: "flex shrink-0 items-center gap-2 text-[11px] text-theme-subtle",
-                    button { class: "topbar-action", type: "button", "data-lirox-save-button": "true", "Saved" }
-                    span { "data-lirox-save-state": "true", "Saved" }
-                    a { class: "topbar-action", href: "/onboarding", "Setup" }
-                    form { method: "post", action: "/logout",
-                        button { class: "topbar-action", type: "submit", "Logout" }
-                    }
+                    // button { class: "topbar-action", type: "button", "data-lirox-save-button": "true", "Saved" }
+                    // form { method: "post", action: "/logout",
+                    //     button { class: "topbar-action", type: "submit", "Logout" }
+                    // }
                     span { "{source}" }
                 }
             }
@@ -391,7 +388,7 @@ pub(crate) fn EditorPane(
     let _ = on_action;
 
     rsx! {
-        section { class: "flex h-full min-h-0 flex-col bg-shell-editor",
+        section { class: "flex h-full min-h-0 flex-col pt-4 bg-shell-editor",
             div {
                 class: "min-h-0 flex-1 w-full font-mono text-ui leading-6 text-theme-text",
                 "data-lirox-editor-root": "true",
