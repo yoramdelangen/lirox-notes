@@ -5,7 +5,6 @@ use liroxnotes_shared::WorkspaceView;
 use super::super::components::{EditorPane, Sidebar, StatusBar, TopBar};
 use super::super::layouts::WorkspaceLayout;
 
-#[allow(dead_code)]
 #[component]
 pub fn WorkspaceShell(
     view: WorkspaceView,
@@ -15,7 +14,7 @@ pub fn WorkspaceShell(
     on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
-    let labels_notes = matches!(sidebar_mode, SidebarMode::LabelsNotes);
+    let labels_notes = false;
 
     rsx! {
         document::Link { rel: "icon", href: "data:," }

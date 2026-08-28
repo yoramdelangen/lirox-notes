@@ -91,7 +91,6 @@ struct WorkspaceRequest {
     branch: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize)]
 struct InstallRequest {
     workspace_root: Option<String>,

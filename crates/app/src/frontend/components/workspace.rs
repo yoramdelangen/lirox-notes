@@ -3,12 +3,57 @@ use dioxus::prelude::*;
 use liroxnotes_shared::{LabelSummary, NoteSummary, TreeEntry, TreeKind, WorkspaceView, APP_NAME};
 use std::collections::BTreeSet;
 
-#[allow(dead_code)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SidebarView {
+    FileTree,
+    Oil,
+    LabelsNotes,
+    Files,
+}
+
+impl SidebarView {
+    fn from_mode(mode: SidebarMode) -> Self {
+        match mode {
+            SidebarMode::Tree => Self::FileTree,
+            SidebarMode::LabelsNotes => Self::LabelsNotes,
+            SidebarMode::Files => Self::Files,
+        }
+    }
+}
+
+#[component]
+fn DirtyMarker(note_path: String) -> Element {
+    rsx! {
+        span {
+            class: "ml-auto shrink-0 text-theme-accent/70",
+            "data-lirox-sidebar-dirty": "true",
+            "data-note-path": note_path,
+        }
+    }
+}
+
 fn note_href(slug: &str, path: &str) -> String {
     format!("/workspace/{slug}/note/{path}")
 }
 
-#[allow(dead_code)]
+fn sidebar_label(label: &str) -> String {
+    label.strip_suffix(".md").unwrap_or(label).to_string()
+}
+
+fn folder_note_path(notes: &[NoteSummary], folder_path: &str) -> Option<String> {
+    let folder_name = folder_path.rsplit('/').next().unwrap_or(folder_path);
+    let readme = format!("{folder_path}/README.md");
+    let same_name = format!("{folder_path}/{folder_name}.md");
+
+    if notes.iter().any(|note| note.path == readme) {
+        Some(readme)
+    } else if notes.iter().any(|note| note.path == same_name) {
+        Some(same_name)
+    } else {
+        None
+    }
+}
+
 #[component]
 pub(crate) fn Sidebar(
     view: WorkspaceView,
@@ -19,6 +64,7 @@ pub(crate) fn Sidebar(
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let focused = matches!(focus, FocusTarget::Sidebar);
+    let sidebar_view = SidebarView::from_mode(sidebar_mode);
     let shell_classes = if focused {
         "h-full min-h-0 overflow-auto border-r border-theme-accent/50 bg-shell-panel px-3 pt-1 pb-3 outline outline-1 outline-theme-accent/40"
     } else {
@@ -30,19 +76,18 @@ pub(crate) fn Sidebar(
             section { class: "space-y-3",
                 div {
                     div { class: "sidebar-heading", "{APP_NAME}" }
-                    match sidebar_mode {
-                        SidebarMode::Tree => rsx! {
-                            ul { class: "sidebar-list",
-                                for row in view.tree {
-                                    TreeRow { slug: view.slug.clone(), row, on_select_note: on_select_note.clone() }
-                                }
-                            }
+                    match sidebar_view {
+                        SidebarView::FileTree => rsx! {
+                            FileTreeSidebar { view: view.clone(), on_select_note: on_select_note.clone() }
                         },
-                        SidebarMode::LabelsNotes => rsx! {
+                        SidebarView::Oil => rsx! {
+                            OilSidebar { view: view.clone(), browser_dir, on_action: on_action.clone(), on_select_note: on_select_note.clone() }
+                        },
+                        SidebarView::LabelsNotes => rsx! {
                             LabelsNotesSidebar { view: view.clone(), on_select_note: on_select_note.clone() }
                         },
-                        SidebarMode::Files => rsx! {
-                            FilesSidebar { view: view.clone(), browser_dir: browser_dir.clone(), on_action: on_action.clone(), on_select_note: on_select_note.clone() }
+                        SidebarView::Files => rsx! {
+                            FilesListSidebar { view: view.clone(), on_select_note: on_select_note.clone() }
                         },
                     }
                 }
@@ -51,7 +96,20 @@ pub(crate) fn Sidebar(
     }
 }
 
-#[allow(dead_code)]
+#[component]
+fn FileTreeSidebar(
+    view: WorkspaceView,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
+    rsx! {
+        ul { class: "sidebar-list",
+            for row in view.tree {
+                TreeRow { slug: view.slug.clone(), notes: view.notes.clone(), selected_note_path: view.selected_note.path.clone(), row, on_select_note: on_select_note.clone() }
+            }
+        }
+    }
+}
+
 #[component]
 fn LabelsNotesSidebar(
     view: WorkspaceView,
@@ -79,9 +137,8 @@ fn LabelsNotesSidebar(
     }
 }
 
-#[allow(dead_code)]
 #[component]
-fn FilesSidebar(
+fn OilSidebar(
     view: WorkspaceView,
     browser_dir: String,
     on_action: Option<EventHandler<AppAction>>,
@@ -112,7 +169,23 @@ fn FilesSidebar(
     }
 }
 
-#[allow(dead_code)]
+#[component]
+fn FilesListSidebar(
+    view: WorkspaceView,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
+    rsx! {
+        div { class: "space-y-3",
+            div { class: "sidebar-heading", "Files" }
+            ul { class: "sidebar-list",
+                for note in view.notes {
+                    FileRow { slug: view.slug.clone(), note, on_select_note: on_select_note.clone() }
+                }
+            }
+        }
+    }
+}
+
 fn parent_directory(path: &str) -> Option<&str> {
     if path.is_empty() {
         None
@@ -121,7 +194,6 @@ fn parent_directory(path: &str) -> Option<&str> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 struct BrowserEntry {
     kind: TreeKind,
@@ -129,7 +201,6 @@ struct BrowserEntry {
     path: String,
 }
 
-#[allow(dead_code)]
 fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry> {
     let mut folders = BTreeSet::new();
     let mut files = Vec::new();
@@ -182,19 +253,32 @@ fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry
     entries
 }
 
-#[allow(dead_code)]
 #[component]
-fn TreeRow(slug: String, row: TreeEntry, on_select_note: Option<EventHandler<String>>) -> Element {
+fn TreeRow(
+    slug: String,
+    notes: Vec<NoteSummary>,
+    selected_note_path: String,
+    row: TreeEntry,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
     let indent = if row.depth == 0 { "pl-1" } else { "pl-4" };
-    let classes = if row.active {
-        "flex items-center sidebar-item-active"
-    } else {
-        "flex items-center sidebar-item-idle"
-    };
     let icon = match row.kind {
         TreeKind::Folder => "▸",
         TreeKind::File => "",
     };
+    let row_path = row.path.clone();
+    let folder_target = folder_note_path(&notes, &row.path);
+    let active = if row.kind == TreeKind::Folder {
+        folder_target.as_deref() == Some(selected_note_path.as_str())
+    } else {
+        row.active
+    };
+    let classes = if active {
+        "flex items-center sidebar-item-active"
+    } else {
+        "flex items-center sidebar-item-idle"
+    };
+    let label = sidebar_label(&row.label);
 
     rsx! {
         li {
@@ -205,12 +289,21 @@ fn TreeRow(slug: String, row: TreeEntry, on_select_note: Option<EventHandler<Str
                         if let Some(on_select_note) = &on_select_note { on_select_note.call(row.path.clone()); }
                     },
                         span { class: "w-3 shrink-0 text-theme-subtle", "{icon}" }
-                        span { class: "truncate", "{row.label}" }
+                        span { class: "truncate", "{label}" }
+                        DirtyMarker { note_path: row_path }
+                    }
+                } else if let Some(target) = folder_target {
+                    a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &target), onclick: move |event| {
+                        event.prevent_default();
+                        if let Some(on_select_note) = &on_select_note { on_select_note.call(target.clone()); }
+                    },
+                        span { class: "w-3 shrink-0 text-theme-subtle", "{icon}" }
+                        span { class: "truncate", "{label}" }
                     }
                 } else {
                     div { class: format!("{classes} w-full {indent} pr-2"),
                         span { class: "w-3 shrink-0 text-theme-subtle", "{icon}" }
-                        span { class: "truncate", "{row.label}" }
+                        span { class: "truncate", "{label}" }
                     }
                 }
             }
@@ -218,7 +311,6 @@ fn TreeRow(slug: String, row: TreeEntry, on_select_note: Option<EventHandler<Str
     }
 }
 
-#[allow(dead_code)]
 #[component]
 fn BrowserEntryRow(
     slug: String,
@@ -233,15 +325,30 @@ fn BrowserEntryRow(
     let path_for_lookup = path.clone();
     let path_for_fallback = path;
     let label_for_fallback = label.clone();
+    let display_label = sidebar_label(&label);
     match kind {
-        TreeKind::Folder => rsx! {
-            li {
-                button { class: "sidebar-item-button", onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::SetBrowserDir(path_for_action.clone())) },
-                    span { class: "w-4 shrink-0 text-theme-subtle", "󰉋" }
-                    span { "{label}" }
+        TreeKind::Folder => {
+            let folder_target = folder_note_path(&notes, &path_for_lookup);
+
+            rsx! {
+                li {
+                    if let Some(target) = folder_target {
+                        a { class: "sidebar-item-button", href: note_href(&slug, &target), onclick: move |event| {
+                            event.prevent_default();
+                            if let Some(on_select_note) = &on_select_note { on_select_note.call(target.clone()); }
+                        },
+                            span { class: "w-4 shrink-0 text-theme-subtle", "󰉋" }
+                            span { "{display_label}" }
+                        }
+                    } else {
+                        button { class: "sidebar-item-button", onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::SetBrowserDir(path_for_action.clone())) },
+                            span { class: "w-4 shrink-0 text-theme-subtle", "󰉋" }
+                            span { "{display_label}" }
+                        }
+                    }
                 }
             }
-        },
+        }
         TreeKind::File => {
             let note = notes
                 .into_iter()
@@ -259,6 +366,7 @@ fn BrowserEntryRow(
             } else {
                 "sidebar-item-idle"
             };
+            let note_path = note.path.clone();
 
             rsx! {
                 li {
@@ -267,7 +375,8 @@ fn BrowserEntryRow(
                         if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
                     },
                         span { class: "w-4 shrink-0 text-theme-subtle", "󰈔" }
-                        span { class: "truncate font-medium", "{label}" }
+                        span { class: "truncate font-medium", "{display_label}" }
+                        DirtyMarker { note_path }
                     }
                 }
             }
@@ -275,7 +384,6 @@ fn BrowserEntryRow(
     }
 }
 
-#[allow(dead_code)]
 #[component]
 fn FileRow(
     slug: String,
@@ -296,14 +404,16 @@ fn FileRow(
             },
                 div { class: "flex items-center justify-between gap-2",
                     span { class: "truncate font-medium", "{note.title}" }
-                    span { class: "note-path", "{note.path}" }
+                    div { class: "flex items-center gap-2",
+                        DirtyMarker { note_path: note.path.clone() }
+                        span { class: "note-path", "{note.path}" }
+                    }
                 }
             }
         }
     }
 }
 
-#[allow(dead_code)]
 #[component]
 fn LabelRow(label: LabelSummary) -> Element {
     let depth = label.name.matches('/').count();
@@ -319,7 +429,6 @@ fn LabelRow(label: LabelSummary) -> Element {
     }
 }
 
-#[allow(dead_code)]
 #[component]
 fn NoteRow(
     slug: String,
@@ -340,7 +449,10 @@ fn NoteRow(
             },
                 div { class: "flex items-center justify-between gap-2",
                     span { class: "truncate font-medium", "{note.title}" }
-                    span { class: "note-path", "{note.path}" }
+                    div { class: "flex items-center gap-2",
+                        DirtyMarker { note_path: note.path.clone() }
+                        span { class: "note-path", "{note.path}" }
+                    }
                 }
                 div { class: "mt-0.5 flex flex-wrap gap-1",
                     for label in note.labels.iter().take(3) {
@@ -379,7 +491,6 @@ pub(crate) fn TopBar(workspace_name: String, note_title: String, source: String)
     }
 }
 
-#[allow(dead_code)]
 #[component]
 pub(crate) fn EditorPane(
     view: WorkspaceView,
@@ -403,7 +514,6 @@ pub(crate) fn EditorPane(
     }
 }
 
-#[allow(dead_code)]
 #[component]
 pub(crate) fn StatusBar(
     note_path: String,
@@ -432,7 +542,7 @@ pub(crate) fn StatusBar(
             div { class: "flex items-center justify-end gap-2 px-3",
                 span { class: "truncate text-theme-subtle", "data-lirox-note-path": "true", "{note_path}" }
                 StatusPill { icon: "", label: branch }
-                StatusPill { icon: "+", label: changed_notes.to_string() }
+                ChangeStatusPill { changed_notes }
                 StatusPill { icon: "󰎄", label: note_count.to_string() }
                 StatusPill { icon: "󱁕", label: source }
             }
@@ -440,7 +550,6 @@ pub(crate) fn StatusBar(
     }
 }
 
-#[allow(dead_code)]
 #[component]
 fn ModeButton(
     label: &'static str,
@@ -460,13 +569,28 @@ fn ModeButton(
     }
 }
 
-#[allow(dead_code)]
+#[component]
+fn ChangeStatusPill(changed_notes: usize) -> Element {
+    let label = if changed_notes == 1 {
+        "1 change".to_string()
+    } else {
+        format!("{changed_notes} changes")
+    };
+
+    rsx! {
+        span { class: "status-pill",
+            span { class: "font-icon w-3 shrink-0 text-center text-[10px] text-theme-accent/70", "+" }
+            span { "data-lirox-change-label": "true", "{label}" }
+        }
+    }
+}
+
 #[component]
 fn StatusPill(icon: &'static str, label: String) -> Element {
     rsx! {
         span { class: "status-pill",
             span { class: "font-icon w-3 shrink-0 text-center text-[10px] text-theme-accent/70", "{icon}" }
-            span { "data-lirox-changed-count": "true", "{label}" }
+            span { "{label}" }
         }
     }
 }

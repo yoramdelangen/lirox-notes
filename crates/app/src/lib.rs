@@ -17,7 +17,6 @@ const EDITOR_JS: Asset = asset!("/assets/editor.js");
 const EDITOR_BRIDGE_JS: Asset = asset!("/assets/editor-bridge.js");
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum FrontendState {
     Loading,
     Install,
@@ -26,7 +25,6 @@ pub enum FrontendState {
     Ready,
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Deserialize)]
 struct AuthSession {
     installed: bool,
@@ -37,7 +35,6 @@ struct AuthSession {
     workspace_root: String,
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn frontend_state_from_auth(session: &AuthSession) -> FrontendState {
     frontend_state_from_auth_flags(
         session.installed,
@@ -62,14 +59,12 @@ pub fn frontend_state_from_auth_flags(
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FocusTarget {
     Sidebar,
     Editor,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SidebarMode {
     Tree,
@@ -77,7 +72,6 @@ pub enum SidebarMode {
     Files,
 }
 
-#[allow(dead_code)]
 impl SidebarMode {
     fn next(self) -> Self {
         match self {
@@ -88,7 +82,6 @@ impl SidebarMode {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq)]
 pub enum AppAction {
     FocusSidebar,
@@ -99,7 +92,6 @@ pub enum AppAction {
     GoUpDirectory,
 }
 
-#[allow(dead_code)]
 #[cfg(target_arch = "wasm32")]
 impl AppAction {
     fn from_str(action: &str) -> Option<Self> {
@@ -274,7 +266,6 @@ async fn fetch_auth_session() -> Option<AuthSession> {
     serde_json::from_str::<AuthSession>(&response).ok()
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[cfg(target_arch = "wasm32")]
 async fn fetch_workspace_view(selected_note_path: Option<&str>) -> Option<WorkspaceView> {
     let path = selected_note_path.unwrap_or("");
@@ -282,7 +273,6 @@ async fn fetch_workspace_view(selected_note_path: Option<&str>) -> Option<Worksp
     serde_json::from_str::<WorkspaceView>(&response).ok()
 }
 
-#[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
 async fn fetch_workspace_view(_: Option<&str>) -> Option<WorkspaceView> {
     None

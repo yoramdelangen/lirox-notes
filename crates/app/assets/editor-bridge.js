@@ -1,7 +1,8 @@
 const editorSelector = "[data-lirox-editor-root]";
 const saveButtonSelector = "[data-lirox-save-button]";
 const saveStateSelector = "[data-lirox-save-state]";
-const changedCountSelector = "[data-lirox-changed-count]";
+const changeLabelSelector = "[data-lirox-change-label]";
+const sidebarDirtySelector = "[data-lirox-sidebar-dirty]";
 
 const editorState = new WeakMap();
 const editorRoots = new WeakSet();
@@ -24,6 +25,18 @@ const setText = (root, selector, value) => {
   });
 };
 
+const syncSidebarDirty = (root, dirty) => {
+  const notePath = root.dataset.notePath ?? "";
+
+  document.querySelectorAll(sidebarDirtySelector).forEach((node) => {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+
+    node.textContent = node.dataset.notePath === notePath && dirty ? "+" : "";
+  });
+};
+
 const syncChrome = (root, detail) => {
   const savedDoc = editorState.get(root)?.savedDoc ?? root.dataset.initialDoc ?? "";
   const dirty = detail.doc !== savedDoc;
@@ -31,7 +44,8 @@ const syncChrome = (root, detail) => {
   const title = root.dataset.noteTitle || detail.title;
 
   setText(root, saveStateSelector, label);
-  setText(root, changedCountSelector, dirty ? "1" : "0");
+  setText(root, changeLabelSelector, dirty ? "1 change" : "0 changes");
+  syncSidebarDirty(root, dirty);
 
   const button = document.querySelector(saveButtonSelector);
   if (button) {
@@ -173,6 +187,7 @@ const refreshEditorRoot = async (root) => {
   state.savedDoc = nextDoc;
   state.detail = null;
   editorState.set(root, state);
+  syncSidebarDirty(root, false);
 
   const api = editorApi();
   if (api) {
