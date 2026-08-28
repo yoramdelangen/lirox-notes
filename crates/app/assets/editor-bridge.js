@@ -145,6 +145,11 @@ const saveCurrentDoc = async (root) => {
     return;
   }
 
+  if (root.dataset.virtualNote === "true" && state.detail.doc.trim() === "") {
+    syncChrome(root, state.detail);
+    return;
+  }
+
   const button = document.querySelector(saveButtonSelector);
   if (button) {
     button.textContent = "Saving...";

@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use liroxnotes_shared::WorkspaceView;
+use liroxnotes_shared::{NoteSummary, WorkspaceView};
 
 #[cfg(target_arch = "wasm32")]
 use crate::{fetch_workspace_view, workspace_note_path_from_location};
@@ -9,6 +9,39 @@ use super::super::super::components::{EditorPane, Sidebar, StatusBar, TopBar};
 
 fn parent_directory(path: &str) -> &str {
     path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("")
+}
+
+fn fallback_title(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or(path).trim_end_matches(".md").replace('-', " ")
+}
+
+fn virtual_workspace_view(view: WorkspaceView, path: &str) -> WorkspaceView {
+    let mut notes = view.notes.clone();
+    if !notes.iter().any(|note| note.path == path) {
+        notes.push(NoteSummary {
+            path: path.to_string(),
+            title: fallback_title(path),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: false,
+        });
+    }
+    for note in &mut notes {
+        note.active = note.path == path;
+    }
+
+    WorkspaceView {
+        selected_note: notes.iter().find(|note| note.path == path).cloned().unwrap_or(NoteSummary {
+            path: path.to_string(),
+            title: fallback_title(path),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: true,
+        }),
+        selected_note_body: String::new(),
+        notes,
+        ..view
+    }
 }
 
 #[component]
@@ -62,8 +95,19 @@ pub(crate) fn ReadyRoute() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             let mut workspace = workspace;
+            let current_view = view.clone();
             spawn(async move {
-                workspace.set(fetch_workspace_view(Some(&path)).await);
+                let next_view = fetch_workspace_view(Some(&path))
+                    .await
+                    .map(|next| {
+                        if next.selected_note.path == path {
+                            next
+                        } else {
+                            virtual_workspace_view(next, &path)
+                        }
+                    })
+                    .or_else(|| Some(virtual_workspace_view(current_view, &path)));
+                workspace.set(next_view);
             });
         }
     };

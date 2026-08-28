@@ -54,6 +54,48 @@ fn folder_note_path(notes: &[NoteSummary], folder_path: &str) -> Option<String> 
     }
 }
 
+fn default_folder_note_path(folder_path: &str) -> String {
+    format!("{folder_path}/README.md")
+}
+
+fn root_sidebar_notes(notes: &[NoteSummary]) -> Vec<NoteSummary> {
+    ["README.md", "HOME.md"]
+        .into_iter()
+        .filter_map(|path| notes.iter().find(|note| note.path == path).cloned())
+        .collect()
+}
+
+fn hidden_sidebar_note_path(notes: &[NoteSummary], path: &str) -> bool {
+    if matches!(path, "README.md" | "HOME.md") {
+        return true;
+    }
+
+    let Some((dir, file)) = path.rsplit_once('/') else {
+        return false;
+    };
+    let folder_name = dir.rsplit('/').next().unwrap_or(dir);
+
+    matches!(file, "README.md")
+        || (file == format!("{folder_name}.md")
+            && folder_note_path(notes, dir).as_deref() == Some(path))
+}
+
+fn visible_sidebar_notes(notes: &[NoteSummary]) -> Vec<NoteSummary> {
+    notes
+        .iter()
+        .filter(|note| !hidden_sidebar_note_path(notes, &note.path))
+        .cloned()
+        .collect()
+}
+
+fn visible_tree_rows(notes: &[NoteSummary], rows: &[TreeEntry]) -> Vec<TreeEntry> {
+    rows
+        .iter()
+        .filter(|row| row.kind != TreeKind::File || !hidden_sidebar_note_path(notes, &row.path))
+        .cloned()
+        .collect()
+}
+
 #[component]
 pub(crate) fn Sidebar(
     view: WorkspaceView,
@@ -65,6 +107,7 @@ pub(crate) fn Sidebar(
 ) -> Element {
     let focused = matches!(focus, FocusTarget::Sidebar);
     let sidebar_view = SidebarView::from_mode(sidebar_mode);
+    let root_notes = root_sidebar_notes(&view.notes);
     let shell_classes = if focused {
         "h-full min-h-0 overflow-auto border-r border-theme-accent/50 bg-shell-panel px-3 pt-1 pb-3 outline outline-1 outline-theme-accent/40"
     } else {
@@ -76,6 +119,13 @@ pub(crate) fn Sidebar(
             section { class: "space-y-3",
                 div {
                     div { class: "sidebar-heading", "{APP_NAME}" }
+                    if !root_notes.is_empty() {
+                        ul { class: "sidebar-list",
+                            for note in root_notes {
+                                RootNoteRow { slug: view.slug.clone(), note, on_select_note: on_select_note.clone() }
+                            }
+                        }
+                    }
                     match sidebar_view {
                         SidebarView::FileTree => rsx! {
                             FileTreeSidebar { view: view.clone(), on_select_note: on_select_note.clone() }
@@ -101,9 +151,11 @@ fn FileTreeSidebar(
     view: WorkspaceView,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
+    let rows = visible_tree_rows(&view.notes, &view.tree);
+
     rsx! {
         ul { class: "sidebar-list",
-            for row in view.tree {
+            for row in rows {
                 TreeRow { slug: view.slug.clone(), notes: view.notes.clone(), selected_note_path: view.selected_note.path.clone(), row, on_select_note: on_select_note.clone() }
             }
         }
@@ -115,6 +167,8 @@ fn LabelsNotesSidebar(
     view: WorkspaceView,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
+    let notes = visible_sidebar_notes(&view.notes);
+
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden lg:grid lg:grid-cols-[max-content_fit-content(24rem)] lg:gap-2",
             section { class: "min-w-0 w-fit",
@@ -128,7 +182,7 @@ fn LabelsNotesSidebar(
             section { class: "min-w-0 w-full max-w-[24rem] lg:border-l lg:border-shell-border/60 lg:pl-2",
                 div { class: "sidebar-heading", "Notes" }
                 ul { class: "sidebar-list",
-                    for note in view.notes {
+                    for note in notes {
                         NoteRow { slug: view.slug.clone(), note, on_select_note: on_select_note.clone() }
                     }
                 }
@@ -174,11 +228,13 @@ fn FilesListSidebar(
     view: WorkspaceView,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
+    let notes = visible_sidebar_notes(&view.notes);
+
     rsx! {
         div { class: "space-y-3",
             div { class: "sidebar-heading", "Files" }
             ul { class: "sidebar-list",
-                for note in view.notes {
+                for note in notes {
                     FileRow { slug: view.slug.clone(), note, on_select_note: on_select_note.clone() }
                 }
             }
@@ -228,6 +284,9 @@ fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry
         if parts.next().is_some() {
             folders.insert(first.to_string());
         } else {
+            if hidden_sidebar_note_path(notes, &note.path) {
+                continue;
+            }
             files.push(BrowserEntry {
                 kind: TreeKind::File,
                 label: first.to_string(),
@@ -254,6 +313,29 @@ fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry
 }
 
 #[component]
+fn RootNoteRow(slug: String, note: NoteSummary, on_select_note: Option<EventHandler<String>>) -> Element {
+    let classes = if note.active {
+        "sidebar-item-active"
+    } else {
+        "sidebar-item-idle"
+    };
+
+    rsx! {
+        li {
+            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
+                event.prevent_default();
+                if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
+            },
+                div { class: "flex items-center justify-between gap-2",
+                    span { class: "truncate font-medium", "{sidebar_label(&note.path)}" }
+                    DirtyMarker { note_path: note.path.clone() }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn TreeRow(
     slug: String,
     notes: Vec<NoteSummary>,
@@ -267,9 +349,10 @@ fn TreeRow(
         TreeKind::File => "",
     };
     let row_path = row.path.clone();
-    let folder_target = folder_note_path(&notes, &row.path);
+    let folder_target = folder_note_path(&notes, &row.path)
+        .unwrap_or_else(|| default_folder_note_path(&row.path));
     let active = if row.kind == TreeKind::Folder {
-        folder_target.as_deref() == Some(selected_note_path.as_str())
+        folder_target == selected_note_path
     } else {
         row.active
     };
@@ -292,16 +375,11 @@ fn TreeRow(
                         span { class: "truncate", "{label}" }
                         DirtyMarker { note_path: row_path }
                     }
-                } else if let Some(target) = folder_target {
-                    a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &target), onclick: move |event| {
-                        event.prevent_default();
-                        if let Some(on_select_note) = &on_select_note { on_select_note.call(target.clone()); }
-                    },
-                        span { class: "w-3 shrink-0 text-theme-subtle", "{icon}" }
-                        span { class: "truncate", "{label}" }
-                    }
                 } else {
-                    div { class: format!("{classes} w-full {indent} pr-2"),
+                    a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &folder_target), onclick: move |event| {
+                        event.prevent_default();
+                        if let Some(on_select_note) = &on_select_note { on_select_note.call(folder_target.clone()); }
+                    },
                         span { class: "w-3 shrink-0 text-theme-subtle", "{icon}" }
                         span { class: "truncate", "{label}" }
                     }
@@ -497,6 +575,10 @@ pub(crate) fn EditorPane(
     on_action: Option<EventHandler<AppAction>>,
 ) -> Element {
     let _ = on_action;
+    let virtual_note = !view
+        .tree
+        .iter()
+        .any(|row| row.kind == TreeKind::File && row.path == view.selected_note.path);
 
     rsx! {
         section { class: "flex h-full min-h-0 flex-col pt-4 bg-shell-editor",
@@ -506,6 +588,7 @@ pub(crate) fn EditorPane(
                 "data-note-path": view.selected_note.path,
                 "data-note-title": view.selected_note.title,
                 "data-initial-doc": view.selected_note_body,
+                "data-virtual-note": if virtual_note { "true" } else { "false" },
                 "data-line-numbers": "false",
                 "data-writing-width": "650px",
                 aria_label: "Markdown editor"
