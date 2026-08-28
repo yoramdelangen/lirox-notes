@@ -27,7 +27,18 @@ pub fn WorkspaceShell(
                 TopBar { workspace_name: view.name.clone(), note_title: view.selected_note.title.clone(), source: view.source.clone() }
             },
             sidebar: rsx! {
-                Sidebar { view: view.clone(), focus, sidebar_mode, browser_dir, on_action: on_action.clone(), on_select_note: on_select_note.clone() }
+                Sidebar {
+                    view: view.clone(),
+                    focus,
+                    sidebar_mode,
+                    browser_dir,
+                    pending_create: None,
+                    on_action: on_action.clone(),
+                    on_select_note: on_select_note.clone(),
+                    on_create_change: None,
+                    on_create_submit: None,
+                    on_create_cancel: None,
+                }
             },
             editor: rsx! {
                 EditorPane { view: view.clone(), on_action: on_action.clone() }

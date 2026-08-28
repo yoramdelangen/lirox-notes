@@ -3,6 +3,8 @@ use liroxnotes_shared::WorkspaceView;
 use serde::Deserialize;
 
 #[cfg(target_arch = "wasm32")]
+use js_sys::Object;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::{spawn_local, JsFuture};
@@ -90,6 +92,57 @@ pub enum AppAction {
     SetSidebarMode(SidebarMode),
     SetBrowserDir(String),
     GoUpDirectory,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SidebarCreateKind {
+    Note,
+    Folder,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct SidebarCreateState {
+    pub dir: String,
+    pub kind: SidebarCreateKind,
+    pub value: String,
+}
+
+fn normalize_create_segment(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join("-")
+}
+
+fn normalize_create_path(value: &str) -> String {
+    value
+        .split('/')
+        .map(normalize_create_segment)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+pub fn sidebar_create_path(create: &SidebarCreateState) -> Option<String> {
+    let force_folder = create.value.trim_end().ends_with('/');
+    let name = if force_folder {
+        create.value.trim_end().trim_end_matches('/').trim_end()
+    } else {
+        create.value.trim()
+    };
+    let normalized = normalize_create_path(name.trim_end_matches(".md"));
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let leaf = match create.kind {
+        SidebarCreateKind::Folder => format!("{normalized}/README.md"),
+        SidebarCreateKind::Note if force_folder => format!("{normalized}/README.md"),
+        SidebarCreateKind::Note => format!("{normalized}.md"),
+    };
+
+    Some(if create.dir.is_empty() {
+        leaf
+    } else {
+        format!("{}/{leaf}", create.dir)
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -432,9 +485,282 @@ fn api_origin() -> String {
     }
 }
 
-pub fn workspace_note_path_from_location(path: &str) -> Option<&str> {
+pub fn workspace_note_path_from_location(path: &str) -> Option<String> {
     let prefix = "/workspace/";
     let rest = path.strip_prefix(prefix)?;
-    let (_, note_path) = rest.split_once("/note/")?;
-    Some(note_path)
+    let (_, note_path) = rest.split_once('/')?;
+
+    if let Some(note_path) = note_path.strip_prefix("note/") {
+        return (!note_path.is_empty()).then(|| note_path.to_string());
+    }
+
+    let folder_path = note_path.trim_matches('/');
+    if folder_path.is_empty() || note_path == folder_path {
+        return None;
+    }
+
+    Some(format!("{folder_path}/README.md"))
+}
+
+pub fn workspace_location_for_note_path(workspace_slug: &str, note_path: &str) -> String {
+    if let Some(folder_path) = note_path.strip_suffix("/README.md") {
+        return format!("/workspace/{workspace_slug}/{folder_path}/");
+    }
+
+    format!("/workspace/{workspace_slug}/note/{note_path}")
+}
+
+pub fn current_workspace_note_path() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        return web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .and_then(|path| workspace_note_path_from_location(&path));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        None
+    }
+}
+
+pub fn sync_workspace_location(workspace_slug: &str, note_path: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let Ok(history) = window.history() else {
+            return;
+        };
+
+        let url = workspace_location_for_note_path(workspace_slug, note_path);
+        let _ = history.push_state_with_url(&JsValue::NULL, "", Some(&url));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (workspace_slug, note_path);
+    }
+}
+
+pub fn on_create_virtual_note<F>(listener: F)
+where
+    F: FnMut(String) + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut listener = listener;
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Some(custom) = event.dyn_ref::<web_sys::CustomEvent>() else {
+                return;
+            };
+            let Ok(detail) = custom.detail().dyn_into::<Object>() else {
+                return;
+            };
+            let Ok(value) = js_sys::Reflect::get(&detail, &JsValue::from_str("path")) else {
+                return;
+            };
+            let Some(path) = value.as_string() else {
+                return;
+            };
+            listener(path);
+        });
+
+        if let Some(window) = web_sys::window() {
+            let _ = window.add_event_listener_with_callback(
+                "liroxnotes-create-note",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = listener;
+    }
+}
+
+pub fn on_workspace_popstate<F>(listener: F)
+where
+    F: FnMut(String) + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut listener = listener;
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |_event: web_sys::Event| {
+            let Some(path) = current_workspace_note_path() else {
+                return;
+            };
+            listener(path);
+        });
+
+        if let Some(window) = web_sys::window() {
+            let _ = window.add_event_listener_with_callback(
+                "popstate",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = listener;
+    }
+}
+
+pub fn on_delete_workspace_target<F>(listener: F)
+where
+    F: FnMut(String, String) + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut listener = listener;
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Some(custom) = event.dyn_ref::<web_sys::CustomEvent>() else {
+                return;
+            };
+            let Ok(detail) = custom.detail().dyn_into::<Object>() else {
+                return;
+            };
+            let Ok(path_value) = js_sys::Reflect::get(&detail, &JsValue::from_str("path")) else {
+                return;
+            };
+            let Ok(kind_value) = js_sys::Reflect::get(&detail, &JsValue::from_str("kind")) else {
+                return;
+            };
+            let Some(path) = path_value.as_string() else {
+                return;
+            };
+            let Some(kind) = kind_value.as_string() else {
+                return;
+            };
+            listener(path, kind);
+        });
+
+        if let Some(window) = web_sys::window() {
+            let _ = window.add_event_listener_with_callback(
+                "liroxnotes-delete-target",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = listener;
+    }
+}
+
+pub fn on_start_sidebar_create<F>(listener: F)
+where
+    F: FnMut(String, SidebarCreateKind) + 'static,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut listener = listener;
+        let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            let Some(custom) = event.dyn_ref::<web_sys::CustomEvent>() else {
+                return;
+            };
+            let Ok(detail) = custom.detail().dyn_into::<Object>() else {
+                return;
+            };
+            let Ok(dir_value) = js_sys::Reflect::get(&detail, &JsValue::from_str("dir")) else {
+                return;
+            };
+            let Ok(kind_value) = js_sys::Reflect::get(&detail, &JsValue::from_str("kind")) else {
+                return;
+            };
+            let Some(dir) = dir_value.as_string() else {
+                return;
+            };
+            let Some(kind) = kind_value.as_string() else {
+                return;
+            };
+            let kind = match kind.as_str() {
+                "folder" => SidebarCreateKind::Folder,
+                _ => SidebarCreateKind::Note,
+            };
+            listener(dir, kind);
+        });
+
+        if let Some(window) = web_sys::window() {
+            let _ = window.add_event_listener_with_callback(
+                "liroxnotes-start-create",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = listener;
+    }
+}
+
+pub fn request_virtual_note_creation(path: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let detail = Object::new();
+        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("path"), &JsValue::from_str(path));
+        let init = web_sys::CustomEventInit::new();
+        init.set_detail(&detail);
+        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict(
+            "liroxnotes-create-note",
+            &init,
+        ) {
+            if let Some(window) = web_sys::window() {
+                let _ = window.dispatch_event(&event);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = path;
+    }
+}
+
+pub fn prime_virtual_note_draft(path: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let detail = Object::new();
+        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("path"), &JsValue::from_str(path));
+        let init = web_sys::CustomEventInit::new();
+        init.set_detail(&detail);
+        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict(
+            "liroxnotes-prime-note-draft",
+            &init,
+        ) {
+            if let Some(window) = web_sys::window() {
+                let _ = window.dispatch_event(&event);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = path;
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn delete_note(workspace_slug: &str, path: &str) -> bool {
+    fetch_status(
+        &format!("/api/workspaces/{workspace_slug}/files/{path}"),
+        "DELETE",
+        None,
+    )
+    .await
+        == Some(200)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn delete_note(_: &str, _: &str) -> bool {
+    false
 }

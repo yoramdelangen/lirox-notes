@@ -1090,6 +1090,16 @@ fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpRes
     layouts::html_page("LiroxNotes", &body)
 }
 
+fn workspace_note_path_for_route(workspace: &str, path: &str) -> Option<String> {
+    let url = if path.is_empty() {
+        format!("/workspace/{workspace}")
+    } else {
+        format!("/workspace/{workspace}/{path}")
+    };
+
+    liroxnotes_app::workspace_note_path_from_location(&url)
+}
+
 #[get("/")]
 async fn index(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
     match is_installed(&state.paths) {
@@ -1272,6 +1282,36 @@ async fn note_page(
                 response
             } else {
                 render_workspace(&config, &path)
+            }
+        }
+        Ok(None) => HttpResponse::SeeOther()
+            .append_header(("location", "/onboarding"))
+            .finish(),
+        Err(error) => HttpResponse::InternalServerError().body(error.to_string()),
+    }
+}
+
+#[get("/workspace/{workspace}/{path:.*}")]
+async fn workspace_path_page(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    route: web::Path<(String, String)>,
+) -> impl Responder {
+    let (workspace, path) = route.into_inner();
+    match is_authenticated(&req, &state.paths) {
+        Ok(true) => {}
+        Ok(false) => return login_redirect(),
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
+    match configured(&state) {
+        Ok(Some(config)) => {
+            if let Some(response) = require_configured_workspace(&config, &workspace) {
+                response
+            } else if let Some(selected_note_path) = workspace_note_path_for_route(&workspace, &path)
+            {
+                render_workspace(&config, &selected_note_path)
+            } else {
+                render_workspace(&config, DEMO_WORKSPACE.default_note_path)
             }
         }
         Ok(None) => HttpResponse::SeeOther()

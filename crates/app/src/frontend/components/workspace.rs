@@ -1,4 +1,7 @@
-use crate::{AppAction, FocusTarget, SidebarMode};
+use crate::{
+    workspace_location_for_note_path, AppAction, FocusTarget, SidebarCreateKind,
+    SidebarCreateState, SidebarMode,
+};
 use dioxus::prelude::*;
 use liroxnotes_shared::{LabelSummary, NoteSummary, TreeEntry, TreeKind, WorkspaceView, APP_NAME};
 use std::collections::BTreeSet;
@@ -33,11 +36,15 @@ fn DirtyMarker(note_path: String) -> Element {
 }
 
 fn note_href(slug: &str, path: &str) -> String {
-    format!("/workspace/{slug}/note/{path}")
+    workspace_location_for_note_path(slug, path)
 }
 
 fn sidebar_label(label: &str) -> String {
     label.strip_suffix(".md").unwrap_or(label).to_string()
+}
+
+fn context_directory_for_note(path: &str) -> String {
+    parent_directory(path).unwrap_or("").to_string()
 }
 
 fn folder_note_path(notes: &[NoteSummary], folder_path: &str) -> Option<String> {
@@ -56,6 +63,11 @@ fn folder_note_path(notes: &[NoteSummary], folder_path: &str) -> Option<String> 
 
 fn default_folder_note_path(folder_path: &str) -> String {
     format!("{folder_path}/README.md")
+}
+
+fn folder_file_count(notes: &[NoteSummary], folder_path: &str) -> usize {
+    let prefix = format!("{folder_path}/");
+    notes.iter().filter(|note| note.path.starts_with(&prefix)).count()
 }
 
 fn root_sidebar_notes(notes: &[NoteSummary]) -> Vec<NoteSummary> {
@@ -102,12 +114,21 @@ pub(crate) fn Sidebar(
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
     browser_dir: String,
+    pending_create: Option<SidebarCreateState>,
     on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
+    on_create_change: Option<EventHandler<String>>,
+    on_create_submit: Option<EventHandler<()>>,
+    on_create_cancel: Option<EventHandler<()>>,
 ) -> Element {
     let focused = matches!(focus, FocusTarget::Sidebar);
     let sidebar_view = SidebarView::from_mode(sidebar_mode);
     let root_notes = root_sidebar_notes(&view.notes);
+    let context_dir = if matches!(sidebar_view, SidebarView::Oil) {
+        browser_dir.clone()
+    } else {
+        context_directory_for_note(&view.selected_note.path)
+    };
     let shell_classes = if focused {
         "h-full min-h-0 overflow-auto border-r border-theme-accent/50 bg-shell-panel px-3 pt-1 pb-3 outline outline-1 outline-theme-accent/40"
     } else {
@@ -115,7 +136,7 @@ pub(crate) fn Sidebar(
     };
 
     rsx! {
-        aside { class: shell_classes, tabindex: "0", "data-lirox-sidebar-root": "true",
+        aside { class: shell_classes, tabindex: "0", "data-lirox-sidebar-root": "true", "data-context-dir": context_dir,
             section { class: "space-y-3",
                 div {
                     div { class: "sidebar-heading", "{APP_NAME}" }
@@ -128,10 +149,10 @@ pub(crate) fn Sidebar(
                     }
                     match sidebar_view {
                         SidebarView::FileTree => rsx! {
-                            FileTreeSidebar { view: view.clone(), on_select_note: on_select_note.clone() }
+                            FileTreeSidebar { view: view.clone(), pending_create: pending_create.clone(), on_select_note: on_select_note.clone(), on_create_change: on_create_change.clone(), on_create_submit: on_create_submit.clone(), on_create_cancel: on_create_cancel.clone() }
                         },
                         SidebarView::Oil => rsx! {
-                            OilSidebar { view: view.clone(), browser_dir, on_action: on_action.clone(), on_select_note: on_select_note.clone() }
+                            OilSidebar { view: view.clone(), browser_dir, pending_create: pending_create.clone(), on_action: on_action.clone(), on_select_note: on_select_note.clone(), on_create_change: on_create_change.clone(), on_create_submit: on_create_submit.clone(), on_create_cancel: on_create_cancel.clone() }
                         },
                         SidebarView::LabelsNotes => rsx! {
                             LabelsNotesSidebar { view: view.clone(), on_select_note: on_select_note.clone() }
@@ -149,14 +170,26 @@ pub(crate) fn Sidebar(
 #[component]
 fn FileTreeSidebar(
     view: WorkspaceView,
+    pending_create: Option<SidebarCreateState>,
     on_select_note: Option<EventHandler<String>>,
+    on_create_change: Option<EventHandler<String>>,
+    on_create_submit: Option<EventHandler<()>>,
+    on_create_cancel: Option<EventHandler<()>>,
 ) -> Element {
     let rows = visible_tree_rows(&view.notes, &view.tree);
 
     rsx! {
         ul { class: "sidebar-list",
+            if pending_create.as_ref().map(|create| create.dir.is_empty()).unwrap_or(false) {
+                InlineCreateRow { depth: 0, create: pending_create.clone().unwrap(), on_create_change: on_create_change.clone(), on_create_submit: on_create_submit.clone(), on_create_cancel: on_create_cancel.clone() }
+            }
             for row in rows {
-                TreeRow { slug: view.slug.clone(), notes: view.notes.clone(), selected_note_path: view.selected_note.path.clone(), row, on_select_note: on_select_note.clone() }
+                TreeRow { slug: view.slug.clone(), notes: view.notes.clone(), selected_note_path: view.selected_note.path.clone(), row: row.clone(), on_select_note: on_select_note.clone() }
+                if let Some(create) = pending_create.clone() {
+                    if create.dir == row.path && row.kind == TreeKind::Folder {
+                        InlineCreateRow { depth: row.depth + 1, create, on_create_change: on_create_change.clone(), on_create_submit: on_create_submit.clone(), on_create_cancel: on_create_cancel.clone() }
+                    }
+                }
             }
         }
     }
@@ -195,8 +228,12 @@ fn LabelsNotesSidebar(
 fn OilSidebar(
     view: WorkspaceView,
     browser_dir: String,
+    pending_create: Option<SidebarCreateState>,
     on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
+    on_create_change: Option<EventHandler<String>>,
+    on_create_submit: Option<EventHandler<()>>,
+    on_create_cancel: Option<EventHandler<()>>,
 ) -> Element {
     let entries = directory_entries(&view.notes, &browser_dir);
     let has_parent = !browser_dir.is_empty();
@@ -215,8 +252,51 @@ fn OilSidebar(
                         button { class: "sidebar-nav-button", onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::GoUpDirectory) }, ".." }
                     }
                 }
+                if pending_create.as_ref().map(|create| create.dir == browser_dir).unwrap_or(false) {
+                    InlineCreateRow { depth: 0, create: pending_create.clone().unwrap(), on_create_change: on_create_change.clone(), on_create_submit: on_create_submit.clone(), on_create_cancel: on_create_cancel.clone() }
+                }
                 for entry in entries {
                     BrowserEntryRow { slug: view.slug.clone(), notes: view.notes.clone(), kind: entry.kind, path: entry.path, label: entry.label, on_action: on_action.clone(), on_select_note: on_select_note.clone() }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn InlineCreateRow(
+    depth: usize,
+    create: SidebarCreateState,
+    on_create_change: Option<EventHandler<String>>,
+    on_create_submit: Option<EventHandler<()>>,
+    on_create_cancel: Option<EventHandler<()>>,
+) -> Element {
+    let indent = if depth == 0 { "pl-1" } else { "pl-4" };
+    let placeholder = match create.kind {
+        SidebarCreateKind::Folder => "folder-name",
+        SidebarCreateKind::Note => "note-name",
+    };
+
+    rsx! {
+        li {
+            form {
+                class: format!("flex items-center gap-2 px-2 py-1 text-ui {indent}"),
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    if let Some(on_create_submit) = &on_create_submit { on_create_submit.call(()); }
+                },
+                input {
+                    class: "w-full rounded bg-theme-surface/80 px-2 py-1 text-theme-text outline-none",
+                    autofocus: "true",
+                    value: "{create.value}",
+                    placeholder: placeholder,
+                    oninput: move |event| if let Some(on_create_change) = &on_create_change { on_create_change.call(event.value()) },
+                    onkeydown: move |event| {
+                        if event.key() == Key::Escape {
+                            if let Some(on_create_cancel) = &on_create_cancel { on_create_cancel.call(()); }
+                        }
+                    },
+                    onblur: move |_| if let Some(on_create_cancel) = &on_create_cancel { on_create_cancel.call(()) },
                 }
             }
         }
@@ -322,7 +402,7 @@ fn RootNoteRow(slug: String, note: NoteSummary, on_select_note: Option<EventHand
 
     rsx! {
         li {
-            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
+            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), "data-context-dir": context_directory_for_note(&note.path), "data-context-path": note.path.clone(), "data-context-kind": "file", onclick: move |event| {
                 event.prevent_default();
                 if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
             },
@@ -362,10 +442,21 @@ fn TreeRow(
         "flex items-center sidebar-item-idle"
     };
     let label = sidebar_label(&row.label);
+    let context_path = row.path.clone();
+    let context_dir = if row.kind == TreeKind::Folder {
+        row.path.clone()
+    } else {
+        context_directory_for_note(&row.path)
+    };
+    let context_count = if row.kind == TreeKind::Folder {
+        folder_file_count(&notes, &row.path).to_string()
+    } else {
+        String::new()
+    };
 
     rsx! {
         li {
-            div { class: "flex items-center gap-2 py-px text-ui",
+            div { class: "flex items-center gap-2 py-px text-ui", "data-context-dir": context_dir, "data-context-path": context_path, "data-context-kind": if row.kind == TreeKind::Folder { "folder" } else { "file" }, "data-context-count": context_count,
                 if row.kind == TreeKind::File {
                     a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &row.path), onclick: move |event| {
                         event.prevent_default();
@@ -407,11 +498,12 @@ fn BrowserEntryRow(
     match kind {
         TreeKind::Folder => {
             let folder_target = folder_note_path(&notes, &path_for_lookup);
+            let context_count = folder_file_count(&notes, &path_for_lookup).to_string();
 
             rsx! {
                 li {
                     if let Some(target) = folder_target {
-                        a { class: "sidebar-item-button", href: note_href(&slug, &target), onclick: move |event| {
+                        a { class: "sidebar-item-button", href: note_href(&slug, &target), "data-context-dir": path_for_lookup.clone(), "data-context-path": path_for_lookup.clone(), "data-context-kind": "folder", "data-context-count": context_count.clone(), onclick: move |event| {
                             event.prevent_default();
                             if let Some(on_select_note) = &on_select_note { on_select_note.call(target.clone()); }
                         },
@@ -419,7 +511,7 @@ fn BrowserEntryRow(
                             span { "{display_label}" }
                         }
                     } else {
-                        button { class: "sidebar-item-button", onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::SetBrowserDir(path_for_action.clone())) },
+                        button { class: "sidebar-item-button", "data-context-dir": path_for_lookup.clone(), "data-context-path": path_for_lookup.clone(), "data-context-kind": "folder", "data-context-count": context_count, onclick: move |_| if let Some(on_action) = &on_action { on_action.call(AppAction::SetBrowserDir(path_for_action.clone())) },
                             span { class: "w-4 shrink-0 text-theme-subtle", "󰉋" }
                             span { "{display_label}" }
                         }
@@ -448,7 +540,7 @@ fn BrowserEntryRow(
 
             rsx! {
                 li {
-                    a { class: format!("flex items-center gap-2 px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
+                    a { class: format!("flex items-center gap-2 px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), "data-context-dir": context_directory_for_note(&note.path), "data-context-path": note.path.clone(), "data-context-kind": "file", onclick: move |event| {
                         event.prevent_default();
                         if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
                     },
@@ -476,7 +568,7 @@ fn FileRow(
 
     rsx! {
         li {
-            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
+            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), "data-context-dir": context_directory_for_note(&note.path), "data-context-path": note.path.clone(), "data-context-kind": "file", onclick: move |event| {
                 event.prevent_default();
                 if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
             },
@@ -521,7 +613,7 @@ fn NoteRow(
 
     rsx! {
         li {
-            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), onclick: move |event| {
+            a { class: format!("block px-2 py-1 text-ui {classes}"), href: note_href(&slug, &note.path), "data-context-dir": context_directory_for_note(&note.path), "data-context-path": note.path.clone(), "data-context-kind": "file", onclick: move |event| {
                 event.prevent_default();
                 if let Some(on_select_note) = &on_select_note { on_select_note.call(note.path.clone()); }
             },

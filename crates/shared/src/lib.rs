@@ -244,6 +244,60 @@ pub fn workspace_view_with_body(
     }
 }
 
+pub fn workspace_view_with_virtual_notes(
+    view: WorkspaceView,
+    selected_note_path: &str,
+    virtual_note_paths: &[String],
+) -> WorkspaceView {
+    let mut notes = view.notes.clone();
+
+    for path in virtual_note_paths {
+        if notes.iter().any(|note| note.path == *path) {
+            continue;
+        }
+
+        notes.push(NoteSummary {
+            path: path.clone(),
+            title: fallback_title(path),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: false,
+        });
+    }
+
+    for note in &mut notes {
+        note.active = note.path == selected_note_path;
+    }
+
+    let selected_note = notes
+        .iter()
+        .find(|note| note.path == selected_note_path)
+        .cloned()
+        .unwrap_or_else(|| NoteSummary {
+            path: selected_note_path.to_string(),
+            title: fallback_title(selected_note_path),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: true,
+        });
+
+    let selected_note_body = if view.selected_note.path == selected_note_path {
+        view.selected_note_body.clone()
+    } else {
+        String::new()
+    };
+
+    WorkspaceView {
+        note_count: notes.len(),
+        tree: build_tree(&notes, selected_note_path),
+        labels: label_summaries(&notes),
+        selected_note,
+        selected_note_body,
+        notes,
+        ..view
+    }
+}
+
 fn note_summary(path: &str, body: &str, selected_note_path: &str) -> NoteSummary {
     let meta = parse_note_meta(body);
     let title = meta
