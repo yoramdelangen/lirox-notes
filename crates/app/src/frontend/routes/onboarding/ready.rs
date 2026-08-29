@@ -4,9 +4,9 @@ use liroxnotes_shared::{workspace_view_with_virtual_notes, WorkspaceView};
 use crate::{
     current_workspace_note_path, delete_note, fetch_workspace_view, on_create_virtual_note,
     on_delete_workspace_target, on_start_sidebar_create, on_workspace_popstate,
-    prime_virtual_note_draft, request_virtual_note_creation, sidebar_create_path,
-    sync_workspace_location, AppAction, FocusTarget, SidebarCreateState, SidebarMode,
-    EDITOR_BRIDGE_JS, EDITOR_JS,
+    prime_virtual_note_draft, pull_workspace, push_workspace, request_virtual_note_creation,
+    sidebar_create_path, sync_workspace_location, AppAction, FocusTarget, SidebarCreateState,
+    SidebarMode, EDITOR_BRIDGE_JS, EDITOR_JS,
 };
 
 use super::super::super::components::{EditorPane, Sidebar, StatusBar, TopBar};
@@ -15,9 +15,15 @@ fn parent_directory(path: &str) -> &str {
     path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("")
 }
 
-fn merged_workspace_view(view: WorkspaceView, path: &str, virtual_notes: &[String]) -> WorkspaceView {
+fn merged_workspace_view(
+    view: WorkspaceView,
+    path: &str,
+    virtual_notes: &[String],
+) -> WorkspaceView {
     let mut paths = virtual_notes.to_vec();
-    if !paths.iter().any(|virtual_path| virtual_path == path) && !view.notes.iter().any(|note| note.path == path) {
+    if !paths.iter().any(|virtual_path| virtual_path == path)
+        && !view.notes.iter().any(|note| note.path == path)
+    {
         paths.push(path.to_string());
     }
 
@@ -81,7 +87,13 @@ pub(crate) fn ReadyRoute() -> Element {
         let mut requested = requested;
         requested.set(true);
         spawn(async move {
-            browser_dir.set(selected.as_deref().map(parent_directory).unwrap_or("").to_string());
+            browser_dir.set(
+                selected
+                    .as_deref()
+                    .map(parent_directory)
+                    .unwrap_or("")
+                    .to_string(),
+            );
             workspace.set(fetch_workspace_view(selected.as_deref()).await);
         });
     });
@@ -109,7 +121,11 @@ pub(crate) fn ReadyRoute() -> Element {
             create_focus.set(FocusTarget::Editor);
             create_pending.set(None);
             sync_workspace_location(&current_view.slug, &path);
-            create_workspace.set(Some(merged_workspace_view(current_view, &path, &next_virtual_notes)));
+            create_workspace.set(Some(merged_workspace_view(
+                current_view,
+                &path,
+                &next_virtual_notes,
+            )));
             create_virtual_notes.set(next_virtual_notes);
         });
 
@@ -135,7 +151,10 @@ pub(crate) fn ReadyRoute() -> Element {
                 let next_view = fetch_workspace_view(Some(&path))
                     .await
                     .map(|next| merged_workspace_view(next, &path, &virtual_note_paths))
-                    .or_else(|| current_view.map(|view| merged_workspace_view(view, &path, &virtual_note_paths)));
+                    .or_else(|| {
+                        current_view
+                            .map(|view| merged_workspace_view(view, &path, &virtual_note_paths))
+                    });
                 popstate_workspace.set(next_view);
             });
         });
@@ -178,7 +197,11 @@ pub(crate) fn ReadyRoute() -> Element {
                 let next_view = fetch_workspace_view(Some(&next_selected))
                     .await
                     .map(|view| {
-                        workspace_view_with_virtual_notes(view, &next_selected, &remaining_virtual_notes)
+                        workspace_view_with_virtual_notes(
+                            view,
+                            &next_selected,
+                            &remaining_virtual_notes,
+                        )
                     })
                     .or_else(|| {
                         Some(workspace_view_with_virtual_notes(
@@ -201,8 +224,8 @@ pub(crate) fn ReadyRoute() -> Element {
         };
     };
 
-        let view_for_sidebar = view.clone();
-        let sidebar_on_select_note = move |path: String| {
+    let view_for_sidebar = view.clone();
+    let sidebar_on_select_note = move |path: String| {
         focus.set(FocusTarget::Editor);
         browser_dir.set(parent_directory(&path).to_string());
 
@@ -214,7 +237,13 @@ pub(crate) fn ReadyRoute() -> Element {
             let next_view = fetch_workspace_view(Some(&path))
                 .await
                 .map(|next| merged_workspace_view(next, &path, &virtual_note_paths))
-                .or_else(|| Some(merged_workspace_view(current_view, &path, &virtual_note_paths)));
+                .or_else(|| {
+                    Some(merged_workspace_view(
+                        current_view,
+                        &path,
+                        &virtual_note_paths,
+                    ))
+                });
             workspace.set(next_view);
         });
     };
@@ -250,6 +279,39 @@ pub(crate) fn ReadyRoute() -> Element {
                 workspace_name: view.name.clone(),
                 note_title: view.selected_note.title.clone(),
                 source: view.source.clone(),
+                unpushed_commits: view.unpushed_commits,
+                on_pull: move |_| {
+                    let Some(current_view) = workspace.read().clone() else {
+                        return;
+                    };
+                    let selected_path = current_view.selected_note.path.clone();
+                    let current_slug = current_view.slug.clone();
+                    let mut workspace = workspace;
+                    let virtual_note_paths = virtual_notes.read().clone();
+                    spawn(async move {
+                        let _ = pull_workspace(&current_slug).await;
+                        let next_view = fetch_workspace_view(Some(&selected_path)).await.map(|view| {
+                            workspace_view_with_virtual_notes(view, &selected_path, &virtual_note_paths)
+                        });
+                        workspace.set(next_view);
+                    });
+                },
+                on_push: move |_| {
+                    let Some(current_view) = workspace.read().clone() else {
+                        return;
+                    };
+                    let selected_path = current_view.selected_note.path.clone();
+                    let current_slug = current_view.slug.clone();
+                    let mut workspace = workspace;
+                    let virtual_note_paths = virtual_notes.read().clone();
+                    spawn(async move {
+                        let _ = push_workspace(&current_slug).await;
+                        let next_view = fetch_workspace_view(Some(&selected_path)).await.map(|view| {
+                            workspace_view_with_virtual_notes(view, &selected_path, &virtual_note_paths)
+                        });
+                        workspace.set(next_view);
+                    });
+                },
             }
             div { class: "grid min-h-0 h-full grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)]",
                 Sidebar {

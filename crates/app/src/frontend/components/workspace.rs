@@ -67,7 +67,10 @@ fn default_folder_note_path(folder_path: &str) -> String {
 
 fn folder_file_count(notes: &[NoteSummary], folder_path: &str) -> usize {
     let prefix = format!("{folder_path}/");
-    notes.iter().filter(|note| note.path.starts_with(&prefix)).count()
+    notes
+        .iter()
+        .filter(|note| note.path.starts_with(&prefix))
+        .count()
 }
 
 fn root_sidebar_notes(notes: &[NoteSummary]) -> Vec<NoteSummary> {
@@ -101,8 +104,7 @@ fn visible_sidebar_notes(notes: &[NoteSummary]) -> Vec<NoteSummary> {
 }
 
 fn visible_tree_rows(notes: &[NoteSummary], rows: &[TreeEntry]) -> Vec<TreeEntry> {
-    rows
-        .iter()
+    rows.iter()
         .filter(|row| row.kind != TreeKind::File || !hidden_sidebar_note_path(notes, &row.path))
         .cloned()
         .collect()
@@ -304,10 +306,7 @@ fn InlineCreateRow(
 }
 
 #[component]
-fn FilesListSidebar(
-    view: WorkspaceView,
-    on_select_note: Option<EventHandler<String>>,
-) -> Element {
+fn FilesListSidebar(view: WorkspaceView, on_select_note: Option<EventHandler<String>>) -> Element {
     let notes = visible_sidebar_notes(&view.notes);
 
     rsx! {
@@ -393,7 +392,11 @@ fn directory_entries(notes: &[NoteSummary], directory: &str) -> Vec<BrowserEntry
 }
 
 #[component]
-fn RootNoteRow(slug: String, note: NoteSummary, on_select_note: Option<EventHandler<String>>) -> Element {
+fn RootNoteRow(
+    slug: String,
+    note: NoteSummary,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
     let classes = if note.active {
         "sidebar-item-active"
     } else {
@@ -429,8 +432,8 @@ fn TreeRow(
         TreeKind::File => "",
     };
     let row_path = row.path.clone();
-    let folder_target = folder_note_path(&notes, &row.path)
-        .unwrap_or_else(|| default_folder_note_path(&row.path));
+    let folder_target =
+        folder_note_path(&notes, &row.path).unwrap_or_else(|| default_folder_note_path(&row.path));
     let active = if row.kind == TreeKind::Folder {
         folder_target == selected_note_path
     } else {
@@ -635,7 +638,22 @@ fn NoteRow(
 }
 
 #[component]
-pub(crate) fn TopBar(workspace_name: String, note_title: String, source: String) -> Element {
+pub(crate) fn TopBar(
+    workspace_name: String,
+    note_title: String,
+    source: String,
+    unpushed_commits: usize,
+    on_pull: Option<EventHandler<()>>,
+    on_push: Option<EventHandler<()>>,
+) -> Element {
+    let _ = note_title;
+    let pull_title = "Pull remote changes";
+    let push_title = if unpushed_commits == 1 {
+        "Push 1 unpushed commit".to_string()
+    } else {
+        format!("Push {unpushed_commits} unpushed commits")
+    };
+
     rsx! {
         header { class: "topbar-shell",
             div { class: "flex items-center px-3",
@@ -650,6 +668,28 @@ pub(crate) fn TopBar(workspace_name: String, note_title: String, source: String)
                     // h1 { class: "truncate font-medium text-theme-text", "data-lirox-note-title": "true", "{note_title}" }
                 }
                 div { class: "flex shrink-0 items-center gap-2 text-[11px] text-theme-subtle",
+                    button {
+                        class: "topbar-action flex h-7 w-7 items-center justify-center p-0",
+                        type: "button",
+                        title: pull_title,
+                        aria_label: pull_title,
+                        onclick: move |_| if let Some(on_pull) = &on_pull { on_pull.call(()) },
+                        span { class: "font-icon text-[12px] text-theme-text", "↓" }
+                    }
+                    button {
+                        class: "topbar-action relative flex h-7 w-7 items-center justify-center p-0",
+                        type: "button",
+                        title: "{push_title}",
+                        aria_label: "{push_title}",
+                        onclick: move |_| if let Some(on_push) = &on_push { on_push.call(()) },
+                        span { class: "font-icon text-[12px] text-theme-text", "↑" }
+                        if unpushed_commits > 0 {
+                            span {
+                                class: "absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-theme-accent px-1 text-[9px] leading-none text-shell-bg",
+                                "{unpushed_commits}"
+                            }
+                        }
+                    }
                     // button { class: "topbar-action", type: "button", "data-lirox-save-button": "true", "Saved" }
                     // form { method: "post", action: "/logout",
                     //     button { class: "topbar-action", type: "submit", "Logout" }

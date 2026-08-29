@@ -1,7 +1,8 @@
 use liroxnotes_gateway::{
     changed_count, commit_note, configure_git_remote, configured_profile, ensure_workspace,
     format_config, is_installed, parse_config, parse_onboarding_form, port_from_args,
-    safe_note_path, save_config, workspace_view_for_config, GatewayConfig, RuntimePaths,
+    push_workspace, safe_note_path, save_config, workspace_view_for_config, GatewayConfig,
+    RuntimePaths,
 };
 use std::{
     fs,
@@ -97,6 +98,54 @@ fn onboarding_git_remote_configures_origin() {
         String::from_utf8_lossy(&remote.stdout).trim(),
         "git@example.com:me/notes.git"
     );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn push_workspace_pushes_commits_to_origin() {
+    let root = temp_root("push");
+    let remote = root.join("remote.git");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(&root)
+        .arg(&remote)
+        .status()
+        .unwrap();
+    ensure_workspace(&workspace).unwrap();
+    let config = GatewayConfig {
+        workspace_slug: "push".to_string(),
+        workspace_name: "Push".to_string(),
+        workspace_path: workspace.clone(),
+        repo_url: remote.to_string_lossy().to_string(),
+        branch: "master".to_string(),
+    };
+
+    configure_git_remote(&config).unwrap();
+    fs::write(workspace.join("notes/welcome.md"), "# Pushed\n").unwrap();
+    assert!(commit_note(&workspace, "notes/welcome.md").unwrap());
+    assert_eq!(
+        workspace_view_for_config(&config, "notes/welcome.md")
+            .unwrap()
+            .unpushed_commits,
+        2
+    );
+    assert!(push_workspace(&config).unwrap());
+    assert_eq!(
+        workspace_view_for_config(&config, "notes/welcome.md")
+            .unwrap()
+            .unpushed_commits,
+        0
+    );
+
+    let remote_head = Command::new("git")
+        .args(["rev-parse", "master"])
+        .current_dir(&remote)
+        .output()
+        .unwrap();
+    assert!(remote_head.status.success());
 
     let _ = fs::remove_dir_all(root);
 }

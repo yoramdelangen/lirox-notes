@@ -24,7 +24,14 @@ pub fn WorkspaceShell(
         WorkspaceLayout {
             labels_notes,
             top_bar: rsx! {
-                TopBar { workspace_name: view.name.clone(), note_title: view.selected_note.title.clone(), source: view.source.clone() }
+                TopBar {
+                    workspace_name: view.name.clone(),
+                    note_title: view.selected_note.title.clone(),
+                    source: view.source.clone(),
+                    unpushed_commits: view.unpushed_commits,
+                    on_pull: None,
+                    on_push: None,
+                }
             },
             sidebar: rsx! {
                 Sidebar {

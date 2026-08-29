@@ -48,6 +48,7 @@ pub struct GatewayConfig {
 struct SaveResponse {
     ok: bool,
     committed: bool,
+    pushed: bool,
 }
 
 #[derive(Serialize)]
@@ -712,6 +713,40 @@ fn current_branch(workspace: &Path, config: &GatewayConfig) -> String {
         .unwrap_or_else(|_| config.branch.clone())
 }
 
+fn unpushed_commit_count(config: &GatewayConfig) -> usize {
+    if config.repo_url.trim().is_empty() {
+        return 0;
+    }
+
+    if run_git(
+        &config.workspace_path,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("origin/{}", config.branch),
+        ],
+    )
+    .is_err()
+    {
+        return run_git(&config.workspace_path, &["rev-list", "--count", "HEAD"])
+            .ok()
+            .and_then(|count| count.parse().ok())
+            .unwrap_or(0);
+    }
+
+    run_git(
+        &config.workspace_path,
+        &[
+            "rev-list",
+            "--count",
+            &format!("origin/{}..HEAD", config.branch),
+        ],
+    )
+    .ok()
+    .and_then(|count| count.parse().ok())
+    .unwrap_or(0)
+}
+
 pub fn commit_note(workspace: &Path, path: &str) -> std::io::Result<bool> {
     let status = run_git(workspace, &["status", "--porcelain", "--", path])?;
     if status.is_empty() {
@@ -736,6 +771,30 @@ pub fn commit_note(workspace: &Path, path: &str) -> std::io::Result<bool> {
 
     run_git(workspace, &["add", "--", path])?;
     run_git(workspace, &["commit", "-m", &format!("Update {path}")])?;
+    Ok(true)
+}
+
+pub fn push_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
+    if config.repo_url.trim().is_empty() {
+        return Ok(false);
+    }
+
+    run_git(
+        &config.workspace_path,
+        &["push", "origin", &format!("HEAD:{}", config.branch)],
+    )?;
+    Ok(true)
+}
+
+pub fn pull_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
+    if config.repo_url.trim().is_empty() {
+        return Ok(false);
+    }
+
+    run_git(
+        &config.workspace_path,
+        &["pull", "--ff-only", "origin", &config.branch],
+    )?;
     Ok(true)
 }
 
@@ -1053,7 +1112,7 @@ pub fn workspace_view_for_config(
         .map(|record| record.path.as_str())
         .unwrap_or(DEMO_WORKSPACE.default_note_path);
 
-    Ok(workspace_view_from_notes(
+    let mut view = workspace_view_from_notes(
         &config.workspace_slug,
         &config.workspace_name,
         &current_branch(&config.workspace_path, config),
@@ -1066,7 +1125,9 @@ pub fn workspace_view_for_config(
         selected_note_path,
         changed_count(&config.workspace_path),
         &notes,
-    ))
+    );
+    view.unpushed_commits = unpushed_commit_count(config);
+    Ok(view)
 }
 
 fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpResponse {
@@ -1307,7 +1368,8 @@ async fn workspace_path_page(
         Ok(Some(config)) => {
             if let Some(response) = require_configured_workspace(&config, &workspace) {
                 response
-            } else if let Some(selected_note_path) = workspace_note_path_for_route(&workspace, &path)
+            } else if let Some(selected_note_path) =
+                workspace_note_path_for_route(&workspace, &path)
             {
                 render_workspace(&config, &selected_note_path)
             } else {
@@ -1525,15 +1587,8 @@ async fn sync_workspace_api(
     let (pulled, pushed, message) = if config.repo_url.trim().is_empty() {
         (false, false, "local workspace has no remote".to_string())
     } else {
-        run_git(
-            &config.workspace_path,
-            &["pull", "--ff-only", "origin", &config.branch],
-        )?;
-        run_git(
-            &config.workspace_path,
-            &["push", "origin", &format!("HEAD:{}", config.branch)],
-        )?;
-        (true, true, "synced".to_string())
+        pull_workspace(&config)?;
+        (true, false, "pulled".to_string())
     };
 
     let mut response = HttpResponse::Ok().json(SyncResponse {
@@ -1541,6 +1596,74 @@ async fn sync_workspace_api(
         pulled,
         pushed,
         message,
+    });
+    cors(&mut response);
+    Ok(response)
+}
+
+#[post("/api/workspaces/{workspace}/pull")]
+async fn pull_workspace_api(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    workspace: web::Path<String>,
+) -> Result<HttpResponse> {
+    if let Some(response) = require_auth_api(&req, &state.paths)? {
+        return Ok(response);
+    }
+    let Some(config) = configured(&state)? else {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "workspace is not configured",
+        ));
+    };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
+
+    let pulled = pull_workspace(&config)?;
+    let mut response = HttpResponse::Ok().json(SyncResponse {
+        ok: true,
+        pulled,
+        pushed: false,
+        message: if pulled {
+            "pulled".to_string()
+        } else {
+            "local workspace has no remote".to_string()
+        },
+    });
+    cors(&mut response);
+    Ok(response)
+}
+
+#[post("/api/workspaces/{workspace}/push")]
+async fn push_workspace_api(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    workspace: web::Path<String>,
+) -> Result<HttpResponse> {
+    if let Some(response) = require_auth_api(&req, &state.paths)? {
+        return Ok(response);
+    }
+    let Some(config) = configured(&state)? else {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "workspace is not configured",
+        ));
+    };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
+
+    let pushed = push_workspace(&config)?;
+    let mut response = HttpResponse::Ok().json(SyncResponse {
+        ok: true,
+        pulled: false,
+        pushed,
+        message: if pushed {
+            "pushed".to_string()
+        } else {
+            "local workspace has no remote".to_string()
+        },
     });
     cors(&mut response);
     Ok(response)
@@ -1610,6 +1733,7 @@ async fn put_workspace_file_api(
     let mut response = HttpResponse::Ok().json(SaveResponse {
         ok: true,
         committed,
+        pushed: false,
     });
     cors(&mut response);
     Ok(response)
@@ -1650,6 +1774,7 @@ async fn delete_workspace_file_api(
     let mut response = HttpResponse::Ok().json(SaveResponse {
         ok: true,
         committed,
+        pushed: false,
     });
     cors(&mut response);
     Ok(response)
@@ -1826,10 +1951,10 @@ async fn save_note(
             return Err(error.into());
         }
     };
-
     let mut response = HttpResponse::Ok().json(SaveResponse {
         ok: true,
         committed,
+        pushed: false,
     });
     cors(&mut response);
     Ok(response)

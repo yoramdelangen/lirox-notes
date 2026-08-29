@@ -41,6 +41,7 @@ pub struct WorkspaceView {
     pub source: String,
     pub note_count: usize,
     pub changed_notes: usize,
+    pub unpushed_commits: usize,
     pub selected_note: NoteSummary,
     pub selected_note_body: String,
     pub tree: Vec<TreeEntry>,
@@ -152,6 +153,7 @@ pub fn workspace_view_from_notes(
             source: source.to_string(),
             note_count: 0,
             changed_notes,
+            unpushed_commits: 0,
             selected_note,
             selected_note_body: String::new(),
             tree: Vec::new(),
@@ -177,6 +179,7 @@ pub fn workspace_view_from_notes(
         source: source.to_string(),
         note_count: notes.len(),
         changed_notes,
+        unpushed_commits: 0,
         tree: build_tree(&notes, &selected_note.path),
         labels: label_summaries(&notes),
         selected_note,
@@ -225,6 +228,7 @@ pub fn workspace_view_with_body(
         source: workspace.source.to_string(),
         note_count: notes.len(),
         changed_notes: 0,
+        unpushed_commits: 0,
         selected_note_body: workspace
             .notes
             .iter()

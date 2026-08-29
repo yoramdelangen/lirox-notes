@@ -332,6 +332,26 @@ async fn fetch_workspace_view(_: Option<&str>) -> Option<WorkspaceView> {
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn pull_workspace(slug: &str) -> bool {
+    fetch_status(&format!("/api/workspaces/{slug}/pull"), "POST", None).await == Some(200)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn pull_workspace(_: &str) -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn push_workspace(slug: &str) -> bool {
+    fetch_status(&format!("/api/workspaces/{slug}/push"), "POST", None).await == Some(200)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn push_workspace(_: &str) -> bool {
+    false
+}
+
+#[cfg(target_arch = "wasm32")]
 async fn api_install(
     workspace_root: &str,
     user: &str,
@@ -597,10 +617,8 @@ where
         });
 
         if let Some(window) = web_sys::window() {
-            let _ = window.add_event_listener_with_callback(
-                "popstate",
-                closure.as_ref().unchecked_ref(),
-            );
+            let _ = window
+                .add_event_listener_with_callback("popstate", closure.as_ref().unchecked_ref());
             closure.forget();
         }
     }
@@ -707,13 +725,16 @@ pub fn request_virtual_note_creation(path: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         let detail = Object::new();
-        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("path"), &JsValue::from_str(path));
+        let _ = js_sys::Reflect::set(
+            &detail,
+            &JsValue::from_str("path"),
+            &JsValue::from_str(path),
+        );
         let init = web_sys::CustomEventInit::new();
         init.set_detail(&detail);
-        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict(
-            "liroxnotes-create-note",
-            &init,
-        ) {
+        if let Ok(event) =
+            web_sys::CustomEvent::new_with_event_init_dict("liroxnotes-create-note", &init)
+        {
             if let Some(window) = web_sys::window() {
                 let _ = window.dispatch_event(&event);
             }
@@ -730,13 +751,16 @@ pub fn prime_virtual_note_draft(path: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         let detail = Object::new();
-        let _ = js_sys::Reflect::set(&detail, &JsValue::from_str("path"), &JsValue::from_str(path));
+        let _ = js_sys::Reflect::set(
+            &detail,
+            &JsValue::from_str("path"),
+            &JsValue::from_str(path),
+        );
         let init = web_sys::CustomEventInit::new();
         init.set_detail(&detail);
-        if let Ok(event) = web_sys::CustomEvent::new_with_event_init_dict(
-            "liroxnotes-prime-note-draft",
-            &init,
-        ) {
+        if let Ok(event) =
+            web_sys::CustomEvent::new_with_event_init_dict("liroxnotes-prime-note-draft", &init)
+        {
             if let Some(window) = web_sys::window() {
                 let _ = window.dispatch_event(&event);
             }
