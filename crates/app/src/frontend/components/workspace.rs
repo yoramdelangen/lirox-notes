@@ -1,6 +1,6 @@
 use crate::{
-    workspace_location_for_note_path, AppAction, FocusTarget, SidebarCreateKind,
-    SidebarCreateState, SidebarMode,
+    sidebar_context_directory_for_note, workspace_location_for_note_path, AppAction, FocusTarget,
+    SidebarCreateKind, SidebarCreateState, SidebarMode,
 };
 use dioxus::prelude::*;
 use liroxnotes_shared::{LabelSummary, NoteSummary, TreeEntry, TreeKind, WorkspaceView, APP_NAME};
@@ -44,7 +44,7 @@ fn sidebar_label(label: &str) -> String {
 }
 
 fn context_directory_for_note(path: &str) -> String {
-    parent_directory(path).unwrap_or("").to_string()
+    sidebar_context_directory_for_note(path)
 }
 
 fn folder_note_path(notes: &[NoteSummary], folder_path: &str) -> Option<String> {
@@ -108,6 +108,18 @@ fn visible_tree_rows(notes: &[NoteSummary], rows: &[TreeEntry]) -> Vec<TreeEntry
         .filter(|row| row.kind != TreeKind::File || !hidden_sidebar_note_path(notes, &row.path))
         .cloned()
         .collect()
+}
+
+fn create_row_matches(row: &TreeEntry, dir: &str) -> bool {
+    row.kind == TreeKind::Folder && row.path == dir
+        || row.kind == TreeKind::File && context_directory_for_note(&row.path) == dir
+}
+
+fn tree_row_indent(depth: usize) -> String {
+    format!(
+        "padding-left: {}rem",
+        if depth == 0 { 0.25 } else { depth as f32 }
+    )
 }
 
 #[component]
@@ -188,7 +200,7 @@ fn FileTreeSidebar(
             for row in rows {
                 TreeRow { slug: view.slug.clone(), notes: view.notes.clone(), selected_note_path: view.selected_note.path.clone(), row: row.clone(), on_select_note: on_select_note.clone() }
                 if let Some(create) = pending_create.clone() {
-                    if create.dir == row.path && row.kind == TreeKind::Folder {
+                    if create_row_matches(&row, &create.dir) {
                         InlineCreateRow { depth: row.depth + 1, create, on_create_change: on_create_change.clone(), on_create_submit: on_create_submit.clone(), on_create_cancel: on_create_cancel.clone() }
                     }
                 }
@@ -273,7 +285,7 @@ fn InlineCreateRow(
     on_create_submit: Option<EventHandler<()>>,
     on_create_cancel: Option<EventHandler<()>>,
 ) -> Element {
-    let indent = if depth == 0 { "pl-1" } else { "pl-4" };
+    let indent = tree_row_indent(depth);
     let placeholder = match create.kind {
         SidebarCreateKind::Folder => "folder-name",
         SidebarCreateKind::Note => "note-name",
@@ -282,13 +294,15 @@ fn InlineCreateRow(
     rsx! {
         li {
             form {
-                class: format!("flex items-center gap-2 px-2 py-1 text-ui {indent}"),
+                class: "flex items-center gap-2 px-2 py-1 text-ui",
+                style: indent,
                 onsubmit: move |event| {
                     event.prevent_default();
                     if let Some(on_create_submit) = &on_create_submit { on_create_submit.call(()); }
                 },
                 input {
                     class: "w-full rounded bg-theme-surface/80 px-2 py-1 text-theme-text outline-none",
+                    "data-lirox-create-input": "true",
                     autofocus: "true",
                     value: "{create.value}",
                     placeholder: placeholder,
@@ -296,6 +310,12 @@ fn InlineCreateRow(
                     onkeydown: move |event| {
                         if event.key() == Key::Escape {
                             if let Some(on_create_cancel) = &on_create_cancel { on_create_cancel.call(()); }
+                        }
+                        if event.key() == Key::Character(" ".into()) {
+                            event.prevent_default();
+                            if let Some(on_create_change) = &on_create_change {
+                                on_create_change.call(format!("{}-", create.value));
+                            }
                         }
                     },
                     onblur: move |_| if let Some(on_create_cancel) = &on_create_cancel { on_create_cancel.call(()) },
@@ -318,14 +338,6 @@ fn FilesListSidebar(view: WorkspaceView, on_select_note: Option<EventHandler<Str
                 }
             }
         }
-    }
-}
-
-fn parent_directory(path: &str) -> Option<&str> {
-    if path.is_empty() {
-        None
-    } else {
-        Some(path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or(""))
     }
 }
 
@@ -426,7 +438,7 @@ fn TreeRow(
     row: TreeEntry,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
-    let indent = if row.depth == 0 { "pl-1" } else { "pl-4" };
+    let indent = tree_row_indent(row.depth);
     let icon = match row.kind {
         TreeKind::Folder => "▸",
         TreeKind::File => "",
@@ -461,7 +473,7 @@ fn TreeRow(
         li {
             div { class: "flex items-center gap-2 py-px text-ui", "data-context-dir": context_dir, "data-context-path": context_path, "data-context-kind": if row.kind == TreeKind::Folder { "folder" } else { "file" }, "data-context-count": context_count,
                 if row.kind == TreeKind::File {
-                    a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &row.path), onclick: move |event| {
+                    a { class: format!("{classes} w-full pr-2"), style: indent, href: note_href(&slug, &row.path), onclick: move |event| {
                         event.prevent_default();
                         if let Some(on_select_note) = &on_select_note { on_select_note.call(row.path.clone()); }
                     },
@@ -470,7 +482,7 @@ fn TreeRow(
                         DirtyMarker { note_path: row_path }
                     }
                 } else {
-                    a { class: format!("{classes} w-full {indent} pr-2"), href: note_href(&slug, &folder_target), onclick: move |event| {
+                    a { class: format!("{classes} w-full pr-2"), style: indent, href: note_href(&slug, &folder_target), onclick: move |event| {
                         event.prevent_default();
                         if let Some(on_select_note) = &on_select_note { on_select_note.call(folder_target.clone()); }
                     },
@@ -781,6 +793,32 @@ fn ModeButton(
 
     rsx! {
         button { class: classes, title: title, aria_label: title, onclick: move |_| if let Some(on_action) = &on_action { on_action.call(action.clone()) }, "{label}" }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{create_row_matches, tree_row_indent};
+    use liroxnotes_shared::{TreeEntry, TreeKind};
+
+    #[test]
+    fn renders_create_row_for_a_note_stem_that_is_not_a_folder_yet() {
+        let row = TreeEntry {
+            kind: TreeKind::File,
+            label: "roadmap.md".to_string(),
+            path: "notes/roadmap.md".to_string(),
+            depth: 1,
+            active: true,
+        };
+
+        assert!(create_row_matches(&row, "notes/roadmap"));
+    }
+
+    #[test]
+    fn increases_tree_indent_for_each_nested_level() {
+        assert_eq!(tree_row_indent(0), "padding-left: 0.25rem");
+        assert_eq!(tree_row_indent(1), "padding-left: 1rem");
+        assert_eq!(tree_row_indent(2), "padding-left: 2rem");
     }
 }
 

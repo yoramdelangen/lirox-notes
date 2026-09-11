@@ -20,7 +20,7 @@ cargo run -p liroxnotes-gateway
 
 On first launch, the gateway opens onboarding and asks for workspace path, optional Git remote URL, and branch.
 
-The MVP uses a local session login first. Open `http://127.0.0.1:3000`, enter any display name, configure a workspace, then edit a note and press Save or `Cmd/Ctrl+S`. Each save writes the Markdown file and creates a real Git commit in the configured workspace.
+The MVP uses a local session login first. Open `http://127.0.0.1:3010`, enter any display name, configure a workspace, then edit a note and press Save or `Cmd/Ctrl+S`. Each save writes the Markdown file and creates a real Git commit in the configured workspace.
 
 If you set a Git remote URL during onboarding or through `POST /api/repositories/demo/connect`, manual sync runs `git pull --ff-only` and `git push` against that remote.
 
@@ -46,7 +46,7 @@ Custom port:
 ./scripts/dx-serve --port 4100
 ```
 
-The Dioxus dev server uses the requested port. The Actix gateway runs beside it on `LIROX_GATEWAY_PORT` or `3000`.
+The Dioxus dev server uses the requested port. The Actix gateway runs beside it on `LIROX_GATEWAY_PORT` or `3010`.
 
 Gateway-only check:
 

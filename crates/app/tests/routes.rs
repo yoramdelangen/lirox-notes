@@ -1,6 +1,7 @@
 use liroxnotes_app::{
-    frontend_state_from_auth_flags, sidebar_create_path, workspace_location_for_note_path,
-    workspace_note_path_from_location, FrontendState, SidebarCreateKind, SidebarCreateState,
+    frontend_state_from_auth_flags, sidebar_context_directory_for_note, sidebar_create_path,
+    workspace_location_for_note_path, workspace_note_path_from_location, FrontendState,
+    SidebarCreateKind, SidebarCreateState,
 };
 
 #[test]
@@ -26,7 +27,7 @@ fn auth_state_prefers_onboarding_over_login() {
 #[test]
 fn parses_selected_note_from_workspace_route() {
     assert_eq!(
-        workspace_note_path_from_location("/workspace/notes/note/notes/roadmap.md"),
+        workspace_note_path_from_location("/workspace/notes/note/notes/roadmap"),
         Some("notes/roadmap.md".to_string())
     );
     assert_eq!(workspace_note_path_from_location("/workspace/notes"), None);
@@ -44,7 +45,7 @@ fn builds_folder_friendly_workspace_routes() {
     );
     assert_eq!(
         workspace_location_for_note_path("notes", "projects/demo/todo.md"),
-        "/workspace/notes/note/projects/demo/todo.md"
+        "/workspace/notes/note/projects/demo/todo"
     );
 }
 
@@ -82,4 +83,17 @@ fn builds_nested_sidebar_create_paths() {
         }),
         Some("projects/client-a/Sprint-Notes.md".to_string())
     );
+}
+
+#[test]
+fn creates_notes_beneath_the_context_note() {
+    assert_eq!(
+        sidebar_context_directory_for_note("notes/roadmap.md"),
+        "notes/roadmap"
+    );
+    assert_eq!(
+        sidebar_context_directory_for_note("projects/README.md"),
+        "projects"
+    );
+    assert_eq!(sidebar_context_directory_for_note("HOME.md"), "HOME");
 }

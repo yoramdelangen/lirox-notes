@@ -1,7 +1,7 @@
 # LiroxNotes Gateway API
 
 ```http
-@host = http://127.0.0.1:3000
+@host = http://127.0.0.1:3010
 @workspace = /tmp/liroxnotes-workspace
 @note = notes/manual.md
 ```

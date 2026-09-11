@@ -12,9 +12,10 @@ const pendingTitleSelections = new Map();
 let activeRoot = null;
 let leader = null;
 let sidebarContextMenu = null;
+let pendingCreateFocus = false;
 
 const editorApi = () => window.LiroxNotesEditor;
-const apiOrigin = () => ["127.0.0.1", "localhost"].includes(window.location.hostname) && window.location.port !== "3000" ? `http://${window.location.hostname}:3000` : "";
+const apiOrigin = () => ["127.0.0.1", "localhost"].includes(window.location.hostname) && window.location.port !== "3010" ? `http://${window.location.hostname}:3010` : "";
 const noteApiUrl = (root) => root.dataset.notePath ? `${apiOrigin()}/api/notes/${encodeURI(root.dataset.notePath)}` : null;
 
 const retryRefresh = (root) => {
@@ -85,6 +86,7 @@ const dispatchVirtualNote = (path) => {
 };
 
 const dispatchStartCreate = (dir, kind) => {
+  pendingCreateFocus = true;
   window.dispatchEvent(new CustomEvent("liroxnotes-start-create", { detail: { dir, kind } }));
 };
 
@@ -205,6 +207,45 @@ const focusSidebarEdge = (last) => {
   return true;
 };
 
+const activateSidebarItem = () => {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !active.closest(sidebarRootSelector)) {
+    return false;
+  }
+
+  if (!active.matches("a[href], button:not([disabled])")) {
+    return false;
+  }
+
+  active.click();
+  requestAnimationFrame(focusEditor);
+  return true;
+};
+
+const focusedSidebarCreateDir = () => {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !active.closest(sidebarRootSelector)) {
+    return null;
+  }
+
+  const context = active.closest("[data-context-kind]");
+  if (!(context instanceof HTMLElement)) {
+    return active.matches("[data-lirox-sidebar-root]") ? active.dataset.contextDir ?? "" : null;
+  }
+
+  return context.dataset.contextDir ?? "";
+};
+
+const startSidebarNote = () => {
+  const dir = focusedSidebarCreateDir();
+  if (dir == null) {
+    return false;
+  }
+
+  dispatchStartCreate(dir, "note");
+  return true;
+};
+
 const saveCurrentDoc = async (root) => {
   const state = editorState.get(root);
   if (!state || state.detail == null) {
@@ -320,6 +361,32 @@ const closeSidebarContextMenu = () => {
   }
 };
 
+const focusPendingCreateInput = () => {
+  if (!pendingCreateFocus) {
+    return;
+  }
+
+  const input = document.querySelector("[data-lirox-create-input]");
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+
+  pendingCreateFocus = false;
+  input.focus();
+  input.select();
+};
+
+const cancelSidebarCreate = () => {
+  const input = document.activeElement;
+  if (!(input instanceof HTMLInputElement) || !input.matches("[data-lirox-create-input]")) {
+    return false;
+  }
+
+  pendingCreateFocus = false;
+  input.blur();
+  return true;
+};
+
 const ensureSidebarContextMenu = () => {
   if (sidebarContextMenu instanceof HTMLElement) {
     return sidebarContextMenu;
@@ -402,7 +469,7 @@ const wireSidebarRoot = (root) => {
       return;
     }
 
-    const contextTarget = target.closest("[data-context-dir]") ?? root;
+    const contextTarget = target.closest("[data-context-kind]");
     const contextDir = contextTarget instanceof HTMLElement ? contextTarget.dataset.contextDir ?? "" : "";
     const contextPath = contextTarget instanceof HTMLElement ? contextTarget.dataset.contextPath ?? "" : "";
     const contextKind = contextTarget instanceof HTMLElement ? contextTarget.dataset.contextKind ?? "" : "";
@@ -447,6 +514,8 @@ const mountOrRefreshEditors = () => {
     wireEditorRoot(root);
     void refreshEditorRoot(root);
   });
+
+  requestAnimationFrame(focusPendingCreateInput);
 };
 
 document.addEventListener("keydown", (event) => {
@@ -457,6 +526,20 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (event.key === "Escape" && cancelSidebarCreate()) {
+    event.preventDefault();
+    leader = null;
+    return;
+  }
+
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && isSidebarFocused()) {
+    if (startSidebarNote()) {
+      event.preventDefault();
+      leader = null;
+      return;
+    }
+  }
+
   if (event.key === "Escape" || (event.ctrlKey && event.key === "[")) {
     event.preventDefault();
     focusSidebar();
@@ -464,11 +547,19 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (isSidebarFocused() && event.key === "i") {
+  if (isSidebarFocused() && !isEditable(event.target) && event.key === "i") {
     event.preventDefault();
     focusEditor();
     leader = null;
     return;
+  }
+
+  if (!event.metaKey && !event.ctrlKey && !event.altKey && isSidebarFocused() && event.key.toLowerCase() === "n") {
+    if (startSidebarNote()) {
+      event.preventDefault();
+      leader = null;
+      return;
+    }
   }
 
   if (event.key === "Enter" && document.activeElement?.matches?.("[data-lirox-sidebar-root]")) {
@@ -476,6 +567,14 @@ document.addEventListener("keydown", (event) => {
     focusEditor();
     leader = null;
     return;
+  }
+
+  if (isSidebarFocused() && (event.key === "Enter" || event.key === " ")) {
+    if (activateSidebarItem()) {
+      event.preventDefault();
+      leader = null;
+      return;
+    }
   }
 
   if (isSidebarFocused() && (event.key === "ArrowDown" || event.key.toLowerCase() === "j")) {

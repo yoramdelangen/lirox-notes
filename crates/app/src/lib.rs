@@ -145,6 +145,16 @@ pub fn sidebar_create_path(create: &SidebarCreateState) -> Option<String> {
     })
 }
 
+pub fn sidebar_context_directory_for_note(path: &str) -> String {
+    if path == "README.md" {
+        return String::new();
+    }
+    if let Some(directory) = path.strip_suffix("/README.md") {
+        return directory.to_string();
+    }
+    path.strip_suffix(".md").unwrap_or(path).to_string()
+}
+
 #[cfg(target_arch = "wasm32")]
 impl AppAction {
     fn from_str(action: &str) -> Option<Self> {
@@ -238,7 +248,7 @@ pub fn App() -> Element {
                             frontend_state.set(frontend_state_from_auth(&session));
                             status_message.set(String::new());
                         } else {
-                            status_message.set("Installation failed. Is the gateway running on port 3000?".to_string());
+                            status_message.set("Installation failed. Is the gateway running on port 3010?".to_string());
                         }
                     });
                 }
@@ -265,7 +275,7 @@ pub fn App() -> Element {
                             frontend_state.set(frontend_state_from_auth(&session));
                             status_message.set(String::new());
                         } else {
-                            status_message.set("Login failed. Is the gateway running on port 3000?".to_string());
+                            status_message.set("Login failed. Is the gateway running on port 3010?".to_string());
                         }
                     });
                 }
@@ -498,8 +508,8 @@ fn api_origin() -> String {
     let location = window.location();
     let port = location.port().unwrap_or_default();
     let host = location.hostname().unwrap_or_default();
-    if (host == "127.0.0.1" || host == "localhost") && port != "3000" {
-        format!("http://{host}:3000")
+    if (host == "127.0.0.1" || host == "localhost") && port != "3010" {
+        format!("http://{host}:3010")
     } else {
         String::new()
     }
@@ -511,7 +521,13 @@ pub fn workspace_note_path_from_location(path: &str) -> Option<String> {
     let (_, note_path) = rest.split_once('/')?;
 
     if let Some(note_path) = note_path.strip_prefix("note/") {
-        return (!note_path.is_empty()).then(|| note_path.to_string());
+        return (!note_path.is_empty()).then(|| {
+            if note_path.ends_with(".md") {
+                note_path.to_string()
+            } else {
+                format!("{note_path}.md")
+            }
+        });
     }
 
     let folder_path = note_path.trim_matches('/');
@@ -527,7 +543,8 @@ pub fn workspace_location_for_note_path(workspace_slug: &str, note_path: &str) -
         return format!("/workspace/{workspace_slug}/{folder_path}/");
     }
 
-    format!("/workspace/{workspace_slug}/note/{note_path}")
+    let display_path = note_path.strip_suffix(".md").unwrap_or(note_path);
+    format!("/workspace/{workspace_slug}/note/{display_path}")
 }
 
 pub fn current_workspace_note_path() -> Option<String> {

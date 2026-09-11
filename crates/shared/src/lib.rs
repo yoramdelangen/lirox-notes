@@ -256,7 +256,12 @@ pub fn workspace_view_with_virtual_notes(
     let mut notes = view.notes.clone();
 
     for path in virtual_note_paths {
-        if notes.iter().any(|note| note.path == *path) {
+        let promoted_readme = path
+            .strip_suffix(".md")
+            .map(|stem| format!("{stem}/README.md"));
+        if notes.iter().any(|note| {
+            note.path == *path || promoted_readme.as_deref() == Some(note.path.as_str())
+        }) {
             continue;
         }
 

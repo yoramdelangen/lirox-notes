@@ -183,7 +183,7 @@ pub fn port_from_args(args: impl IntoIterator<Item = String>) -> u16 {
             return args
                 .next()
                 .and_then(|value| value.parse().ok())
-                .unwrap_or(3000);
+                .unwrap_or(3010);
         }
 
         if let Some(port) = arg
@@ -197,7 +197,7 @@ pub fn port_from_args(args: impl IntoIterator<Item = String>) -> u16 {
     env::var("LIROX_PORT")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or(3000)
+        .unwrap_or(3010)
 }
 
 pub fn parse_config(input: &str) -> Option<GatewayConfig> {
@@ -748,7 +748,18 @@ fn unpushed_commit_count(config: &GatewayConfig) -> usize {
 }
 
 pub fn commit_note(workspace: &Path, path: &str) -> std::io::Result<bool> {
-    let status = run_git(workspace, &["status", "--porcelain", "--", path])?;
+    commit_note_paths(workspace, &[PathBuf::from(path)])
+}
+
+fn commit_note_paths(workspace: &Path, paths: &[PathBuf]) -> std::io::Result<bool> {
+    let path_strings: Vec<String> = paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    let path_args: Vec<&str> = path_strings.iter().map(String::as_str).collect();
+    let mut status_args = vec!["status", "--porcelain", "--"];
+    status_args.extend(path_args.iter().copied());
+    let status = run_git(workspace, &status_args)?;
     if status.is_empty() {
         return Ok(false);
     }
@@ -769,8 +780,13 @@ pub fn commit_note(workspace: &Path, path: &str) -> std::io::Result<bool> {
         )?;
     }
 
-    run_git(workspace, &["add", "--", path])?;
-    run_git(workspace, &["commit", "-m", &format!("Update {path}")])?;
+    let mut add_args = vec!["add", "--"];
+    add_args.extend(path_args.iter().copied());
+    run_git(workspace, &add_args)?;
+    run_git(
+        workspace,
+        &["commit", "-m", &format!("Update {}", path_strings[0])],
+    )?;
     Ok(true)
 }
 
@@ -798,7 +814,58 @@ pub fn pull_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
     Ok(true)
 }
 
-fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::io::Result<bool> {
+pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::io::Result<bool> {
+    let Some(relative) = safe_note_path(path) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid note path",
+        ));
+    };
+
+    let mut changed_paths = vec![relative.clone()];
+    let mut directory = relative.parent();
+    while let Some(directory_path) = directory {
+        if directory_path.as_os_str().is_empty() {
+            break;
+        }
+
+        let name = directory_path.file_name().unwrap();
+        let legacy = directory_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(format!("{}.md", name.to_string_lossy()));
+        let readme = directory_path.join("README.md");
+        let legacy_absolute = config.workspace_path.join(&legacy);
+        if legacy_absolute.is_file() {
+            let readme_absolute = config.workspace_path.join(&readme);
+            if readme_absolute.exists() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!(
+                        "cannot move {} to existing {}",
+                        legacy.display(),
+                        readme.display()
+                    ),
+                ));
+            }
+            fs::create_dir_all(config.workspace_path.join(directory_path))?;
+            fs::rename(legacy_absolute, readme_absolute)?;
+            changed_paths.push(legacy);
+            changed_paths.push(readme);
+        }
+
+        directory = directory_path.parent();
+    }
+
+    let absolute = config.workspace_path.join(&relative);
+    if let Some(parent) = absolute.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&absolute, body)?;
+    commit_note_paths(&config.workspace_path, &changed_paths)
+}
+
+pub fn delete_note_file(config: &GatewayConfig, path: &str) -> std::io::Result<bool> {
     let Some(relative) = safe_note_path(path) else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -807,10 +874,11 @@ fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::io::
     };
 
     let absolute = config.workspace_path.join(&relative);
-    if let Some(parent) = absolute.parent() {
-        fs::create_dir_all(parent)?;
+    if !absolute.is_file() {
+        return Ok(false);
     }
-    fs::write(&absolute, body)?;
+
+    fs::remove_file(&absolute)?;
     commit_note(&config.workspace_path, &relative.to_string_lossy())
 }
 
@@ -1758,18 +1826,15 @@ async fn delete_workspace_file_api(
     if let Some(response) = require_configured_workspace(&config, &workspace) {
         return Ok(response);
     }
-    let Some(relative) = safe_note_path(&path) else {
-        return Ok(api_error(
-            actix_web::http::StatusCode::BAD_REQUEST,
-            "invalid note path",
-        ));
-    };
-    let absolute = config.workspace_path.join(&relative);
-    let committed = if absolute.exists() {
-        fs::remove_file(&absolute)?;
-        commit_note(&config.workspace_path, &relative.to_string_lossy())?
-    } else {
-        false
+    let committed = match delete_note_file(&config, &path) {
+        Ok(committed) => committed,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+            return Ok(api_error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "invalid note path",
+            ));
+        }
+        Err(error) => return Err(error.into()),
     };
     let mut response = HttpResponse::Ok().json(SaveResponse {
         ok: true,
