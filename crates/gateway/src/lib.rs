@@ -294,7 +294,7 @@ fn default_workspace_root(paths: &RuntimePaths) -> PathBuf {
     paths.default_workspace.clone()
 }
 
-fn app_workspace_root(paths: &RuntimePaths) -> std::io::Result<PathBuf> {
+pub(crate) fn app_workspace_root(paths: &RuntimePaths) -> std::io::Result<PathBuf> {
     match fs::read_to_string(install_file(paths)) {
         Ok(contents) => {
             for line in contents.lines() {
@@ -1352,6 +1352,13 @@ fn auth_response(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<Htt
     Ok(response)
 }
 
+fn legacy_auth_response(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<HttpResponse> {
+    let session = request_session(req, paths)?;
+    let mut response = HttpResponse::Ok().json(build_session_response(paths, session.as_ref())?);
+    cors(&mut response);
+    Ok(response)
+}
+
 #[get("/api/bootstrap")]
 async fn bootstrap_api(state: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse> {
     Ok(auth_response(&req, &state.paths)?)
@@ -1359,7 +1366,7 @@ async fn bootstrap_api(state: web::Data<AppState>, req: HttpRequest) -> Result<H
 
 #[get("/api/auth")]
 async fn auth_root_api(state: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse> {
-    Ok(auth_response(&req, &state.paths)?)
+    Ok(legacy_auth_response(&req, &state.paths)?)
 }
 
 #[get("/api/auth/session")]

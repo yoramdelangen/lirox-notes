@@ -1,4 +1,4 @@
-use crate::{is_installed, load_config, RuntimePaths};
+use crate::{app_workspace_root, is_installed, load_config, RuntimePaths};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs,
@@ -724,7 +724,7 @@ pub fn bootstrap_response(
         onboarding: persisted_onboarding_status(paths)?,
         authenticated,
         user,
-        workspace_root: paths.default_workspace.to_string_lossy().into_owned(),
+        workspace_root: app_workspace_root(paths)?.to_string_lossy().into_owned(),
         workspace: config.map(|config| GatewayConfigResponse {
             slug: config.workspace_slug,
             name: config.workspace_name,

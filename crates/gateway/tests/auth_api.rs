@@ -3,7 +3,7 @@ use actix_web::{
     http::{header, StatusCode},
     test, App,
 };
-use liroxnotes_gateway::{auth::*, configure_app, RuntimePaths};
+use liroxnotes_gateway::{auth::*, configure_app, save_config, GatewayConfig, RuntimePaths};
 use std::{
     fs,
     time::{SystemTime, UNIX_EPOCH},
@@ -64,6 +64,28 @@ impl Fixture {
                 expires_at: u64::MAX,
             })
             .unwrap();
+        fixture
+    }
+
+    fn custom_installation() -> Self {
+        let fixture = Self::authenticated();
+        let custom_root = fixture.paths.config_file.with_file_name("custom-root");
+        fs::write(
+            fixture.paths.config_file.with_file_name("install"),
+            format!("installed=true\nworkspace_root={}\n", custom_root.display()),
+        )
+        .unwrap();
+        save_config(
+            &fixture.paths.config_file,
+            &GatewayConfig {
+                workspace_slug: "notes".into(),
+                workspace_name: "Notes".into(),
+                workspace_path: custom_root.join("notes"),
+                repo_url: String::new(),
+                branch: "main".into(),
+            },
+        )
+        .unwrap();
         fixture
     }
 
@@ -172,4 +194,37 @@ async fn unauthenticated_workspace_json_is_rejected() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[actix_web::test]
+async fn bootstrap_reports_custom_application_workspace_root() {
+    let fixture = Fixture::custom_installation();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/bootstrap").to_request(),
+    )
+    .await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        bootstrap.workspace_root,
+        fixture
+            .paths
+            .config_file
+            .with_file_name("custom-root")
+            .to_string_lossy()
+    );
+}
+
+#[actix_web::test]
+async fn legacy_auth_endpoint_keeps_session_response_schema() {
+    let fixture = Fixture::fresh();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response =
+        test::call_service(&app, test::TestRequest::get().uri("/api/auth").to_request()).await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.get("auth_mode").is_some());
+    assert!(json.get("onboarding").is_none());
 }
