@@ -42,21 +42,25 @@ pub fn FileTreeSurface(
                 kbd { class: "text-xs text-[var(--lirox-subtle)]", "j/k · Enter" }
             }
             ul { class: "min-h-0 flex-1 overflow-auto p-2", role: "tree",
-                for entry in view.tree {
-                    li { key: "{entry.path}", role: "treeitem", aria_selected: "{entry.active}",
-                        button {
-                            class: "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-[var(--lirox-surface-alt)] focus:outline-none focus:ring-1 focus:ring-[var(--lirox-accent)]",
-                            class: if entry.active { "bg-[var(--lirox-selection)] text-[var(--lirox-fg)]" } else { "text-[var(--lirox-muted)]" },
-                            style: "padding-left: {entry.depth * 12 + 8}px;",
-                            aria_label: "Open {entry.label}",
-                            onclick: {
-                                let path = entry.path.clone();
-                                let dispatcher = dispatcher.clone();
-                                let on_select_note = on_select_note.clone();
-                                move |_| open_note(dispatcher.clone(), state, on_select_note.clone(), path.clone())
-                            },
-                            span { class: "w-4 text-[var(--lirox-accent)]", if entry.kind == TreeKind::Folder { "▾" } else { "·" } }
-                            span { "{entry.label}" }
+                if view.tree.is_empty() {
+                    li { class: "p-3 text-sm text-[var(--lirox-muted)]", "No notes available" }
+                } else {
+                    for entry in view.tree {
+                        li { key: "{entry.path}", role: "treeitem", aria_selected: "{entry.active}",
+                            button {
+                                class: "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-[var(--lirox-surface-alt)] focus:outline-none focus:ring-1 focus:ring-[var(--lirox-accent)]",
+                                class: if entry.active { "bg-[var(--lirox-selection)] text-[var(--lirox-fg)]" } else { "text-[var(--lirox-muted)]" },
+                                style: "padding-left: {entry.depth * 12 + 8}px;",
+                                aria_label: "Open {entry.label}",
+                                onclick: {
+                                    let path = entry.path.clone();
+                                    let dispatcher = dispatcher.clone();
+                                    let on_select_note = on_select_note.clone();
+                                    move |_| open_note(dispatcher.clone(), state, on_select_note.clone(), path.clone())
+                                },
+                                span { class: "w-4 text-[var(--lirox-accent)]", if entry.kind == TreeKind::Folder { "▾" } else { "·" } }
+                                span { "{entry.label}" }
+                            }
                         }
                     }
                 }

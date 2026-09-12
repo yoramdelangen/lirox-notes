@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use liroxnotes_shared::mock_workspace_view;
+use liroxnotes_shared::WorkspaceView;
 
 pub mod app;
 pub mod command;
@@ -47,7 +47,7 @@ pub enum AppAction {
 
 #[component]
 pub fn App() -> Element {
-    let state = use_signal(ApplicationState::demo);
+    let state = use_signal(ApplicationState::empty);
     use_context_provider(|| AppContext {
         state,
         dispatcher: Dispatcher::new(),
@@ -56,7 +56,7 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         WorkspaceShell {
-            view: mock_workspace_view("notes/welcome.md"),
+            view: WorkspaceView::empty(),
             focus: FocusTarget::Editor,
             sidebar_mode: SidebarMode::Tree,
             browser_dir: String::new(),
@@ -91,11 +91,11 @@ mod tests {
     #[test]
     fn parses_note_routes_and_folder_routes() {
         assert_eq!(
-            super::workspace_note_path_from_location("/workspace/demo/note/notes/welcome"),
+            super::workspace_note_path_from_location("/workspace/workspace/note/notes/welcome"),
             Some("notes/welcome.md".to_string())
         );
         assert_eq!(
-            super::workspace_note_path_from_location("/workspace/demo/notes/"),
+            super::workspace_note_path_from_location("/workspace/workspace/notes/"),
             Some("notes/README.md".to_string())
         );
     }

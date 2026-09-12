@@ -1,7 +1,7 @@
 use crate::{
     command::SurfaceId,
     config::AppConfig,
-    domain::DemoDomain,
+    domain::DomainState,
     input::{InputScope, InputState, SurfaceKind},
     workspace::WorkspaceState,
 };
@@ -10,7 +10,7 @@ use crate::{
 pub struct ApplicationState {
     pub input: InputState,
     pub workspace: WorkspaceState,
-    pub domain: DemoDomain,
+    pub domain: DomainState,
     pub config: AppConfig,
     pub status: StatusState,
 }
@@ -21,11 +21,11 @@ pub struct StatusState {
 }
 
 impl ApplicationState {
-    pub fn demo() -> Self {
+    pub fn empty() -> Self {
         Self {
             input: InputState::default(),
-            workspace: WorkspaceState::demo(),
-            domain: DemoDomain::demo(),
+            workspace: WorkspaceState::empty(),
+            domain: DomainState::empty(),
             config: AppConfig::defaults(),
             status: StatusState::default(),
         }

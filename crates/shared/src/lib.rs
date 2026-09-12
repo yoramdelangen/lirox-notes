@@ -49,6 +49,31 @@ pub struct WorkspaceView {
     pub notes: Vec<NoteSummary>,
 }
 
+impl WorkspaceView {
+    pub fn empty() -> Self {
+        Self {
+            slug: String::new(),
+            name: String::new(),
+            branch: String::new(),
+            source: String::new(),
+            note_count: 0,
+            changed_notes: 0,
+            unpushed_commits: 0,
+            selected_note: NoteSummary {
+                path: String::new(),
+                title: String::new(),
+                labels: Vec::new(),
+                links: Vec::new(),
+                active: false,
+            },
+            selected_note_body: String::new(),
+            tree: Vec::new(),
+            labels: Vec::new(),
+            notes: Vec::new(),
+        }
+    }
+}
+
 pub struct NoteRecord {
     pub path: &'static str,
     pub body: &'static str,

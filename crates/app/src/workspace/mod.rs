@@ -17,14 +17,14 @@ mod tests {
 
     #[test]
     fn standard_layout_contains_file_tree_and_editor() {
-        let workspace = WorkspaceState::demo();
+        let workspace = WorkspaceState::empty();
         assert!(workspace.layout.contains(SurfaceId::FILE_TREE));
         assert!(workspace.layout.contains(SurfaceId::EDITOR));
     }
 
     #[test]
     fn focus_mode_preserves_file_tree_state_and_restores_layout() {
-        let mut workspace = WorkspaceState::demo();
+        let mut workspace = WorkspaceState::empty();
         let standard = workspace.layout.clone();
         workspace
             .surface_mut(SurfaceId::FILE_TREE)
@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn file_tree_overlay_reuses_registered_surface() {
-        let mut workspace = WorkspaceState::demo();
+        let mut workspace = WorkspaceState::empty();
         workspace.toggle_focus_mode();
         workspace.open_file_tree_overlay();
         assert_eq!(
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn narrow_viewport_uses_editor_layout_and_opens_file_tree_as_overlay() {
-        let mut workspace = WorkspaceState::demo();
+        let mut workspace = WorkspaceState::empty();
         workspace.set_viewport(ViewportMode::Narrow);
 
         assert_eq!(workspace.render_layout(), LayoutNode::focus());

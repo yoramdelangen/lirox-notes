@@ -44,7 +44,7 @@ pub struct SurfaceRegistry {
 }
 
 impl SurfaceRegistry {
-    pub fn demo() -> Self {
+    pub fn empty() -> Self {
         let mut surfaces = HashMap::new();
         surfaces.insert(SurfaceId::EDITOR, SurfaceState::editor());
         surfaces.insert(SurfaceId::FILE_TREE, SurfaceState::file_tree());

@@ -24,14 +24,14 @@ pub struct WorkspaceState {
     standard_layout: LayoutNode,
 }
 impl WorkspaceState {
-    pub fn demo() -> Self {
+    pub fn empty() -> Self {
         let layout = LayoutNode::standard();
         Self {
             ui_mode: UiMode::Standard,
             viewport: ViewportMode::Wide,
             layout: layout.clone(),
             standard_layout: layout,
-            surfaces: SurfaceRegistry::demo(),
+            surfaces: SurfaceRegistry::empty(),
             focus: FocusState::default(),
             overlays: OverlayStack::default(),
         }

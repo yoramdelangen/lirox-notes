@@ -29,7 +29,9 @@ pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
                 span { class: "text-xs {mode_class}", if insert { "INSERT" } else { "NORMAL" } }
             }
             div { class: "min-h-0 flex-1 overflow-auto p-4",
-                if insert {
+                if view.note_count == 0 {
+                    p { class: "text-sm text-[var(--lirox-muted)]", "No note selected" }
+                } else if insert {
                     textarea {
                         class: "h-full min-h-64 w-full resize-none border-0 bg-transparent font-mono text-sm leading-6 text-[var(--lirox-fg)] outline-none",
                         value: "{view.selected_note_body}",

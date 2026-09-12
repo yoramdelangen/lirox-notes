@@ -28,7 +28,7 @@ mod tests {
 
     #[test]
     fn focus_mode_round_trip_restores_standard_layout() {
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         dispatch(&mut state, command("workspace.toggle_focus_mode"));
         assert_eq!(state.workspace.ui_mode, UiMode::Focus);
         dispatch(&mut state, command("workspace.toggle_focus_mode"));
@@ -38,14 +38,14 @@ mod tests {
 
     #[test]
     fn unknown_command_becomes_status_error() {
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         dispatch(&mut state, command("missing.command"));
         assert!(state.status.message.unwrap().contains("Unknown command"));
     }
 
     #[test]
     fn mode_commands_update_input_state() {
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         dispatch(&mut state, command("editor.enter_insert_mode"));
         assert_eq!(state.input.mode, InputMode::Insert);
         dispatch(&mut state, command("editor.enter_normal_mode"));
@@ -54,8 +54,7 @@ mod tests {
 
     #[test]
     fn moving_file_tree_selection_with_no_notes_sets_status_without_panicking() {
-        let mut state = ApplicationState::demo();
-        state.domain.notes.clear();
+        let mut state = ApplicationState::empty();
 
         dispatch(&mut state, command("file_tree.move_down"));
 
@@ -67,7 +66,7 @@ mod tests {
 
     #[test]
     fn opening_selected_note_only_closes_the_file_tree_overlay() {
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         state.workspace.overlays.push(OverlayEntry::file_tree());
         state.workspace.overlays.push(OverlayEntry {
             id: 2,
@@ -86,14 +85,14 @@ mod tests {
             .overlays
             .contains_surface(SurfaceId::FILE_TREE));
 
-        let mut docked = ApplicationState::demo();
+        let mut docked = ApplicationState::empty();
         dispatch(&mut docked, command("file_tree.open_selected"));
         assert_eq!(docked.workspace.overlays.top(), None);
     }
 
     #[test]
     fn modal_overlay_routes_input_to_its_surface_before_focused_surface() {
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         state.workspace.ui_mode = UiMode::Focus;
         state.workspace.open_file_tree_overlay();
 
@@ -114,7 +113,7 @@ mod tests {
 
     #[test]
     fn non_modal_overlay_does_not_take_input_priority() {
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         state.workspace.overlays.push(OverlayEntry {
             id: 2,
             surface: SurfaceId::FILE_TREE,
@@ -148,7 +147,7 @@ mod tests {
     #[test]
     fn dispatcher_preserves_effects_at_the_application_boundary() {
         let dispatcher = Dispatcher::new();
-        let mut state = ApplicationState::demo();
+        let mut state = ApplicationState::empty();
         state.domain.selected_note = Some("notes/welcome.md".into());
 
         dispatcher.dispatch(&mut state, command("editor.save"));

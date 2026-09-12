@@ -5,38 +5,19 @@ pub struct Note {
     pub body: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DemoDomain {
+pub struct DomainState {
     pub workspace_name: String,
     pub notes: Vec<Note>,
     pub selected_note: Option<String>,
     pub document: String,
 }
-impl DemoDomain {
-    pub fn demo() -> Self {
-        let notes = vec![
-            Note {
-                path: "notes/welcome.md".into(),
-                title: "Welcome".into(),
-                body: "Welcome to LiroxNotes.".into(),
-            },
-            Note {
-                path: "notes/deep.md".into(),
-                title: "Deep Notes".into(),
-                body: "A nested note for deterministic demos.".into(),
-            },
-            Note {
-                path: "projects/roadmap.md".into(),
-                title: "Roadmap".into(),
-                body: "Build the calm workbench.".into(),
-            },
-        ];
-        let selected_note = Some(notes[0].path.clone());
-        let document = notes[0].body.clone();
+impl DomainState {
+    pub fn empty() -> Self {
         Self {
-            workspace_name: "LiroxNotes".into(),
-            notes,
-            selected_note,
-            document,
+            workspace_name: String::new(),
+            notes: Vec::new(),
+            selected_note: None,
+            document: String::new(),
         }
     }
     pub fn open_note(&mut self, path: &str) -> bool {
