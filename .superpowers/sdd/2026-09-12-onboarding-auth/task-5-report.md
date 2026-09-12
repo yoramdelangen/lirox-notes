@@ -46,3 +46,45 @@
 - Existing request files under `crates/gateway/http/` still contain historical
   `/api/auth/login` examples; they were outside Task 5's requested file set and
   are not active gateway routes.
+
+## Task 5 Review Fix
+
+### Findings Fixed
+
+- Removed config-presence inference from `auth::persisted_onboarding_status`.
+  Markerless legacy or partial configs remain `workspace_required`; no
+  automatic migration can falsely claim completion.
+- Moved `mark_installed` in `POST /api/workspaces` after workspace setup, Git
+  configuration, and config persistence. Completion is appended only after the
+  install marker write succeeds.
+- Workspace bootstrap failures return status `500` with the common
+  `{ "error": "<message>" }` JSON envelope and do not write markers.
+- Clarified JSON versus legacy plain-text error behavior in `API.md`.
+- Removed duplicated endpoint contracts from `ONBOARDING_AUTH.md`; exact API
+  contracts remain owned by `API.md`.
+
+### Tests
+
+- Added `preexisting_workspace_config_without_completion_marker_requires_onboarding`.
+- Added `workspace_creation_failure_keeps_onboarding_required_and_returns_json_error`.
+- Both focused tests failed against the old behavior and passed after the fix.
+
+### Verification
+
+- `cargo test -p liroxnotes-gateway --tests`: passed, 18 unit, 9 auth API, and
+  22 Git workspace tests.
+- `cargo test -p liroxnotes-shared --test workspace`: passed, 7 tests.
+- `cargo check --workspace --locked`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `dx check --package liroxnotes-app`: passed, no issues found.
+- `git diff --check`: passed.
+
+### Fix Commit
+
+- `02cc5e7 fix: make onboarding completion marker authoritative`
+- Report update is committed separately.
+
+### Remaining Concern
+
+- Historical `/api/auth/login` examples remain in `crates/gateway/http/`,
+  outside this review-fix scope and not active gateway routes.
