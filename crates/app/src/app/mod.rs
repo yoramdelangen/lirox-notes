@@ -3,7 +3,7 @@ mod event;
 mod reducer;
 mod state;
 
-pub use dispatcher::dispatch;
+pub use dispatcher::{dispatch, Dispatcher};
 pub use event::{ApplicationEvent, StatusEvent, WorkspaceEvent};
 pub use reducer::{apply_event, Effect};
 pub use state::{ApplicationState, StatusState};

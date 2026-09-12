@@ -2065,6 +2065,8 @@ dependencies = [
  "dioxus",
  "liroxnotes-shared",
  "serde",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

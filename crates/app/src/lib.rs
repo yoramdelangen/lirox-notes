@@ -6,7 +6,17 @@ pub mod command;
 pub mod config;
 pub mod domain;
 pub mod input;
+pub mod platform;
 pub mod workspace;
+
+use app::{ApplicationState, Dispatcher};
+use input::InputEvent;
+
+#[derive(Clone, Copy)]
+pub struct AppContext {
+    pub state: Signal<ApplicationState>,
+    pub dispatcher: Dispatcher,
+}
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
@@ -36,6 +46,11 @@ pub enum AppAction {
 
 #[component]
 pub fn App() -> Element {
+    let state = use_signal(ApplicationState::demo);
+    use_context_provider(|| AppContext {
+        state,
+        dispatcher: Dispatcher,
+    });
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
@@ -59,6 +74,28 @@ pub fn WorkspaceShell(
     on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
+    let context = use_context::<AppContext>();
+    let onkeydown = move |event: KeyboardEvent| {
+        let Some(InputEvent::Key(stroke)) =
+            platform::web::keyboard::normalize_keyboard_event(&event)
+        else {
+            return;
+        };
+        if !platform::web::keyboard::should_intercept(&event) {
+            return;
+        }
+        let mut state = context.state;
+        let result = {
+            let mut state = state.write();
+            let bindings = state.config.keymaps.bindings.clone();
+            let scopes = state.active_input_scopes();
+            input::resolve(&bindings, &mut state.input, stroke, &scopes)
+        };
+        if let input::ResolveResult::Matched(invocation) = result {
+            event.prevent_default();
+            context.dispatcher.dispatch(&mut state.write(), invocation);
+        }
+    };
     let focus_label = match focus {
         FocusTarget::Sidebar => "sidebar",
         FocusTarget::Editor => "editor",
@@ -71,6 +108,7 @@ pub fn WorkspaceShell(
     let note_path = view.selected_note.path.clone();
     rsx! {
         main {
+            onkeydown: onkeydown,
             class: "min-h-screen bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
             id: "workspace-shell",
             h1 { class: "border-b border-[var(--lirox-border)] p-3 text-sm", "LiroxNotes" }

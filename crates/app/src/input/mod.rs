@@ -6,6 +6,11 @@ mod scope;
 mod sequence;
 mod state;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InputEvent {
+    Key(KeyStroke),
+}
+
 pub use key::{Key, KeyStroke, Modifiers};
 pub use keymap::KeyBinding;
 pub use mode::InputMode;
