@@ -254,4 +254,22 @@ mod tests {
         assert_eq!(state.auth.screen, Screen::Login);
         assert_eq!(state.auth.operation, AuthOperation::None);
     }
+
+    #[test]
+    fn queued_effects_advance_the_reactive_version_without_operation_state() {
+        let mut state = crate::app::ApplicationState::empty();
+        let dispatcher = crate::app::Dispatcher::new();
+        dispatcher.dispatch_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(
+                BootstrapState::authenticated_complete(),
+            )),
+        );
+        assert_eq!(state.auth.operation, AuthOperation::None);
+        assert_eq!(state.effect_version, 1);
+        assert_eq!(
+            dispatcher.take_effects(),
+            vec![crate::app::Effect::LoadWorkspace]
+        );
+    }
 }

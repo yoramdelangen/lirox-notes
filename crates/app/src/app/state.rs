@@ -16,6 +16,7 @@ pub struct ApplicationState {
     pub config: AppConfig,
     pub status: StatusState,
     pub auth: AuthState,
+    pub effect_version: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -32,6 +33,7 @@ impl ApplicationState {
             config: AppConfig::defaults(),
             status: StatusState::default(),
             auth: AuthState::default(),
+            effect_version: 0,
         }
     }
 

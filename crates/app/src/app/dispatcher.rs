@@ -14,12 +14,19 @@ impl Dispatcher {
 
     pub fn dispatch(&self, state: &mut ApplicationState, invocation: CommandInvocation) {
         let effects = dispatch(state, invocation);
-        self.effects.borrow_mut().extend(effects);
+        self.enqueue(state, effects);
     }
 
     pub fn dispatch_event(&self, state: &mut ApplicationState, event: ApplicationEvent) {
         let effects = super::reducer::apply_event(state, event);
-        self.effects.borrow_mut().extend(effects);
+        self.enqueue(state, effects);
+    }
+
+    fn enqueue(&self, state: &mut ApplicationState, effects: Vec<Effect>) {
+        if !effects.is_empty() {
+            state.effect_version = state.effect_version.wrapping_add(1);
+            self.effects.borrow_mut().extend(effects);
+        }
     }
 
     pub fn dispatch_auth_command(&self, state: &mut ApplicationState, command: AuthCommand) {

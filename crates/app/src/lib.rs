@@ -67,6 +67,7 @@ pub fn App() -> Element {
         && state.read().auth.workspace.is_some();
     let effect_dispatcher = dispatcher.clone();
     use_effect(move || {
+        let _ = state.read().effect_version;
         let _ = state.read().auth.operation.clone();
         let effect_dispatcher = effect_dispatcher.clone();
         spawn(async move {

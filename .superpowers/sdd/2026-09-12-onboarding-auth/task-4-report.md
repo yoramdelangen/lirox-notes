@@ -47,6 +47,20 @@
 
 - Native passkey and fresh-install browser flow are covered by compile/SSR checks but still need browser automation with a WebAuthn virtual authenticator.
 
+## Round 2 Fixes
+
+- Added a monotonic `effect_version` at the dispatcher boundary and made the app effect hook observe it, so effects queued while auth remains idle are reactive.
+- Kept the fresh-install registration surface interactive and added visible workspace setup through `POST /api/workspaces`.
+- Added retryable handling for rejected inline workspace creation requests.
+- Added reducer tests covering idle queue scheduling, auth expiry, operation transitions, and workspace gating.
+
+## Round 2 Verification
+
+- `cargo test -p liroxnotes-app -p liroxnotes-gateway`: pass, 44 app tests, 18 gateway unit tests, and 28 gateway integration tests.
+- `cargo check --workspace --locked`: pass.
+- `cargo fmt --all -- --check`: pass.
+- `dx check --package liroxnotes-app`: pass.
+
 ## Concerns
 
 - The WebAuthn adapter intentionally does not persist credential material. Browser hardware execution still needs an end-to-end browser test.
