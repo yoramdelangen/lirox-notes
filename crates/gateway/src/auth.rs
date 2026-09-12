@@ -8,6 +8,8 @@ use std::{
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
+use uuid::Uuid;
+use webauthn_rs::prelude::*;
 
 const RECORD_VERSION: u8 = 1;
 
@@ -192,6 +194,244 @@ pub struct AuthStore {
     paths: RuntimePaths,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthError {
+    ChallengeExpired,
+    ChallengeNotFound,
+    ChallengeMismatch,
+    RegistrationClosed,
+    LoginUnavailable,
+    VerificationFailed,
+    Storage(String),
+    Configuration(String),
+}
+
+impl std::fmt::Display for AuthError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::ChallengeExpired => "challenge expired",
+            Self::ChallengeNotFound => "challenge not found",
+            Self::ChallengeMismatch => "challenge mismatch",
+            Self::RegistrationClosed => "registration is already complete",
+            Self::LoginUnavailable => "login is not available",
+            Self::VerificationFailed => "passkey verification failed",
+            Self::Storage(_) => "auth storage failed",
+            Self::Configuration(_) => "invalid WebAuthn configuration",
+        })
+    }
+}
+
+impl std::error::Error for AuthError {}
+
+impl From<io::Error> for AuthError {
+    fn from(error: io::Error) -> Self {
+        Self::Storage(error.to_string())
+    }
+}
+
+#[derive(Clone)]
+pub struct AuthService {
+    pub store: AuthStore,
+    pub webauthn: Webauthn,
+    session_ttl: u64,
+}
+
+impl AuthService {
+    pub fn new(store: AuthStore, webauthn: Webauthn, session_ttl: u64) -> Self {
+        Self {
+            store,
+            webauthn,
+            session_ttl,
+        }
+    }
+
+    pub fn from_env(paths: RuntimePaths) -> Result<Self, AuthError> {
+        let rp_id = std::env::var("LIROX_RP_ID").unwrap_or_else(|_| "localhost".into());
+        let origin =
+            std::env::var("LIROX_RP_ORIGIN").unwrap_or_else(|_| "http://localhost:3010".into());
+        let origin =
+            Url::parse(&origin).map_err(|error| AuthError::Configuration(error.to_string()))?;
+        let webauthn = WebauthnBuilder::new(&rp_id, &origin)
+            .map_err(|error| AuthError::Configuration(error.to_string()))?
+            .rp_name("LiroxNotes")
+            .build()
+            .map_err(|error| AuthError::Configuration(error.to_string()))?;
+        let session_ttl = std::env::var("LIROX_SESSION_TTL_SECONDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(2_592_000);
+        Ok(Self::new(AuthStore::new(paths), webauthn, session_ttl))
+    }
+
+    pub fn registration_options(&self) -> Result<(String, CreationChallengeResponse), AuthError> {
+        if self
+            .store
+            .load_account()?
+            .is_some_and(|account| !account.credentials.is_empty())
+        {
+            return Err(AuthError::RegistrationClosed);
+        }
+        let (options, state) = self
+            .webauthn
+            .start_passkey_registration(Uuid::new_v4(), "local", "LiroxNotes", None)
+            .map_err(|_| AuthError::VerificationFailed)?;
+        let challenge_id = Uuid::new_v4().to_string();
+        self.store.save_challenge(&ChallengeRecord {
+            version: RECORD_VERSION,
+            challenge_id: challenge_id.clone(),
+            challenge: serde_json::to_string(&state)
+                .map_err(|error| AuthError::Storage(error.to_string()))?,
+            operation: ChallengeOperation::Registration,
+            account_id: None,
+            expires_at: unix_seconds().saturating_add(300),
+        })?;
+        Ok((challenge_id, options))
+    }
+
+    pub fn store_registration_challenge(&self, challenge: ChallengeRecord) {
+        self.store
+            .save_challenge(&challenge)
+            .expect("test challenge persistence should succeed");
+    }
+
+    pub fn verify_registration(
+        &self,
+        challenge_id: &str,
+        credential: &RegisterPublicKeyCredential,
+    ) -> Result<StoredSession, AuthError> {
+        let challenge = self
+            .store
+            .load_challenge()?
+            .ok_or(AuthError::ChallengeNotFound)?;
+        if challenge.challenge_id != challenge_id {
+            return Err(AuthError::ChallengeMismatch);
+        }
+        if challenge.operation != ChallengeOperation::Registration {
+            return Err(AuthError::ChallengeMismatch);
+        }
+        let state: PasskeyRegistration = serde_json::from_str(&challenge.challenge)
+            .map_err(|_| AuthError::VerificationFailed)?;
+        let passkey = self
+            .webauthn
+            .finish_passkey_registration(credential, &state)
+            .map_err(|_| AuthError::VerificationFailed)?;
+        self.store
+            .consume_challenge_record_matching(challenge_id, unix_seconds())?
+            .ok_or(AuthError::ChallengeNotFound)?;
+        let credential_id = serde_json::to_string(passkey.cred_id())
+            .map_err(|error| AuthError::Storage(error.to_string()))?;
+        let public_key = serde_json::to_string(&passkey)
+            .map_err(|error| AuthError::Storage(error.to_string()))?;
+        self.store
+            .save_account(&AccountRecord::with_credential(CredentialRecord {
+                credential_id,
+                public_key,
+                sign_count: 0,
+                label: "Passkey".into(),
+            }))?;
+        self.rotate_session()
+    }
+
+    pub fn login_options(&self) -> Result<(String, RequestChallengeResponse), AuthError> {
+        let account = self
+            .store
+            .load_account()?
+            .ok_or(AuthError::LoginUnavailable)?;
+        let credentials = account
+            .credentials
+            .iter()
+            .map(|credential| serde_json::from_str::<Passkey>(&credential.public_key))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::VerificationFailed)?;
+        let (options, state) = self
+            .webauthn
+            .start_passkey_authentication(&credentials)
+            .map_err(|_| AuthError::VerificationFailed)?;
+        let challenge_id = Uuid::new_v4().to_string();
+        self.store.save_challenge(&ChallengeRecord {
+            version: RECORD_VERSION,
+            challenge_id: challenge_id.clone(),
+            challenge: serde_json::to_string(&state)
+                .map_err(|error| AuthError::Storage(error.to_string()))?,
+            operation: ChallengeOperation::Authentication,
+            account_id: None,
+            expires_at: unix_seconds().saturating_add(300),
+        })?;
+        Ok((challenge_id, options))
+    }
+
+    pub fn verify_login(
+        &self,
+        challenge_id: &str,
+        credential: &PublicKeyCredential,
+    ) -> Result<StoredSession, AuthError> {
+        let challenge = self
+            .store
+            .load_challenge()?
+            .ok_or(AuthError::ChallengeNotFound)?;
+        if challenge.challenge_id != challenge_id {
+            return Err(AuthError::ChallengeMismatch);
+        }
+        if challenge.operation != ChallengeOperation::Authentication {
+            return Err(AuthError::ChallengeMismatch);
+        }
+        let state: PasskeyAuthentication = serde_json::from_str(&challenge.challenge)
+            .map_err(|_| AuthError::VerificationFailed)?;
+        let result = self
+            .webauthn
+            .finish_passkey_authentication(credential, &state)
+            .map_err(|_| AuthError::VerificationFailed)?;
+        self.store
+            .consume_challenge_record_matching(challenge_id, unix_seconds())?
+            .ok_or(AuthError::ChallengeNotFound)?;
+        let mut account = self
+            .store
+            .load_account()?
+            .ok_or(AuthError::LoginUnavailable)?;
+        let credential_id = serde_json::to_string(&result.cred_id())
+            .map_err(|error| AuthError::Storage(error.to_string()))?;
+        let record = account
+            .credentials
+            .iter_mut()
+            .find(|record| record.credential_id == credential_id)
+            .ok_or(AuthError::VerificationFailed)?;
+        record.sign_count = result.counter();
+        self.store.save_account(&account)?;
+        self.rotate_session()
+    }
+
+    pub fn consume_challenge(
+        &self,
+        challenge_id: &str,
+        now: u64,
+    ) -> Result<ChallengeRecord, AuthError> {
+        let challenge = self
+            .store
+            .consume_challenge_record()?
+            .ok_or(AuthError::ChallengeNotFound)?;
+        if challenge.challenge_id != challenge_id {
+            return Err(AuthError::ChallengeMismatch);
+        }
+        if challenge.expires_at <= now {
+            return Err(AuthError::ChallengeExpired);
+        }
+        Ok(challenge)
+    }
+
+    fn rotate_session(&self) -> Result<StoredSession, AuthError> {
+        let created_at = unix_seconds();
+        let session = StoredSession {
+            version: RECORD_VERSION,
+            token: Uuid::new_v4().to_string(),
+            user: "local".into(),
+            created_at,
+            expires_at: created_at.saturating_add(self.session_ttl),
+        };
+        self.store.save_session(&session)?;
+        Ok(session)
+    }
+}
+
 static PERSISTENCE_LOCK: Mutex<()> = Mutex::new(());
 
 impl AuthStore {
@@ -234,6 +474,35 @@ impl AuthStore {
         };
         self.remove("challenge.json")?;
         Ok((challenge.expires_at > now).then_some(challenge))
+    }
+
+    fn consume_challenge_record(&self) -> io::Result<Option<ChallengeRecord>> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
+        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
+            return Ok(None);
+        };
+        self.remove("challenge.json")?;
+        Ok(Some(challenge))
+    }
+
+    fn consume_challenge_record_matching(
+        &self,
+        challenge_id: &str,
+        now: u64,
+    ) -> io::Result<Option<ChallengeRecord>> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
+        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
+            return Ok(None);
+        };
+        if challenge.challenge_id != challenge_id || challenge.expires_at <= now {
+            return Ok(None);
+        }
+        self.remove("challenge.json")?;
+        Ok(Some(challenge))
     }
 
     pub fn load_session(&self) -> io::Result<Option<StoredSession>> {
@@ -569,5 +838,54 @@ mod tests {
             .count();
         assert_eq!(consumed, 1);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn test_service_at(_now: u64) -> AuthService {
+        let root = std::env::temp_dir().join(format!(
+            "lirox-auth-service-{}",
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let store = AuthStore::new(RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        });
+        let origin = Url::parse("http://localhost:3010").unwrap();
+        let webauthn = WebauthnBuilder::new("localhost", &origin)
+            .unwrap()
+            .build()
+            .unwrap();
+        AuthService::new(store, webauthn, 2_592_000)
+    }
+
+    fn challenge(id: &str, expires_at: u64) -> ChallengeRecord {
+        ChallengeRecord {
+            version: RECORD_VERSION,
+            challenge_id: id.into(),
+            challenge: "state".into(),
+            operation: ChallengeOperation::Registration,
+            account_id: None,
+            expires_at,
+        }
+    }
+
+    #[test]
+    fn expired_challenge_is_rejected() {
+        let service = test_service_at(100);
+        service.store_registration_challenge(challenge("c", 90));
+        assert!(matches!(
+            service.consume_challenge("c", 100),
+            Err(AuthError::ChallengeExpired)
+        ));
+    }
+
+    #[test]
+    fn challenge_cannot_be_consumed_twice() {
+        let service = test_service_at(100);
+        service.store_registration_challenge(challenge("c", 200));
+        service.consume_challenge("c", 100).unwrap();
+        assert!(matches!(
+            service.consume_challenge("c", 100),
+            Err(AuthError::ChallengeNotFound)
+        ));
     }
 }

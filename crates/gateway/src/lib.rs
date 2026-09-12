@@ -19,6 +19,7 @@ use std::{
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
+use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
 pub mod auth;
 mod components;
@@ -28,6 +29,7 @@ mod routes;
 #[derive(Clone)]
 struct AppState {
     paths: RuntimePaths,
+    auth: auth::AuthService,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,9 +104,27 @@ struct InstallRequest {
 }
 
 #[derive(Deserialize)]
-struct LoginRequest {
-    user: Option<String>,
-    password: Option<String>,
+struct PasskeyRegistrationVerifyRequest {
+    challenge_id: String,
+    credential: RegisterPublicKeyCredential,
+}
+
+#[derive(Deserialize)]
+struct PasskeyLoginVerifyRequest {
+    challenge_id: String,
+    credential: PublicKeyCredential,
+}
+
+#[derive(Serialize)]
+struct PasskeyOptions<T> {
+    challenge_id: String,
+    #[serde(flatten)]
+    options: T,
+}
+
+#[derive(Serialize)]
+struct PasskeySessionResponse {
+    authenticated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1046,14 +1066,6 @@ fn parse_login_form(body: &str) -> (String, String) {
     (user, password)
 }
 
-fn login_error(message: &str) -> std::io::Result<HttpResponse> {
-    let mut response = HttpResponse::Unauthorized().json(ErrorResponse {
-        error: message.to_string(),
-    });
-    cors(&mut response);
-    Ok(response)
-}
-
 fn build_session_response(
     paths: &RuntimePaths,
     session: Option<&Session>,
@@ -1452,33 +1464,103 @@ async fn auth_api(state: web::Data<AppState>, req: HttpRequest) -> Result<HttpRe
     Ok(auth_response(&req, &state.paths)?)
 }
 
-#[post("/api/auth/login")]
-async fn auth_login_api(
-    state: web::Data<AppState>,
-    request: web::Json<LoginRequest>,
-) -> Result<HttpResponse> {
-    let user = request
-        .user
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("local");
-    let password = request.password.as_deref().unwrap_or_default();
-    if !validate_credentials(&state.paths, user, password)? {
-        return Ok(login_error("invalid username or password")?);
+fn passkey_error(error: auth::AuthError) -> HttpResponse {
+    let status = match error {
+        auth::AuthError::RegistrationClosed | auth::AuthError::LoginUnavailable => {
+            actix_web::http::StatusCode::BAD_REQUEST
+        }
+        auth::AuthError::Storage(_) | auth::AuthError::Configuration(_) => {
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        }
+        _ => actix_web::http::StatusCode::UNAUTHORIZED,
+    };
+    api_error(status, &error.to_string())
+}
+
+#[post("/api/auth/passkeys/register/options")]
+async fn passkey_register_options(state: web::Data<AppState>) -> Result<HttpResponse> {
+    match state.auth.registration_options() {
+        Ok((challenge_id, options)) => {
+            let mut response = HttpResponse::Ok().json(PasskeyOptions {
+                challenge_id,
+                options,
+            });
+            cors(&mut response);
+            Ok(response)
+        }
+        Err(error) => Ok(passkey_error(error)),
     }
-    let session = save_session(&state.paths, user)?;
-    let mut response =
-        HttpResponse::Ok().json(build_session_response(&state.paths, Some(&session))?);
-    response.headers_mut().insert(
-        actix_web::http::header::SET_COOKIE,
-        HeaderValue::from_str(&format!(
-            "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
-            session.token
-        ))
-        .unwrap(),
-    );
-    cors(&mut response);
-    Ok(response)
+}
+
+#[post("/api/auth/passkeys/register/verify")]
+async fn passkey_register_verify(
+    state: web::Data<AppState>,
+    request: web::Json<PasskeyRegistrationVerifyRequest>,
+) -> Result<HttpResponse> {
+    match state
+        .auth
+        .verify_registration(&request.challenge_id, &request.credential)
+    {
+        Ok(session) => {
+            let mut response = HttpResponse::Created().json(PasskeySessionResponse {
+                authenticated: true,
+            });
+            response.headers_mut().insert(
+                actix_web::http::header::SET_COOKIE,
+                HeaderValue::from_str(&format!(
+                    "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
+                    session.token
+                ))
+                .unwrap(),
+            );
+            cors(&mut response);
+            Ok(response)
+        }
+        Err(error) => Ok(passkey_error(error)),
+    }
+}
+
+#[post("/api/auth/passkeys/login/options")]
+async fn passkey_login_options(state: web::Data<AppState>) -> Result<HttpResponse> {
+    match state.auth.login_options() {
+        Ok((challenge_id, options)) => {
+            let mut response = HttpResponse::Ok().json(PasskeyOptions {
+                challenge_id,
+                options,
+            });
+            cors(&mut response);
+            Ok(response)
+        }
+        Err(error) => Ok(passkey_error(error)),
+    }
+}
+
+#[post("/api/auth/passkeys/login/verify")]
+async fn passkey_login_verify(
+    state: web::Data<AppState>,
+    request: web::Json<PasskeyLoginVerifyRequest>,
+) -> Result<HttpResponse> {
+    match state
+        .auth
+        .verify_login(&request.challenge_id, &request.credential)
+    {
+        Ok(session) => {
+            let mut response = HttpResponse::Ok().json(PasskeySessionResponse {
+                authenticated: true,
+            });
+            response.headers_mut().insert(
+                actix_web::http::header::SET_COOKIE,
+                HeaderValue::from_str(&format!(
+                    "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
+                    session.token
+                ))
+                .unwrap(),
+            );
+            cors(&mut response);
+            Ok(response)
+        }
+        Err(error) => Ok(passkey_error(error)),
+    }
 }
 
 #[post("/api/auth/logout")]
@@ -2052,7 +2134,10 @@ async fn api_preflight() -> HttpResponse {
 
 pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
     configured_profile(&paths)?;
-    let state = web::Data::new(AppState { paths });
+    let auth = auth::AuthService::from_env(paths.clone()).map_err(|error| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, error.to_string())
+    })?;
+    let state = web::Data::new(AppState { paths, auth });
 
     HttpServer::new(move || {
         App::new()

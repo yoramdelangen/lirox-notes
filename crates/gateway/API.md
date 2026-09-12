@@ -31,9 +31,8 @@ invalid cookie returns:
 {"error":"login required"}
 ```
 
-with status `401`. Authentication is intentionally local: passwordless users
-only need the matching username; password users also need the matching
-password.
+with status `401`. Authentication uses server-managed passkeys. Successful
+verification rotates the opaque session and returns a `lirox_session` cookie.
 
 ## Common Errors
 
@@ -63,7 +62,10 @@ exists, rather than the JSON error object.
 |---|---|---:|---:|
 | `GET` | `/api/auth` | No | `200` `SessionResponse` |
 | `GET` | `/api/auth/{path}` | No | `200` `SessionResponse` |
-| `POST` | `/api/auth/login` | No | `200` `SessionResponse` + cookie |
+| `POST` | `/api/auth/passkeys/register/options` | No | `200` WebAuthn creation options |
+| `POST` | `/api/auth/passkeys/register/verify` | No | `201` authenticated + cookie |
+| `POST` | `/api/auth/passkeys/login/options` | No | `200` WebAuthn request options |
+| `POST` | `/api/auth/passkeys/login/verify` | No | `200` authenticated + cookie |
 | `POST` | `/api/auth/logout` | No | `200` `SessionResponse` + cleared cookie |
 | `POST` | `/api/setup` | No | `201` `SessionResponse` + cookie |
 | `GET` | `/api/workspaces` | Yes | `200` array of `WorkspaceResponse` |
@@ -92,6 +94,21 @@ repository identifiers are single path segments.
 
 ## Authentication And Setup
 
+### Passkey endpoints
+
+`POST /api/auth/passkeys/register/options` returns library-generated creation
+options and a short-lived `challenge_id`. The matching verify request is JSON
+`{"challenge_id":"...","credential":<browser response>}`. Registration is
+rejected with `400` after the first credential is stored.
+
+`POST /api/auth/passkeys/login/options` returns library-generated request
+options and a short-lived `challenge_id`. Its verify request has the same JSON
+shape, with the browser authentication response in `credential`. Login before
+registration is rejected with `400`.
+
+Missing, expired, reused, mismatched, or invalid challenges return the common
+JSON error envelope with a stable non-sensitive message.
+
 ### `GET /api/auth`
 
 Returns the current session state. It does not require authentication and does
@@ -106,22 +123,6 @@ Wildcard alias for the auth status endpoint. The `{path}` value is ignored.
 For example, `/api/auth/session` returns the same response as `/api/auth`.
 
 Response: `200` with `SessionResponse`.
-
-### `POST /api/auth/login`
-
-Validates credentials, creates a session, persists it server-side, and returns
-the session cookie.
-
-Request body: JSON `LoginRequest`.
-
-| Field | Type | Required | Behavior |
-|---|---|---:|---|
-| `user` | string | No | Defaults to `local` when absent or blank |
-| `password` | string | No | Defaults to an empty string |
-
-Success: `200`, `SessionResponse`, and `Set-Cookie`.
-
-Failure: `401` JSON `{"error":"invalid username or password"}`.
 
 ### `POST /api/auth/logout`
 
