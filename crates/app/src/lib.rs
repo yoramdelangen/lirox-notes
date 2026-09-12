@@ -12,7 +12,7 @@ pub mod workspace;
 use app::{ApplicationState, Dispatcher};
 use input::InputEvent;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct AppContext {
     pub state: Signal<ApplicationState>,
     pub dispatcher: Dispatcher,
@@ -49,7 +49,7 @@ pub fn App() -> Element {
     let state = use_signal(ApplicationState::demo);
     use_context_provider(|| AppContext {
         state,
-        dispatcher: Dispatcher,
+        dispatcher: Dispatcher::new(),
     });
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }

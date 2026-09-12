@@ -33,8 +33,12 @@ impl ApplicationState {
 
     pub fn active_input_scopes(&self) -> Vec<InputScope> {
         let mut scopes = Vec::new();
-        if self.workspace.overlays.top().is_some() {
-            scopes.push(InputScope::Overlay);
+        if let Some(overlay) = self.workspace.overlays.top() {
+            if overlay.input_policy == crate::workspace::OverlayInputPolicy::Modal {
+                scopes.push(InputScope::Overlay);
+                scopes.push(InputScope::SurfaceInstance(overlay.surface.clone()));
+                scopes.push(InputScope::Surface(surface_kind(&overlay.surface)));
+            }
         }
         let active = self.workspace.focus.active_surface.clone();
         scopes.push(InputScope::SurfaceInstance(active.clone()));
@@ -45,5 +49,13 @@ impl ApplicationState {
         }));
         scopes.extend([InputScope::Workspace, InputScope::Global]);
         scopes
+    }
+}
+
+fn surface_kind(surface: &SurfaceId) -> SurfaceKind {
+    if *surface == SurfaceId::FILE_TREE {
+        SurfaceKind::FileTree
+    } else {
+        SurfaceKind::Editor
     }
 }

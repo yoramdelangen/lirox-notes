@@ -25,3 +25,16 @@ Focused normalization coverage includes plain `j`, `Ctrl+w`, `Escape`, and `Spac
 ## Commit
 
 Recorded in the Task 6 commit listed in the task response.
+
+## Review Fixes
+
+- Modal overlays now add their surface instance and surface kind ahead of the focused surface scopes, so the File Tree overlay resolves `j`, `k`, and `Enter` through FileTree bindings.
+- Non-modal overlays do not add overlay scopes and therefore cannot hijack focused-surface, workspace, or global input.
+- `Dispatcher` queues every `Effect` returned by the pure reducer for the application boundary instead of dropping it in the UI handler; no backend executor was added.
+- Added focused tests for modal overlay routing, non-modal precedence, and effect propagation.
+
+## Review-Fix Validation
+
+- `cargo test -p liroxnotes-app`: 32 passed.
+- `cargo fmt --check`: passed.
+- `cargo check --workspace --locked`: passed.
