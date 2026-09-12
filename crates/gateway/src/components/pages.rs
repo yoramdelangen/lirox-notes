@@ -2,7 +2,7 @@ use crate::*;
 
 pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) -> String {
     let error = error
-        .map(|message| format!("<p style=\"color:#ff8f40\">{message}</p>"))
+        .map(|message| format!("<p style=\"color:#ff8f40\">{}</p>", html_escape(message)))
         .unwrap_or_default();
     format!(
         r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
@@ -26,6 +26,22 @@ pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) ->
 </main>"#,
         html_escape(&paths.config_file.to_string_lossy())
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_errors_are_html_escaped() {
+        let paths = RuntimePaths {
+            config_file: "config".into(),
+            default_workspace: "workspace".into(),
+        };
+        let body = onboarding_page_body(&paths, Some("<script>alert(1)</script> &"));
+        assert!(!body.contains("<script>alert(1)</script>"));
+        assert!(body.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp;"));
+    }
 }
 
 pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {

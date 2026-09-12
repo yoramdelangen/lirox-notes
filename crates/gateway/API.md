@@ -61,8 +61,10 @@ JSON API failures use the JSON envelope.
 
 | Method | Path | Auth | Success |
 |---|---|---:|---:|
+| `GET` | `/api/bootstrap` | No | `200` `BootstrapResponse` |
 | `GET` | `/api/auth` | No | `200` `SessionResponse` |
 | `GET` | `/api/auth/{path}` | No | `200` `SessionResponse` |
+| `GET` | `/api/auth/session` | No | `200` `BootstrapResponse` |
 | `POST` | `/api/auth/passkeys/register/options` | No | `200` WebAuthn creation options |
 | `POST` | `/api/auth/passkeys/register/verify` | No | `201` authenticated + cookie |
 | `POST` | `/api/auth/passkeys/login/options` | No | `200` WebAuthn request options |
@@ -100,15 +102,30 @@ repository identifiers are single path segments.
 `POST /api/auth/passkeys/register/options` returns library-generated creation
 options and a short-lived `challenge_id`. The matching verify request is JSON
 `{"challenge_id":"...","credential":<browser response>}`. Registration is
-rejected with `400` after the first credential is stored.
+rejected with `400` after onboarding is complete; incomplete legacy installs
+may register a fresh passkey.
 
 `POST /api/auth/passkeys/login/options` returns library-generated request
 options and a short-lived `challenge_id`. Its verify request has the same JSON
 shape, with the browser authentication response in `credential`. Login before
-registration is rejected with `400`.
+explicit onboarding completion is rejected with `400`.
 
 Missing, expired, reused, mismatched, or invalid challenges return the common
 JSON error envelope with a stable non-sensitive message.
+
+### `GET /api/bootstrap`
+
+Returns the authoritative installation, onboarding, session, and workspace
+state used by the app startup gate.
+
+Response: `200` with `BootstrapResponse`:
+
+```json
+{"installed":true,"onboarding":"Complete","authenticated":true,"user":"local","workspace_root":"/path/to/workspaces","workspace":{"slug":"notes","name":"Notes"}}
+```
+
+`onboarding` is `NotStarted`, `WorkspaceRequired`, or `Complete`. `Complete`
+is only returned after explicit workspace bootstrap completion is persisted.
 
 ### `GET /api/auth`
 
@@ -116,14 +133,19 @@ Returns the current session state. It does not require authentication and does
 not reject an invalid cookie; invalid or absent cookies are reported as an
 unauthenticated session.
 
-Response: `200` with `SessionResponse`.
+Response: `200` with the legacy `SessionResponse`:
+
+```json
+{"installed":true,"authenticated":true,"user":"local","auth_mode":"passkey","workspace_required":false,"workspace_root":"/path/to/workspaces"}
+```
 
 ### `GET /api/auth/{path}`
 
 Wildcard alias for the auth status endpoint. The `{path}` value is ignored.
-For example, `/api/auth/session` returns the same response as `/api/auth`.
+Other wildcard paths return the same response as `/api/auth`. The explicit
+`/api/auth/session` route returns `BootstrapResponse` as documented above.
 
-Response: `200` with `SessionResponse`.
+Response: `200` with the same `SessionResponse` schema as `GET /api/auth`.
 
 ### `POST /api/auth/logout`
 
@@ -147,8 +169,8 @@ Request body: JSON `InstallRequest`.
 
 Success: `201`, `SessionResponse`.
 
-Failure: missing passkey session returns `401`; filesystem errors may produce
-`500`.
+Failures use the common JSON error envelope: missing passkey session returns
+`401`; filesystem errors return `500`.
 
 ## Workspaces
 
@@ -186,13 +208,18 @@ The workspace path is derived from the installed workspace root and the slug.
 Success: `201` with `WorkspaceResponse`. After workspace creation, Git setup,
 and configuration persistence all succeed, the install marker also records
 `onboarding_complete=true`; the next bootstrap response reports `complete`.
+If marker writing is interrupted after the install marker is written but before
+the completion line is appended, bootstrap remains `WorkspaceRequired` and the
+same workspace request can be retried.
 
 Failures: `401` when authentication is required; Git/filesystem and
 configuration-persistence failures return `500` using the common JSON error
 shape. A failed setup does not write installation or completion markers and
-remains `workspace_required`. A pre-existing config without the explicit
-completion marker is treated the same way; there is no automatic legacy
-migration.
+normally remains `workspace_required`; if only the install marker was written
+before a later operation failed, the missing completion line keeps the state
+retryable. A pre-existing config without the explicit
+completion marker is treated the same way; legacy password records are ignored
+and require fresh passkey registration rather than being authenticated.
 
 ### `GET /api/workspaces/{workspace}`
 

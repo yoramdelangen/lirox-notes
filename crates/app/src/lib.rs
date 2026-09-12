@@ -209,10 +209,10 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
             })
             .to_string();
             web_json("/api/workspaces", "POST", Some(body)).await?;
-            let view: WorkspaceView =
-                response_json(web_json("/api/workspace/", "GET", None).await?).await?;
             Ok(Some(ApplicationEvent::Auth(
-                app::AuthEvent::WorkspaceLoaded(view),
+                app::AuthEvent::BootstrapLoaded(
+                    response_json(web_json("/api/bootstrap", "GET", None).await?).await?,
+                ),
             )))
         }
         _ => Ok(None),
@@ -249,11 +249,12 @@ async fn web_json(
     use wasm_bindgen_futures::JsFuture;
     let init = web_sys::RequestInit::new();
     init.set_method(method);
+    init.set_credentials(web_sys::RequestCredentials::Include);
     if let Some(body) = body {
         init.set_body(&wasm_bindgen::JsValue::from_str(&body));
     }
-    let request =
-        web_sys::Request::new_with_str_and_init(url, &init).map_err(|_| "request failed")?;
+    let request = web_sys::Request::new_with_str_and_init(&gateway_url(url), &init)
+        .map_err(|_| "request failed")?;
     request
         .headers()
         .set("Content-Type", "application/json")
@@ -270,6 +271,17 @@ async fn web_json(
         return Err(format!("gateway returned {}", response.status()));
     }
     Ok(response)
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+const GATEWAY_BASE_URL: &str = match option_env!("LIROX_GATEWAY_URL") {
+    Some(url) => url,
+    None => "http://localhost:3010",
+};
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn gateway_url(path: &str) -> String {
+    format!("{}{}", GATEWAY_BASE_URL.trim_end_matches('/'), path)
 }
 
 pub fn workspace_note_path_from_location(path: &str) -> Option<String> {
@@ -303,6 +315,14 @@ mod tests {
         assert_eq!(
             super::workspace_note_path_from_location("/workspace/workspace/notes/"),
             Some("notes/README.md".to_string())
+        );
+    }
+
+    #[test]
+    fn gateway_requests_use_the_configured_gateway() {
+        assert_eq!(
+            super::gateway_url("/api/bootstrap"),
+            "http://localhost:3010/api/bootstrap"
         );
     }
 }

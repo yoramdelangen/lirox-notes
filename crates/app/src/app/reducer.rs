@@ -38,9 +38,10 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
     match event {
         AuthEvent::BootstrapRequested => vec![Effect::Bootstrap],
         AuthEvent::BootstrapLoaded(bootstrap) => {
-            auth.screen = if bootstrap.authenticated && bootstrap.workspace.is_some() {
-                screen_for(&bootstrap)
-            } else if bootstrap.authenticated && bootstrap.onboarding == OnboardingStatus::Complete
+            auth.workspace = None;
+            auth.screen = if bootstrap.authenticated
+                && bootstrap.onboarding == OnboardingStatus::Complete
+                && auth.workspace.is_none()
             {
                 Screen::Loading
             } else {
@@ -128,9 +129,9 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
         AuthEvent::WorkspaceLoaded(view) => {
             auth.operation = AuthOperation::None;
             auth.workspace = Some(view);
-            if let Some(bootstrap) = auth.bootstrap.as_mut() {
-                bootstrap.onboarding = OnboardingStatus::Complete;
-                bootstrap.authenticated = true;
+            if auth.bootstrap.as_ref().is_some_and(|bootstrap| {
+                bootstrap.authenticated && bootstrap.onboarding == OnboardingStatus::Complete
+            }) {
                 auth.screen = Screen::Workbench;
             }
             vec![]

@@ -97,7 +97,6 @@ struct WorkspaceRequest {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct InstallRequest {
     workspace_root: Option<String>,
 }
@@ -350,6 +349,7 @@ fn mark_onboarding_complete(paths: &RuntimePaths) -> std::io::Result<()> {
     {
         return Ok(());
     }
+    // An interrupted append leaves onboarding retryable until this line exists.
     let mut file = fs::OpenOptions::new().append(true).open(path)?;
     writeln!(file, "onboarding_complete=true")
 }
@@ -1137,7 +1137,14 @@ mod ssr_tests {
                 .to_request(),
         )
         .await;
-        assert_eq!(response.status(), actix_web::http::StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+        let body = actix_web::body::to_bytes(response.into_body())
+            .await
+            .unwrap();
+        assert!(serde_json::from_slice::<serde_json::Value>(&body)
+            .unwrap()
+            .get("error")
+            .is_some());
         let _ = fs::remove_dir_all(root);
     }
 }
@@ -1524,33 +1531,43 @@ async fn install_api(
     req: HttpRequest,
     request: web::Json<InstallRequest>,
 ) -> Result<HttpResponse> {
-    if let Some(response) = require_auth_api(&req, &state.paths)? {
-        return Ok(response);
+    let result: std::io::Result<HttpResponse> = async {
+        if let Some(response) = require_auth_api(&req, &state.paths)? {
+            return Ok(response);
+        }
+        if state.auth.store.load_account()?.is_none() {
+            return Ok(api_error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "passkey registration required",
+            ));
+        }
+        let workspace_root = request
+            .workspace_root
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_workspace_root(&state.paths));
+        mark_installed(&state.paths, &workspace_root)?;
+        let Some(session) = request_session(&req, &state.paths)? else {
+            return Ok(unauthorized());
+        };
+        let mut response =
+            HttpResponse::Created().json(build_session_response(&state.paths, Some(&session))?);
+        response.headers_mut().insert(
+            actix_web::http::header::SET_COOKIE,
+            HeaderValue::from_str(&session_cookie(&state.auth, &session.token, false)).unwrap(),
+        );
+        cors(&mut response);
+        Ok(response)
     }
-    if state.auth.store.load_account()?.is_none() {
-        return Ok(api_error(
-            actix_web::http::StatusCode::BAD_REQUEST,
-            "passkey registration required",
-        ));
+    .await;
+    match result {
+        Ok(response) => Ok(response),
+        Err(error) => Ok(api_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            &error.to_string(),
+        )),
     }
-    let workspace_root = request
-        .workspace_root
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_workspace_root(&state.paths));
-    mark_installed(&state.paths, &workspace_root)?;
-    let Some(session) = request_session(&req, &state.paths)? else {
-        return Ok(unauthorized());
-    };
-    let mut response =
-        HttpResponse::Created().json(build_session_response(&state.paths, Some(&session))?);
-    response.headers_mut().insert(
-        actix_web::http::header::SET_COOKIE,
-        HeaderValue::from_str(&session_cookie(&state.auth, &session.token, false)).unwrap(),
-    );
-    cors(&mut response);
-    Ok(response)
 }
 
 #[get("/api/workspaces")]

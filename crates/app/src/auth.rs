@@ -120,8 +120,12 @@ pub fn screen_for(bootstrap: &BootstrapState) -> Screen {
     if !bootstrap.installed || bootstrap.onboarding == OnboardingStatus::NotStarted {
         return Screen::RegisterPasskey;
     }
-    if bootstrap.onboarding == OnboardingStatus::WorkspaceRequired && bootstrap.authenticated {
-        return Screen::WorkspaceSetup;
+    if bootstrap.onboarding == OnboardingStatus::WorkspaceRequired {
+        return if bootstrap.authenticated {
+            Screen::WorkspaceSetup
+        } else {
+            Screen::RegisterPasskey
+        };
     }
     if bootstrap.authenticated {
         Screen::Workbench
@@ -145,16 +149,16 @@ pub fn AuthShell() -> Element {
             rsx! { h1 { "Welcome to LiroxNotes" } p { "Checking secure access..." } }
         }
         Screen::RegisterPasskey => {
-            rsx! { h1 { "Secure access" } p { "Create a passkey to protect your notes." } button { onclick: move |_| register.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::RegisterPasskey), "Create passkey" } }
+            rsx! { h1 { "Secure access" } p { "Create a passkey to protect your notes." } button { autofocus: true, disabled: auth.operation != AuthOperation::None, aria_label: "Create passkey", onclick: move |_| register.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::RegisterPasskey), "Create passkey" } }
         }
         Screen::WorkspaceSetup => {
-            rsx! { h1 { "Passkey ready" } p { "Choose where your notes workspace should live." } form { onsubmit: move |event| { event.prevent_default(); let fields = state.read().auth.setup.clone(); create.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::CreateWorkspace(fields)); }, label { "Workspace slug" input { value: "{auth.setup.slug}", oninput: move |event| state.write().auth.setup.slug = event.value() } } label { "Workspace name" input { value: "{auth.setup.name}", oninput: move |event| state.write().auth.setup.name = event.value() } } label { "Git remote URL" input { value: "{auth.setup.repo_url}", oninput: move |event| state.write().auth.setup.repo_url = event.value() } } label { "Branch" input { value: "{auth.setup.branch}", oninput: move |event| state.write().auth.setup.branch = event.value() } } button { r#type: "submit", "Create workspace" } } }
+            rsx! { h1 { "Passkey ready" } p { "Choose where your notes workspace should live." } form { onsubmit: move |event| { event.prevent_default(); let fields = state.read().auth.setup.clone(); create.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::CreateWorkspace(fields)); }, fieldset { legend { "Repository source" } label { r#for: "repo-new", input { id: "repo-new", r#type: "radio", name: "repo_mode", checked: !auth.setup.remote, onchange: move |_| state.write().auth.setup.remote = false } " Create new local repository" } label { r#for: "repo-remote", input { id: "repo-remote", r#type: "radio", name: "repo_mode", checked: auth.setup.remote, onchange: move |_| state.write().auth.setup.remote = true } " Use existing remote" } } label { r#for: "workspace-slug", "Workspace slug", input { id: "workspace-slug", autofocus: true, required: true, value: "{auth.setup.slug}", oninput: move |event| state.write().auth.setup.slug = event.value() } } label { r#for: "workspace-name", "Workspace name", input { id: "workspace-name", required: true, value: "{auth.setup.name}", oninput: move |event| state.write().auth.setup.name = event.value() } } label { r#for: "repo-url", "Git remote URL", input { id: "repo-url", r#type: "url", required: auth.setup.remote, value: "{auth.setup.repo_url}", oninput: move |event| state.write().auth.setup.repo_url = event.value() } } label { r#for: "branch", "Branch", input { id: "branch", required: true, value: "{auth.setup.branch}", oninput: move |event| state.write().auth.setup.branch = event.value() } } button { r#type: "submit", disabled: auth.operation != AuthOperation::None, aria_label: if auth.operation == AuthOperation::CreatingWorkspace { "Creating workspace" } else { "Create workspace" }, if auth.operation == AuthOperation::CreatingWorkspace { "Creating workspace..." } else { "Create workspace" } } } }
         }
         Screen::CreatingWorkspace => {
             rsx! { h1 { "Creating workspace" } p { "Preparing your notes..." } }
         }
         Screen::Login => {
-            rsx! { h1 { "Welcome back" } p { "Use your passkey to continue." } button { onclick: move |_| login.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::Login), "Sign in with passkey" } }
+            rsx! { h1 { "Welcome back" } p { "Use your passkey to continue." } button { autofocus: true, disabled: auth.operation != AuthOperation::None, aria_label: if auth.operation == AuthOperation::LoggingIn { "Signing in" } else { "Sign in with passkey" }, onclick: move |_| login.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::Login), if auth.operation == AuthOperation::LoggingIn { "Signing in..." } else { "Sign in with passkey" } } }
         }
         Screen::Failure => {
             rsx! { h1 { "Something went wrong" } p { "{failure}" } button { onclick: move |_| retry.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::Retry), "Retry" } }
@@ -209,10 +213,10 @@ mod tests {
     }
 
     #[test]
-    fn unauthenticated_workspace_setup_is_login() {
+    fn unauthenticated_workspace_setup_requires_fresh_passkey() {
         let mut bootstrap = BootstrapState::workspace_required();
         bootstrap.authenticated = false;
-        assert_eq!(screen_for(&bootstrap), Screen::Login);
+        assert_eq!(screen_for(&bootstrap), Screen::RegisterPasskey);
     }
 
     #[test]
@@ -253,6 +257,22 @@ mod tests {
         );
         assert_eq!(state.auth.screen, Screen::Login);
         assert_eq!(state.auth.operation, AuthOperation::None);
+    }
+
+    #[test]
+    fn workspace_creation_waits_for_complete_authenticated_bootstrap() {
+        let mut state = crate::app::ApplicationState::empty();
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(
+                BootstrapState::workspace_required(),
+            )),
+        );
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(WorkspaceView::empty())),
+        );
+        assert_ne!(state.auth.screen, Screen::Workbench);
     }
 
     #[test]

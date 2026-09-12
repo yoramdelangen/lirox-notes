@@ -119,7 +119,7 @@ pub fn persisted_onboarding_status(paths: &RuntimePaths) -> io::Result<Onboardin
         .load_account()?
         .is_some_and(|account| !account.credentials.is_empty());
     let configured = load_config(&paths.config_file)?.is_some();
-    if !registered {
+    if !registered && !is_installed(paths)? {
         return Ok(OnboardingStatus::NotStarted);
     }
     let install = paths.config_file.with_file_name("install");
@@ -308,11 +308,7 @@ impl AuthService {
     }
 
     pub fn registration_options(&self) -> Result<(String, CreationChallengeResponse), AuthError> {
-        if self
-            .store
-            .load_account()?
-            .is_some_and(|account| !account.credentials.is_empty())
-        {
+        if persisted_onboarding_status(&self.store.paths)? == OnboardingStatus::Complete {
             return Err(AuthError::RegistrationClosed);
         }
         let account_id = Uuid::new_v4().to_string();
@@ -386,6 +382,9 @@ impl AuthService {
     }
 
     pub fn login_options(&self) -> Result<(String, RequestChallengeResponse), AuthError> {
+        if persisted_onboarding_status(&self.store.paths)? != OnboardingStatus::Complete {
+            return Err(AuthError::LoginUnavailable);
+        }
         let account = self
             .store
             .load_account()?
@@ -421,6 +420,9 @@ impl AuthService {
         challenge_id: &str,
         credential: &PublicKeyCredential,
     ) -> Result<StoredSession, AuthError> {
+        if persisted_onboarding_status(&self.store.paths)? != OnboardingStatus::Complete {
+            return Err(AuthError::LoginUnavailable);
+        }
         let challenge = self
             .store
             .load_challenge()?
@@ -751,6 +753,65 @@ mod tests {
             OnboardingStatus::WorkspaceRequired
         );
         assert_eq!(onboarding_status(true, true), OnboardingStatus::Complete);
+    }
+
+    #[test]
+    fn installed_legacy_workspace_requires_fresh_passkey_registration() {
+        let root =
+            std::env::temp_dir().join(format!("lirox-auth-migration-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        fs::write(
+            paths.config_file.with_file_name("install"),
+            "installed=true\n",
+        )
+        .unwrap();
+        fs::write(
+            paths.config_file.with_file_name("user"),
+            "user=local\npassword_hash=old\n",
+        )
+        .unwrap();
+        assert_eq!(
+            persisted_onboarding_status(&paths).unwrap(),
+            OnboardingStatus::WorkspaceRequired
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn login_is_rejected_before_explicit_completion() {
+        let root =
+            std::env::temp_dir().join(format!("lirox-auth-login-gate-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        fs::write(
+            paths.config_file.with_file_name("install"),
+            "installed=true\n",
+        )
+        .unwrap();
+        let store = AuthStore::new(paths.clone());
+        store
+            .save_account(&AccountRecord::with_credential(credential("one")))
+            .unwrap();
+        let origin = Url::parse("http://localhost:3010").unwrap();
+        let webauthn = WebauthnBuilder::new("localhost", &origin)
+            .unwrap()
+            .build()
+            .unwrap();
+        let service = AuthService::new(store, webauthn, 60);
+        assert!(matches!(
+            service.login_options(),
+            Err(AuthError::LoginUnavailable)
+        ));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
