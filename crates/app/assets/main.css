@@ -22,3 +22,12 @@ body {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     margin: 0;
 }
+
+button,
+textarea {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+}
