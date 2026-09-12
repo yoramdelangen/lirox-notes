@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 dioxus.workspace = true
 liroxnotes-shared = { path = "../shared" }
+serde = "1"
 
 [features]
 default = ["web"]

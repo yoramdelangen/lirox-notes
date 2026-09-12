@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use liroxnotes_shared::{mock_workspace_view, WorkspaceView};
 
+pub mod command;
+
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
