@@ -3,4 +3,5 @@ node_modules/
 dist/
 .lirox-workspace/
 .lirox-runtime/
+.worktrees/
 .DS_Store
