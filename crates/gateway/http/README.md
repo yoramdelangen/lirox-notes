@@ -30,7 +30,7 @@ Shared variables live in `http-client.env.json`. Select the `local` environment 
 ```json
 {
   "local": {
-    "host": "http://127.0.0.1:3000",
+    "host": "http://127.0.0.1:3010",
     "workspace": "demo",
     "repo": "demo",
     "note": "notes/manual-test.md",

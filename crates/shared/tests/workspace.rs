@@ -1,6 +1,6 @@
 use liroxnotes_shared::{
-    mock_workspace_view, workspace_view_from_notes, workspace_view_with_body, TreeKind,
-    DEMO_WORKSPACE,
+    mock_workspace_view, workspace_view_from_notes, workspace_view_with_body,
+    workspace_view_with_virtual_notes, TreeKind, WorkspaceNote, DEMO_WORKSPACE,
 };
 
 #[test]
@@ -67,4 +67,42 @@ fn empty_workspace_has_empty_selected_note() {
     assert_eq!(view.selected_note.path, "notes/welcome.md");
     assert_eq!(view.selected_note_body, "");
     assert!(view.notes.is_empty());
+}
+
+#[test]
+fn drops_virtual_legacy_note_after_folder_promotion() {
+    let view = workspace_view_from_notes(
+        "demo",
+        "Demo",
+        "main",
+        "local",
+        "project-planning/another-nested/README.md",
+        "project-planning/another-nested/deeper-level.md",
+        0,
+        &[
+            WorkspaceNote {
+                path: "project-planning/another-nested/README.md".to_string(),
+                body: "# Another nested\n".to_string(),
+            },
+            WorkspaceNote {
+                path: "project-planning/another-nested/deeper-level.md".to_string(),
+                body: "# Deeper level\n".to_string(),
+            },
+        ],
+    );
+    let merged = workspace_view_with_virtual_notes(
+        view,
+        "project-planning/another-nested/deeper-level.md",
+        &["project-planning/another-nested.md".to_string()],
+    );
+
+    assert!(merged
+        .notes
+        .iter()
+        .all(|note| note.path != "project-planning/another-nested.md"));
+    assert!(merged.tree.iter().any(|row| {
+        row.kind == TreeKind::File
+            && row.path == "project-planning/another-nested/deeper-level.md"
+            && row.depth == 2
+    }));
 }

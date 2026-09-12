@@ -4,7 +4,7 @@ set -eu
 bun run build:css
 (cd packages/editor && bun run build)
 
-gateway_port="${LIROX_GATEWAY_PORT:-3000}"
+gateway_port="${LIROX_GATEWAY_PORT:-3010}"
 LIROX_DEV_CORS=1 cargo run -p liroxnotes-gateway -- --port "$gateway_port" &
 gateway_pid=$!
 

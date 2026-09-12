@@ -1,8 +1,8 @@
 use liroxnotes_gateway::{
-    changed_count, commit_note, configure_git_remote, configured_profile, ensure_workspace,
-    format_config, is_installed, parse_config, parse_onboarding_form, port_from_args,
-    push_workspace, safe_note_path, save_config, workspace_view_for_config, GatewayConfig,
-    RuntimePaths,
+    changed_count, commit_note, configure_git_remote, configured_profile, delete_note_file,
+    ensure_workspace, format_config, is_installed, parse_config, parse_onboarding_form,
+    port_from_args, push_workspace, safe_note_path, save_config, save_note_body,
+    workspace_view_for_config, GatewayConfig, RuntimePaths,
 };
 use std::{
     fs,
@@ -48,6 +48,69 @@ fn saves_and_commits_note() {
 
     assert!(commit_note(&root, "notes/welcome.md").unwrap());
     assert_eq!(changed_count(&root), 0);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn deletes_and_commits_note_without_failing_when_already_absent() {
+    let root = temp_root("delete-note");
+    ensure_workspace(&root).unwrap();
+    let config = GatewayConfig {
+        workspace_slug: "test".to_string(),
+        workspace_name: "Test".to_string(),
+        workspace_path: root.clone(),
+        repo_url: String::new(),
+        branch: "main".to_string(),
+    };
+
+    assert!(delete_note_file(&config, "notes/welcome.md").unwrap());
+    assert!(!root.join("notes/welcome.md").exists());
+    assert!(!delete_note_file(&config, "notes/welcome.md").unwrap());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn promotes_note_files_to_readmes_when_creating_nested_notes() {
+    let root = temp_root("nested-notes");
+    ensure_workspace(&root).unwrap();
+    let config = GatewayConfig {
+        workspace_slug: "test".to_string(),
+        workspace_name: "Test".to_string(),
+        workspace_path: root.clone(),
+        repo_url: String::new(),
+        branch: "main".to_string(),
+    };
+
+    save_note_body(&config, "a-path.md", "A path\n".to_string()).unwrap();
+    save_note_body(
+        &config,
+        "a-path/nested-path.md",
+        "Nested path\n".to_string(),
+    )
+    .unwrap();
+    save_note_body(
+        &config,
+        "a-path/nested-path/deeper.md",
+        "Deeper\n".to_string(),
+    )
+    .unwrap();
+
+    assert!(!root.join("a-path.md").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("a-path/README.md")).unwrap(),
+        "A path\n"
+    );
+    assert!(!root.join("a-path/nested-path.md").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("a-path/nested-path/README.md")).unwrap(),
+        "Nested path\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("a-path/nested-path/deeper.md")).unwrap(),
+        "Deeper\n"
+    );
 
     let _ = fs::remove_dir_all(root);
 }
@@ -146,6 +209,52 @@ fn push_workspace_pushes_commits_to_origin() {
         .output()
         .unwrap();
     assert!(remote_head.status.success());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn saving_only_commits_until_explicit_push() {
+    let root = temp_root("save-commit-only");
+    let remote = root.join("remote.git");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(&root)
+        .arg(&remote)
+        .status()
+        .unwrap();
+    ensure_workspace(&workspace).unwrap();
+    let config = GatewayConfig {
+        workspace_slug: "save-commit-only".to_string(),
+        workspace_name: "Save Commit Only".to_string(),
+        workspace_path: workspace.clone(),
+        repo_url: remote.to_string_lossy().to_string(),
+        branch: "master".to_string(),
+    };
+
+    configure_git_remote(&config).unwrap();
+    fs::write(
+        workspace.join("notes/welcome.md"),
+        "# Changed without push\n",
+    )
+    .unwrap();
+    assert!(commit_note(&workspace, "notes/welcome.md").unwrap());
+
+    let remote_head = Command::new("git")
+        .args(["rev-parse", "--verify", "master"])
+        .current_dir(&remote)
+        .output()
+        .unwrap();
+    assert!(!remote_head.status.success());
+
+    assert!(
+        workspace_view_for_config(&config, "notes/welcome.md")
+            .unwrap()
+            .unpushed_commits
+            > 0
+    );
 
     let _ = fs::remove_dir_all(root);
 }
@@ -427,5 +536,5 @@ fn parses_port_from_args() {
         4200
     );
     assert_eq!(port_from_args(["bin".into(), "--port=4300".into()]), 4300);
-    assert_eq!(port_from_args(["bin".into()]), 3000);
+    assert_eq!(port_from_args(["bin".into()]), 3010);
 }
