@@ -1015,6 +1015,19 @@ mod ssr_tests {
     }
 
     #[test]
+    fn install_page_has_no_dead_post_form() {
+        let body = components::install_page_body(&RuntimePaths {
+            config_file: PathBuf::from("config"),
+            default_workspace: PathBuf::from("workspace"),
+        });
+
+        assert!(!body.contains("<form"));
+        assert!(!body.contains("action=\"/install\""));
+        assert!(body.contains("/api/setup"));
+        assert!(body.contains("passkey"));
+    }
+
+    #[test]
     fn json_passkey_sessions_authenticate_protected_requests() {
         let root = std::env::temp_dir().join(format!("lirox-session-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
