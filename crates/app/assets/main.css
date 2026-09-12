@@ -1,72 +1,24 @@
-/* App-wide styling */
+:root {
+    --lirox-bg: #0f1116;
+    --lirox-bg-alt: #151922;
+    --lirox-surface: #191e28;
+    --lirox-surface-alt: #222936;
+    --lirox-fg: #d8dee9;
+    --lirox-muted: #9aa6b8;
+    --lirox-subtle: #687386;
+    --lirox-border: #303847;
+    --lirox-accent: #8fb4ff;
+    --lirox-accent-soft: #26364f;
+    --lirox-selection: #29364b;
+    --lirox-success: #8fc7a3;
+    --lirox-warning: #d6b879;
+    --lirox-error: #d38b8b;
+    --lirox-info: #8bb9cc;
+}
+
 body {
-    background-color: #0f1116;
-    color: #ffffff;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 20px;
-}
-
-#hero {
+    background: var(--lirox-bg);
+    color: var(--lirox-fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
 }
-
-#links {
-    width: 400px;
-    text-align: left;
-    font-size: x-large;
-    color: white;
-    display: flex;
-    flex-direction: column;
-}
-
-#links a {
-    color: white;
-    text-decoration: none;
-    margin-top: 20px;
-    margin: 10px 0px;
-    border: white 1px solid;
-    border-radius: 5px;
-    padding: 10px;
-}
-
-#links a:hover {
-    background-color: #1f1f1f;
-    cursor: pointer;
-}
-
-#header {
-    max-width: 1200px;
-}
-
-/* Navbar */
-#navbar {
-    display: flex;
-    flex-direction: row;
-  }
-  
-#navbar a {
-    color: #ffffff;
-    margin-right: 20px;
-    text-decoration: none;
-    transition: color 0.2s ease;
-}
-
-#navbar a:hover {
-    cursor: pointer;
-    color: #91a4d2;
-}
-
-/* Blog page */
-#blog {
-    margin-top: 50px;
-  }
-  
-#blog a {
-    color: #ffffff;
-    margin-top: 50px;
-}
-

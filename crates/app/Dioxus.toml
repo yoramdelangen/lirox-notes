@@ -3,13 +3,13 @@
 [web.app]
 
 # HTML title tag content
-title = "app"
+title = "LiroxNotes"
 
 # include `assets` in web platform
 [web.resource]
 
 # Additional CSS style files
-style = []
+style = ["assets/main.css", "assets/tailwind.css"]
 
 # Additional JavaScript files
 script = []
