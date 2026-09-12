@@ -137,14 +137,8 @@ pub fn persisted_onboarding_status(paths: &RuntimePaths) -> io::Result<Onboardin
             OnboardingStatus::WorkspaceRequired
         });
     }
-    if configured {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(install)?;
-        writeln!(file, "onboarding_complete=true")?;
-        return Ok(OnboardingStatus::Complete);
-    }
+    // A legacy config is not evidence that workspace bootstrap completed.
+    // It must be explicitly recreated through POST /api/workspaces.
     Ok(OnboardingStatus::WorkspaceRequired)
 }
 

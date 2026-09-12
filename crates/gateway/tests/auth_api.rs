@@ -71,6 +71,13 @@ impl Fixture {
         Self::authenticated()
     }
 
+    fn authenticated_without_install() -> Self {
+        let fixture = Self::authenticated_without_workspace();
+        fs::remove_file(fixture.paths.config_file.with_file_name("install")).unwrap();
+        fs::write(&fixture.paths.default_workspace, "not a directory").unwrap();
+        fixture
+    }
+
     fn custom_installation() -> Self {
         let fixture = Self::authenticated();
         let custom_root = fixture.paths.config_file.with_file_name("custom-root");
@@ -243,6 +250,61 @@ async fn workspace_creation_marks_onboarding_complete() {
     let body = to_bytes(response.into_body()).await.unwrap();
     let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
     assert_eq!(bootstrap.onboarding, OnboardingStatus::Complete);
+}
+
+#[actix_web::test]
+async fn workspace_creation_failure_keeps_onboarding_required_and_returns_json_error() {
+    let fixture = Fixture::authenticated_without_install();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/workspaces")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .set_json(serde_json::json!({"workspace_slug": "notes"}))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(error.get("error").is_some());
+
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/bootstrap").to_request(),
+    )
+    .await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(bootstrap.onboarding, OnboardingStatus::WorkspaceRequired);
+    assert!(!bootstrap.installed);
+}
+
+#[actix_web::test]
+async fn preexisting_workspace_config_without_completion_marker_requires_onboarding() {
+    let fixture = Fixture::custom_installation();
+    let install = fixture.paths.config_file.with_file_name("install");
+    fs::write(
+        &install,
+        format!(
+            "installed=true\nworkspace_root={}\n",
+            fixture.paths.default_workspace.display()
+        ),
+    )
+    .unwrap();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/bootstrap").to_request(),
+    )
+    .await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(bootstrap.onboarding, OnboardingStatus::WorkspaceRequired);
 }
 
 #[actix_web::test]

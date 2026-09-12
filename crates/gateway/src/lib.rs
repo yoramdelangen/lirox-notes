@@ -1591,12 +1591,6 @@ async fn create_workspace_api(
         .or_else(|| workspace_slug_from_repo_url(&repo_url))
         .unwrap_or_else(|| "workspace".to_string());
     let workspace_root = app_workspace_root(&state.paths)?;
-    if let Err(error) = mark_installed(&state.paths, &workspace_root) {
-        return Ok(api_error(
-            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
-            &error.to_string(),
-        ));
-    }
     let config = GatewayConfig {
         workspace_slug: workspace_slug.clone(),
         workspace_name: request
@@ -1615,6 +1609,7 @@ async fn create_workspace_api(
     if let Err(error) = ensure_workspace_for_config(&config)
         .and_then(|_| configure_git_remote(&config))
         .and_then(|_| save_config(&state.paths.config_file, &config))
+        .and_then(|_| mark_installed(&state.paths, &workspace_root))
         .and_then(|_| mark_onboarding_complete(&state.paths))
     {
         return Ok(api_error(
