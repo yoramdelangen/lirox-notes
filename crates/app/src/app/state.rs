@@ -5,6 +5,7 @@ use crate::{
     input::{InputScope, InputState, SurfaceKind},
     workspace::WorkspaceState,
 };
+use liroxnotes_shared::WorkspaceView;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApplicationState {
@@ -29,6 +30,44 @@ impl ApplicationState {
             config: AppConfig::defaults(),
             status: StatusState::default(),
         }
+    }
+
+    pub fn from_workspace_view(view: &WorkspaceView) -> Self {
+        let mut state = Self::empty();
+        state.domain.workspace_name = view.name.clone();
+        state.domain.notes = view
+            .notes
+            .iter()
+            .map(|note| crate::domain::Note {
+                path: note.path.clone(),
+                title: note.title.clone(),
+                body: if note.path == view.selected_note.path {
+                    view.selected_note_body.clone()
+                } else {
+                    String::new()
+                },
+            })
+            .collect();
+        if !state.domain.notes.is_empty() {
+            let selected = view
+                .notes
+                .iter()
+                .find(|note| note.active)
+                .or_else(|| view.notes.first())
+                .map(|note| note.path.clone());
+            if let Some(path) = selected {
+                state.domain.open_note(&path);
+                state
+                    .workspace
+                    .surface_mut(SurfaceId::FILE_TREE)
+                    .map(|surface| surface.select(path));
+            }
+        }
+        state
+    }
+
+    pub fn set_document(&mut self, document: String) {
+        self.domain.document = document;
     }
 
     pub fn active_input_scopes(&self) -> Vec<InputScope> {

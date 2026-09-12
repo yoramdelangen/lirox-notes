@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
 use crate::{
+    app::{ApplicationState, Dispatcher},
     input::InputEvent,
     platform::web::keyboard,
     ui::{bottom_bar::BottomBar, top_bar::TopBar, workspace_renderer::WorkspaceRenderer},
@@ -11,6 +12,66 @@ use crate::{
 
 #[component]
 pub fn WorkspaceShell(
+    view: WorkspaceView,
+    focus: FocusTarget,
+    sidebar_mode: SidebarMode,
+    browser_dir: String,
+    on_action: Option<EventHandler<AppAction>>,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
+    if try_use_context::<AppContext>().is_some() {
+        return rsx! {
+            WorkspaceShellContent {
+                view,
+                focus,
+                sidebar_mode,
+                browser_dir,
+                on_action,
+                on_select_note,
+            }
+        };
+    }
+
+    rsx! {
+        WorkspaceShellSsr {
+            view,
+            focus,
+            sidebar_mode,
+            browser_dir,
+            on_action,
+            on_select_note,
+        }
+    }
+}
+
+#[component]
+fn WorkspaceShellSsr(
+    view: WorkspaceView,
+    focus: FocusTarget,
+    sidebar_mode: SidebarMode,
+    browser_dir: String,
+    on_action: Option<EventHandler<AppAction>>,
+    on_select_note: Option<EventHandler<String>>,
+) -> Element {
+    let state = use_signal(|| ApplicationState::from_workspace_view(&view));
+    use_context_provider(|| AppContext {
+        state,
+        dispatcher: Dispatcher::new(),
+    });
+    rsx! {
+        WorkspaceShellContent {
+            view,
+            focus,
+            sidebar_mode,
+            browser_dir,
+            on_action,
+            on_select_note,
+        }
+    }
+}
+
+#[component]
+fn WorkspaceShellContent(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,

@@ -1182,6 +1182,26 @@ fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpRes
     layouts::html_page("LiroxNotes", &body)
 }
 
+#[cfg(test)]
+mod ssr_tests {
+    use super::*;
+
+    #[test]
+    fn workspace_shell_renders_without_parent_app_context() {
+        let body = dioxus_ssr::render_element(rsx!(WorkspaceShell {
+            view: liroxnotes_shared::WorkspaceView::empty(),
+            focus: liroxnotes_app::FocusTarget::Editor,
+            sidebar_mode: liroxnotes_app::SidebarMode::Tree,
+            browser_dir: String::new(),
+            on_action: None,
+            on_select_note: None,
+        }));
+
+        assert!(body.contains("No notes available"));
+        assert!(body.contains("No note selected"));
+    }
+}
+
 fn workspace_note_path_for_route(workspace: &str, path: &str) -> Option<String> {
     let url = if path.is_empty() {
         format!("/workspace/{workspace}")

@@ -25,6 +25,8 @@ pub fn FileTreeSurface(
     };
     let state = context.state;
     let dispatcher = context.dispatcher.clone();
+    let selected_path = state.read().domain.selected_note.clone();
+    let note_count = state.read().domain.notes.len();
     let heading = if sidebar_mode == SidebarMode::Tree {
         "File Tree"
     } else {
@@ -46,10 +48,10 @@ pub fn FileTreeSurface(
                     li { class: "p-3 text-sm text-[var(--lirox-muted)]", "No notes available" }
                 } else {
                     for entry in view.tree {
-                        li { key: "{entry.path}", role: "treeitem", aria_selected: "{entry.active}",
+                        li { key: "{entry.path}", role: "treeitem", aria_selected: "{selected_path.as_deref() == Some(entry.path.as_str())}",
                             button {
                                 class: "flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-[var(--lirox-surface-alt)] focus:outline-none focus:ring-1 focus:ring-[var(--lirox-accent)]",
-                                class: if entry.active { "bg-[var(--lirox-selection)] text-[var(--lirox-fg)]" } else { "text-[var(--lirox-muted)]" },
+                                 class: if selected_path.as_deref() == Some(entry.path.as_str()) { "bg-[var(--lirox-selection)] text-[var(--lirox-fg)]" } else { "text-[var(--lirox-muted)]" },
                                 style: "padding-left: {entry.depth * 12 + 8}px;",
                                 aria_label: "Open {entry.label}",
                                 onclick: {
@@ -66,7 +68,7 @@ pub fn FileTreeSurface(
                 }
             }
             footer { class: "border-t border-[var(--lirox-border)] px-3 py-2 text-xs text-[var(--lirox-subtle)]",
-                "{focus:?} · {view.note_count} notes"
+                 "{focus:?} · {note_count} notes"
             }
         }
     }

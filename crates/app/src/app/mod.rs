@@ -160,4 +160,46 @@ mod tests {
             }]
         );
     }
+
+    #[test]
+    fn workspace_view_adapts_into_selectable_domain_state() {
+        let mut view = liroxnotes_shared::WorkspaceView::empty();
+        view.name = "Notes".into();
+        view.notes = vec![liroxnotes_shared::NoteSummary {
+            path: "notes/one.md".into(),
+            title: "One".into(),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: true,
+        }];
+        view.note_count = 1;
+        view.selected_note = view.notes[0].clone();
+        view.selected_note_body = "# One".into();
+
+        let state = ApplicationState::from_workspace_view(&view);
+
+        assert_eq!(state.domain.workspace_name, "Notes");
+        assert_eq!(state.domain.selected_note.as_deref(), Some("notes/one.md"));
+        assert_eq!(state.domain.document, "# One");
+        assert_eq!(
+            state
+                .workspace
+                .surface(SurfaceId::FILE_TREE)
+                .and_then(|surface| surface.selected_path()),
+            Some("notes/one.md")
+        );
+
+        let mut state = ApplicationState::from_workspace_view(&view);
+        dispatch(&mut state, command("file_tree.move_down"));
+        assert_eq!(state.domain.selected_note.as_deref(), Some("notes/one.md"));
+        dispatch(&mut state, command("file_tree.open_selected"));
+        assert_eq!(state.domain.document, "# One");
+    }
+
+    #[test]
+    fn document_updates_through_application_state() {
+        let mut state = ApplicationState::empty();
+        state.set_document("edited".into());
+        assert_eq!(state.domain.document, "edited");
+    }
 }
