@@ -50,3 +50,17 @@
 
 - The active challenge store remains one slot per runtime directory, as defined by Task 1; concurrent consumption is serialized in-process.
 - Existing pre-review account files without an `account_id` are intentionally not usable for new passkey login; fresh registration creates the required association.
+
+## Scoped Re-Review Fix
+
+### Fix
+
+- `680662b fix: remove dead install form`
+- Converted the install page's non-functional POST form into a static passkey-only section. It now directs users to the WebAuthn API and `/api/setup` without posting to the removed `/install` route.
+- Added `install_page_has_no_dead_post_form`, asserting the rendered page has no form or `/install` action and still exposes the intended passkey setup guidance.
+
+### Verification
+
+- `cargo test -p liroxnotes-gateway`: passed, 18 unit tests and 22 integration tests.
+- `cargo check -p liroxnotes-gateway --locked`: passed.
+- `cargo fmt --all -- --check`: passed.
