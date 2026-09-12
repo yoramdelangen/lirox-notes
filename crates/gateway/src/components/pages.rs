@@ -7,7 +7,7 @@ pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) ->
     format!(
         r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
 <form method="post" action="/onboarding" style="width:min(100%,42rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
-<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7c8796;">LiroxNotes MVP</div>
+<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.18em;color:#7c8796;">LiroxNotes</div>
 <h1 style="margin:0;font-size:1.7rem;">Set up your notes workspace</h1>
 <p style="margin:0;color:#9aa4b2;">Choose whether to clone an existing remote or create a new local repository.</p>
 {error}

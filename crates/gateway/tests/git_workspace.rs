@@ -30,11 +30,11 @@ fn rejects_unsafe_note_paths() {
 }
 
 #[test]
-fn ensure_workspace_seeds_welcome_for_empty_repository() {
+fn ensure_workspace_keeps_empty_repository_empty() {
     let root = temp_root("empty");
     ensure_workspace(&root).unwrap();
 
-    assert!(root.join("notes/welcome.md").exists());
+    assert!(!root.join("notes/welcome.md").exists());
 
     let _ = fs::remove_dir_all(root);
 }
@@ -64,6 +64,9 @@ fn deletes_and_commits_note_without_failing_when_already_absent() {
         branch: "main".to_string(),
     };
 
+    fs::create_dir_all(root.join("notes")).unwrap();
+    fs::write(root.join("notes/welcome.md"), "# Note\n").unwrap();
+    assert!(commit_note(&root, "notes/welcome.md").unwrap());
     assert!(delete_note_file(&config, "notes/welcome.md").unwrap());
     assert!(!root.join("notes/welcome.md").exists());
     assert!(!delete_note_file(&config, "notes/welcome.md").unwrap());
@@ -187,13 +190,14 @@ fn push_workspace_pushes_commits_to_origin() {
     };
 
     configure_git_remote(&config).unwrap();
+    fs::create_dir_all(workspace.join("notes")).unwrap();
     fs::write(workspace.join("notes/welcome.md"), "# Pushed\n").unwrap();
     assert!(commit_note(&workspace, "notes/welcome.md").unwrap());
     assert_eq!(
         workspace_view_for_config(&config, "notes/welcome.md")
             .unwrap()
             .unpushed_commits,
-        2
+        1
     );
     assert!(push_workspace(&config).unwrap());
     assert_eq!(
@@ -235,6 +239,7 @@ fn saving_only_commits_until_explicit_push() {
     };
 
     configure_git_remote(&config).unwrap();
+    fs::create_dir_all(workspace.join("notes")).unwrap();
     fs::write(
         workspace.join("notes/welcome.md"),
         "# Changed without push\n",
@@ -407,7 +412,7 @@ fn configured_profile_clones_remote_workspace() {
 }
 
 #[test]
-fn configured_profile_seeds_empty_cloned_repository() {
+fn configured_profile_keeps_empty_cloned_repository_empty() {
     let root = temp_root("clone-empty");
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source");
@@ -436,7 +441,7 @@ fn configured_profile_seeds_empty_cloned_repository() {
     .unwrap();
 
     assert!(configured_profile(&paths).unwrap().is_some());
-    assert!(clone_path.join("notes/welcome.md").exists());
+    assert!(!clone_path.join("notes/welcome.md").exists());
 
     let _ = fs::remove_dir_all(root);
 }

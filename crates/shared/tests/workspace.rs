@@ -1,11 +1,33 @@
 use liroxnotes_shared::{
-    mock_workspace_view, workspace_view_from_notes, workspace_view_with_body,
-    workspace_view_with_virtual_notes, TreeKind, WorkspaceNote, DEMO_WORKSPACE,
+    workspace_view_from_notes, workspace_view_with_virtual_notes, TreeKind, WorkspaceNote,
 };
 
+fn test_notes() -> Vec<WorkspaceNote> {
+    vec![
+        WorkspaceNote {
+            path: "notes/welcome.md".to_string(),
+            body: "---\ntitle: Welcome\n---\n# Welcome\n\n#overview #welcome\nSee [Roadmap](notes/roadmap.md).".to_string(),
+        },
+        WorkspaceNote {
+            path: "notes/roadmap.md".to_string(),
+            body: "# Roadmap\n\n#welcome".to_string(),
+        },
+    ]
+}
+
 #[test]
-fn parses_demo_note_meta() {
-    let view = mock_workspace_view("notes/welcome.md");
+fn parses_note_meta_from_explicit_records() {
+    let notes = test_notes();
+    let view = workspace_view_from_notes(
+        "test",
+        "Test Workspace",
+        "main",
+        "local",
+        "",
+        "notes/welcome.md",
+        0,
+        &notes,
+    );
 
     assert_eq!(view.selected_note.title, "Welcome");
     assert_eq!(view.selected_note.labels, vec!["overview", "welcome"]);
@@ -16,8 +38,18 @@ fn parses_demo_note_meta() {
 }
 
 #[test]
-fn builds_tree_and_selects_note() {
-    let view = mock_workspace_view("notes/roadmap.md");
+fn builds_tree_and_selects_note_from_explicit_records() {
+    let notes = test_notes();
+    let view = workspace_view_from_notes(
+        "test",
+        "Test Workspace",
+        "main",
+        "local",
+        "",
+        "notes/roadmap.md",
+        0,
+        &notes,
+    );
 
     assert_eq!(view.selected_note.path, "notes/roadmap.md");
     assert!(view
@@ -29,10 +61,19 @@ fn builds_tree_and_selects_note() {
 
 #[test]
 fn overrides_selected_note_body_for_labels() {
-    let view = workspace_view_with_body(
-        &DEMO_WORKSPACE,
+    let notes = [WorkspaceNote {
+        path: "notes/welcome.md".to_string(),
+        body: "# Welcome\n\n#alpha #beta".to_string(),
+    }];
+    let view = workspace_view_from_notes(
+        "test",
+        "Test Workspace",
+        "main",
+        "local",
+        "",
         "notes/welcome.md",
-        "# Welcome\n\n#alpha #beta",
+        0,
+        &notes,
     );
 
     assert!(view.selected_note.labels.contains(&"alpha".to_string()));
@@ -41,10 +82,20 @@ fn overrides_selected_note_body_for_labels() {
 
 #[test]
 fn ignores_labels_in_code_and_links() {
-    let view = workspace_view_with_body(
-        &DEMO_WORKSPACE,
+    let notes = [WorkspaceNote {
+        path: "notes/welcome.md".to_string(),
+        body: "# Heading\n#real `#inline` [#link](notes/#target.md)\n```\n#code\n```\n#done"
+            .to_string(),
+    }];
+    let view = workspace_view_from_notes(
+        "test",
+        "Test Workspace",
+        "main",
+        "local",
+        "",
         "notes/welcome.md",
-        "# Heading\n#real `#inline` [#link](notes/#target.md)\n```\n#code\n```\n#done",
+        0,
+        &notes,
     );
 
     assert_eq!(view.selected_note.labels, vec!["done", "real"]);
@@ -53,18 +104,18 @@ fn ignores_labels_in_code_and_links() {
 #[test]
 fn empty_workspace_has_empty_selected_note() {
     let view = workspace_view_from_notes(
-        "demo",
+        "test",
         "Empty Workspace",
         "main",
         "local git",
-        "notes/welcome.md",
-        "notes/welcome.md",
+        "",
+        "",
         0,
         &[],
     );
 
     assert_eq!(view.note_count, 0);
-    assert_eq!(view.selected_note.path, "notes/welcome.md");
+    assert!(view.selected_note.path.is_empty());
     assert_eq!(view.selected_note_body, "");
     assert!(view.notes.is_empty());
 }
@@ -72,8 +123,8 @@ fn empty_workspace_has_empty_selected_note() {
 #[test]
 fn drops_virtual_legacy_note_after_folder_promotion() {
     let view = workspace_view_from_notes(
-        "demo",
-        "Demo",
+        "test",
+        "Test",
         "main",
         "local",
         "project-planning/another-nested/README.md",

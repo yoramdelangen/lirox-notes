@@ -74,73 +74,10 @@ impl WorkspaceView {
     }
 }
 
-pub struct NoteRecord {
-    pub path: &'static str,
-    pub body: &'static str,
-}
-
 #[derive(Clone)]
 pub struct WorkspaceNote {
     pub path: String,
     pub body: String,
-}
-
-pub struct DemoWorkspace {
-    pub slug: &'static str,
-    pub name: &'static str,
-    pub branch: &'static str,
-    pub source: &'static str,
-    pub default_note_path: &'static str,
-    pub notes: &'static [NoteRecord],
-}
-
-pub const DEMO_WORKSPACE: DemoWorkspace = DemoWorkspace {
-    slug: "demo",
-    name: "MVP Demo Workspace",
-    branch: "demo",
-    source: "read-only fixtures",
-    default_note_path: "notes/welcome.md",
-    notes: &[
-        NoteRecord {
-            path: "notes/welcome.md",
-            body: include_str!("demo_notes/welcome.md"),
-        },
-        NoteRecord {
-            path: "notes/roadmap.md",
-            body: include_str!("demo_notes/roadmap.md"),
-        },
-        NoteRecord {
-            path: "notes/overview.md",
-            body: include_str!("demo_notes/overview.md"),
-        },
-        NoteRecord {
-            path: "drafts/inbox.md",
-            body: include_str!("demo_notes/inbox.md"),
-        },
-        NoteRecord {
-            path: "reference/labels.md",
-            body: include_str!("demo_notes/labels.md"),
-        },
-        NoteRecord {
-            path: "reference/loading.md",
-            body: include_str!("demo_notes/loading.md"),
-        },
-    ],
-};
-
-pub fn mock_workspace_view(selected_note_path: &str) -> WorkspaceView {
-    workspace_view(&DEMO_WORKSPACE, selected_note_path)
-}
-
-pub fn mock_workspace_view_with_body(
-    selected_note_path: &str,
-    selected_note_body: &str,
-) -> WorkspaceView {
-    workspace_view_with_body(&DEMO_WORKSPACE, selected_note_path, selected_note_body)
-}
-
-pub fn workspace_view(workspace: &DemoWorkspace, selected_note_path: &str) -> WorkspaceView {
-    workspace_view_with_body(workspace, selected_note_path, "")
 }
 
 pub fn workspace_view_from_notes(
@@ -148,7 +85,7 @@ pub fn workspace_view_from_notes(
     name: &str,
     branch: &str,
     source: &str,
-    default_note_path: &str,
+    _default_note_path: &str,
     selected_note_path: &str,
     changed_notes: usize,
     note_records: &[WorkspaceNote],
@@ -156,21 +93,13 @@ pub fn workspace_view_from_notes(
     let active_path = note_records
         .iter()
         .find(|note| note.path == selected_note_path)
-        .map(|note| note.path.as_str())
-        .unwrap_or(default_note_path);
+        .map(|note| note.path.as_str());
 
     let notes: Vec<NoteSummary> = note_records
         .iter()
-        .map(|note| note_summary(&note.path, &note.body, active_path))
+        .map(|note| note_summary(&note.path, &note.body, active_path.unwrap_or("")))
         .collect();
     if notes.is_empty() {
-        let selected_note = NoteSummary {
-            path: default_note_path.to_string(),
-            title: fallback_title(default_note_path),
-            labels: Vec::new(),
-            links: Vec::new(),
-            active: true,
-        };
         return WorkspaceView {
             slug: slug.to_string(),
             name: name.to_string(),
@@ -179,7 +108,13 @@ pub fn workspace_view_from_notes(
             note_count: 0,
             changed_notes,
             unpushed_commits: 0,
-            selected_note,
+            selected_note: NoteSummary {
+                path: String::new(),
+                title: String::new(),
+                labels: Vec::new(),
+                links: Vec::new(),
+                active: false,
+            },
             selected_note_body: String::new(),
             tree: Vec::new(),
             labels: Vec::new(),
@@ -188,7 +123,7 @@ pub fn workspace_view_from_notes(
     }
     let selected_note = notes
         .iter()
-        .find(|note| note.path == active_path)
+        .find(|note| Some(note.path.as_str()) == active_path)
         .cloned()
         .unwrap_or_else(|| notes[0].clone());
     let selected_note_body = note_records
@@ -209,66 +144,6 @@ pub fn workspace_view_from_notes(
         labels: label_summaries(&notes),
         selected_note,
         selected_note_body,
-        notes,
-    }
-}
-
-pub fn workspace_view_with_body(
-    workspace: &DemoWorkspace,
-    selected_note_path: &str,
-    selected_note_body: &str,
-) -> WorkspaceView {
-    let active_path = workspace
-        .notes
-        .iter()
-        .find(|note| note.path == selected_note_path)
-        .map(|note| note.path)
-        .unwrap_or(workspace.default_note_path);
-
-    let notes: Vec<NoteSummary> = workspace
-        .notes
-        .iter()
-        .map(|note| {
-            let body = if note.path == active_path && !selected_note_body.is_empty() {
-                selected_note_body
-            } else {
-                note.body
-            };
-
-            note_summary(note.path, body, active_path)
-        })
-        .collect();
-    let selected_note = notes
-        .iter()
-        .find(|note| note.path == active_path)
-        .cloned()
-        .unwrap_or_else(|| notes[0].clone());
-    let tree = build_tree(&notes, &selected_note.path);
-    let labels = label_summaries(&notes);
-
-    WorkspaceView {
-        slug: workspace.slug.to_string(),
-        name: workspace.name.to_string(),
-        branch: workspace.branch.to_string(),
-        source: workspace.source.to_string(),
-        note_count: notes.len(),
-        changed_notes: 0,
-        unpushed_commits: 0,
-        selected_note_body: workspace
-            .notes
-            .iter()
-            .find(|note| note.path == selected_note.path)
-            .map(|note| {
-                if note.path == selected_note.path && !selected_note_body.is_empty() {
-                    selected_note_body.to_string()
-                } else {
-                    note.body.to_string()
-                }
-            })
-            .unwrap_or_else(|| workspace.notes[0].body.to_string()),
-        selected_note,
-        tree,
-        labels,
         notes,
     }
 }

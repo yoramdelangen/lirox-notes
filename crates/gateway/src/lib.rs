@@ -9,7 +9,7 @@ use actix_web::{
 };
 use dioxus::prelude::*;
 use liroxnotes_app::WorkspaceShell;
-use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote, DEMO_WORKSPACE};
+use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -596,48 +596,12 @@ pub fn slugify(value: &str) -> Option<String> {
     (!slug.is_empty()).then_some(slug)
 }
 
-fn workspace_has_user_files(workspace: &Path) -> std::io::Result<bool> {
-    for entry in fs::read_dir(workspace)? {
-        let entry = entry?;
-        if entry.file_name().to_str() == Some(".git") {
-            continue;
-        }
-        return Ok(true);
-    }
-    Ok(false)
-}
-
-fn seed_welcome_files_if_empty(workspace: &Path) -> std::io::Result<()> {
-    if workspace_has_user_files(workspace)? {
-        return Ok(());
-    }
-
-    let welcome = workspace.join("notes/welcome.md");
-    if let Some(parent) = welcome.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        &welcome,
-        "# Welcome\n\nYour workspace is ready. Start writing notes here.\n",
-    )?;
-    run_git(workspace, &["config", "user.name", "LiroxNotes"])?;
-    run_git(
-        workspace,
-        &["config", "user.email", "liroxnotes@example.local"],
-    )?;
-    run_git(workspace, &["add", "."])?;
-    let _ = run_git(workspace, &["commit", "-m", "Initial notes"]);
-    Ok(())
-}
-
 pub fn ensure_workspace(workspace: &Path) -> std::io::Result<()> {
     fs::create_dir_all(workspace)?;
 
     if run_git(workspace, &["rev-parse", "--is-inside-work-tree"]).is_err() {
         run_git(workspace, &["init"])?;
     }
-
-    seed_welcome_files_if_empty(workspace)?;
 
     Ok(())
 }
@@ -668,8 +632,7 @@ fn ensure_workspace_for_config(config: &GatewayConfig) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    clone_git(&config.repo_url, &config.branch, &config.workspace_path)?;
-    seed_welcome_files_if_empty(&config.workspace_path)
+    clone_git(&config.repo_url, &config.branch, &config.workspace_path)
 }
 
 fn read_notes(root: &Path, dir: &Path, notes: &mut Vec<WorkspaceNote>) -> std::io::Result<()> {
@@ -934,7 +897,7 @@ fn api_error(status: actix_web::http::StatusCode, message: &str) -> HttpResponse
 }
 
 fn workspace_summary(config: &GatewayConfig) -> std::io::Result<WorkspaceResponse> {
-    let view = workspace_view_for_config(config, DEMO_WORKSPACE.default_note_path)?;
+    let view = workspace_view_for_config(config, "")?;
 
     Ok(WorkspaceResponse {
         slug: config.workspace_slug.clone(),
@@ -1178,7 +1141,7 @@ pub fn workspace_view_for_config(
     let default_note = notes
         .first()
         .map(|record| record.path.as_str())
-        .unwrap_or(DEMO_WORKSPACE.default_note_path);
+        .unwrap_or("");
 
     let mut view = workspace_view_from_notes(
         &config.workspace_slug,
@@ -1248,7 +1211,7 @@ async fn index(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
     match configured(&state) {
-        Ok(Some(config)) => render_workspace(&config, DEMO_WORKSPACE.default_note_path),
+        Ok(Some(config)) => render_workspace(&config, ""),
         Ok(None) => onboarding_page(&state.paths, None),
         Err(error) => HttpResponse::InternalServerError().body(error.to_string()),
     }
@@ -1383,7 +1346,7 @@ async fn workspace_page(
             if let Some(response) = require_configured_workspace(&config, &workspace) {
                 response
             } else {
-                render_workspace(&config, DEMO_WORKSPACE.default_note_path)
+                render_workspace(&config, "")
             }
         }
         Ok(None) => HttpResponse::SeeOther()
@@ -1441,7 +1404,7 @@ async fn workspace_path_page(
             {
                 render_workspace(&config, &selected_note_path)
             } else {
-                render_workspace(&config, DEMO_WORKSPACE.default_note_path)
+                render_workspace(&config, "")
             }
         }
         Ok(None) => HttpResponse::SeeOther()
@@ -2046,11 +2009,7 @@ async fn workspace_api(
         cors(&mut response);
         return Ok(response);
     };
-    let selected = if path.is_empty() {
-        DEMO_WORKSPACE.default_note_path
-    } else {
-        &path
-    };
+    let selected = &path;
     let mut response = HttpResponse::Ok().json(workspace_view_for_config(&config, selected)?);
     cors(&mut response);
     Ok(response)
