@@ -52,14 +52,44 @@ pub fn WorkspaceShell(
     on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
-    let _ = (focus, sidebar_mode, browser_dir, on_action, on_select_note);
+    let focus_label = match focus {
+        FocusTarget::Sidebar => "sidebar",
+        FocusTarget::Editor => "editor",
+    };
+    let sidebar_label = match sidebar_mode {
+        SidebarMode::Tree => "tree",
+        SidebarMode::LabelsNotes => "labels-notes",
+        SidebarMode::Files => "files",
+    };
+    let note_path = view.selected_note.path.clone();
     rsx! {
-        main { class: "min-h-screen bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
+        main {
+            class: "min-h-screen bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
+            id: "workspace-shell",
             h1 { class: "border-b border-[var(--lirox-border)] p-3 text-sm", "LiroxNotes" }
             section { class: "p-4",
                 h2 { class: "text-lg", "{view.selected_note.title}" }
                 p { class: "text-[var(--lirox-muted)]", "{view.selected_note.path}" }
+                p { class: "text-[var(--lirox-subtle)]", "Focus: {focus_label} | Sidebar: {sidebar_label} | Directory: {browser_dir}" }
                 pre { class: "mt-4 whitespace-pre-wrap", "{view.selected_note_body}" }
+                button {
+                    class: "mt-4",
+                    onclick: move |_| {
+                        if let Some(handler) = on_action.as_ref() {
+                            handler.call(AppAction::FocusEditor);
+                        }
+                    },
+                    "Focus editor"
+                }
+                button {
+                    class: "ml-3 mt-4",
+                    onclick: move |_| {
+                        if let Some(handler) = on_select_note.as_ref() {
+                            handler.call(note_path.clone());
+                        }
+                    },
+                    "Select note"
+                }
             }
         }
     }
