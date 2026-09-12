@@ -8,7 +8,7 @@ use crate::{
 };
 use liroxnotes_shared::WorkspaceView;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ApplicationState {
     pub input: InputState,
     pub workspace: WorkspaceState,

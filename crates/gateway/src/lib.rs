@@ -1561,12 +1561,6 @@ async fn create_workspace_api(
     req: HttpRequest,
     request: web::Json<WorkspaceRequest>,
 ) -> Result<HttpResponse> {
-    if !is_installed(&state.paths)? {
-        return Ok(api_error(
-            actix_web::http::StatusCode::BAD_REQUEST,
-            "application is not installed",
-        ));
-    }
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
@@ -1583,6 +1577,7 @@ async fn create_workspace_api(
         .or_else(|| workspace_slug_from_repo_url(&repo_url))
         .unwrap_or_else(|| "workspace".to_string());
     let workspace_root = app_workspace_root(&state.paths)?;
+    mark_installed(&state.paths, &workspace_root)?;
     let config = GatewayConfig {
         workspace_slug: workspace_slug.clone(),
         workspace_name: request

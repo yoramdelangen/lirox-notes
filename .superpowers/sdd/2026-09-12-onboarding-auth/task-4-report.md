@@ -27,5 +27,21 @@
 
 ## Concerns
 
-- The existing application architecture exposes an effect queue but has no HTTP effect runner. Task 4 therefore wires semantic gateway effects and keeps browser WebAuthn behind its adapter; executing those effects against `/api/bootstrap`, `/api/setup`, and passkey endpoints requires the next effect integration layer.
-- The WebAuthn adapter intentionally does not persist credential material. Gateway option-object conversion beyond the generic browser bridge remains part of that integration layer.
+- The WebAuthn adapter intentionally does not persist credential material. Browser hardware execution still needs an end-to-end browser test.
+
+## Review Fixes
+
+- Added a browser effect executor that drains `Dispatcher::take_effects()` and performs bootstrap, passkey registration/login, workspace creation, authoritative workspace loading, and logout.
+- Replaced arbitrary WebAuthn passthrough with gateway option conversion to `Uint8Array`, credential `toJSON()` serialization, base64url handling, and `DOMException.name` cancellation detection.
+- Added `WorkspaceView` to auth state; workbench rendering now requires that authoritative view and `WorkspaceLoaded` is the only successful transition into it.
+- Added documented workspace fields and semantic auth commands; setup posts to `/api/workspaces`.
+- Added logout/bootstrap ordering, unauthenticated setup, authoritative-workspace, and effect-dispatch tests.
+- Updated gateway first-workspace setup to mark installation and documented the contract change in `crates/gateway/API.md`.
+
+## Fix Verification
+
+- `cargo test -p liroxnotes-app -p liroxnotes-gateway`: pass, 41 app tests, 18 gateway unit tests, and 28 gateway integration tests.
+- `cargo check --workspace --locked`: pass.
+- `cargo check -p liroxnotes-app --target wasm32-unknown-unknown --locked`: pass.
+- `dx check --package liroxnotes-app`: pass.
+- `cargo fmt --all -- --check`: pass.

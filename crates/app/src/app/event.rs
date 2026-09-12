@@ -1,11 +1,14 @@
-#[derive(Clone, Debug, PartialEq, Eq)]
+use crate::auth::{BootstrapState, SetupFields};
+use liroxnotes_shared::WorkspaceView;
+
+#[derive(Clone, PartialEq, Eq)]
 pub enum ApplicationEvent {
     Workspace(WorkspaceEvent),
     Status(StatusEvent),
     Auth(AuthEvent),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum AuthEvent {
     BootstrapRequested,
     BootstrapLoaded(BootstrapState),
@@ -18,6 +21,7 @@ pub enum AuthEvent {
     RegistrationSucceeded,
     LoginSucceeded { user: Option<String> },
     WorkspaceCreated { slug: String, name: String },
+    WorkspaceLoaded(WorkspaceView),
     SessionExpired,
 }
 
@@ -31,4 +35,12 @@ pub enum StatusEvent {
     Message(String),
     Cleared,
 }
-use crate::auth::{BootstrapState, SetupFields};
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum AuthCommand {
+    RegisterPasskey,
+    Login,
+    Logout,
+    CreateWorkspace(SetupFields),
+    Retry,
+}

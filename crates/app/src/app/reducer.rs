@@ -11,6 +11,7 @@ pub enum Effect {
     OpenCommandPalette,
     SaveDocument { path: String, content: String },
     Bootstrap,
+    LoadWorkspace,
     RegisterPasskey,
     Login,
     Logout,
@@ -37,10 +38,22 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
     match event {
         AuthEvent::BootstrapRequested => vec![Effect::Bootstrap],
         AuthEvent::BootstrapLoaded(bootstrap) => {
-            auth.screen = screen_for(&bootstrap);
+            auth.screen = if bootstrap.authenticated && bootstrap.workspace.is_some() {
+                screen_for(&bootstrap)
+            } else if bootstrap.authenticated && bootstrap.onboarding == OnboardingStatus::Complete
+            {
+                Screen::Loading
+            } else {
+                screen_for(&bootstrap)
+            };
             auth.bootstrap = Some(bootstrap);
+            auth.operation = AuthOperation::None;
             auth.failure = None;
-            vec![]
+            if auth.screen == Screen::Loading {
+                vec![Effect::LoadWorkspace]
+            } else {
+                vec![]
+            }
         }
         AuthEvent::RegisterPasskey => {
             auth.operation = AuthOperation::Registering;
@@ -90,7 +103,16 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             if let Some(bootstrap) = auth.bootstrap.as_mut() {
                 bootstrap.authenticated = true;
                 bootstrap.user = user;
-                auth.screen = screen_for(bootstrap);
+                auth.screen = if bootstrap.onboarding == OnboardingStatus::Complete
+                    && bootstrap.workspace.is_none()
+                {
+                    Screen::Loading
+                } else {
+                    screen_for(bootstrap)
+                };
+                if auth.screen == Screen::Loading {
+                    return vec![Effect::LoadWorkspace];
+                }
             }
             vec![]
         }
@@ -100,6 +122,15 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
                 bootstrap.onboarding = OnboardingStatus::Complete;
                 bootstrap.authenticated = true;
                 bootstrap.workspace = Some(crate::auth::WorkspaceSummary { slug, name });
+            }
+            vec![]
+        }
+        AuthEvent::WorkspaceLoaded(view) => {
+            auth.operation = AuthOperation::None;
+            auth.workspace = Some(view);
+            if let Some(bootstrap) = auth.bootstrap.as_mut() {
+                bootstrap.onboarding = OnboardingStatus::Complete;
+                bootstrap.authenticated = true;
                 auth.screen = Screen::Workbench;
             }
             vec![]

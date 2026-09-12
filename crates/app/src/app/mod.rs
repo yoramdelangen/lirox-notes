@@ -4,7 +4,7 @@ mod reducer;
 mod state;
 
 pub use dispatcher::{dispatch, Dispatcher};
-pub use event::{ApplicationEvent, AuthEvent, StatusEvent, WorkspaceEvent};
+pub use event::{ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, WorkspaceEvent};
 pub use reducer::{apply_event, Effect};
 pub use state::{ApplicationState, StatusState};
 

@@ -185,8 +185,8 @@ The workspace path is derived from the installed workspace root and the slug.
 
 Success: `201` with `WorkspaceResponse`.
 
-Failures: `400` `application is not installed`; `401` when authentication is
-required; Git/filesystem failures may produce `500`.
+Failures: `401` when authentication is required; Git/filesystem failures may
+produce `500`. First workspace setup also marks the application installed.
 
 ### `GET /api/workspaces/{workspace}`
 
