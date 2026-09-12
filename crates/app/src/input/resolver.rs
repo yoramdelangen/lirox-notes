@@ -16,6 +16,7 @@ pub fn resolve(
     active_scopes: &[InputScope],
 ) -> ResolveResult {
     if state.mode == InputMode::Normal
+        && state.pending.is_empty()
         && !stroke.modifiers.ctrl
         && !stroke.modifiers.alt
         && !stroke.modifiers.meta
@@ -42,14 +43,19 @@ pub fn resolve(
                 &binding.scope == scope && binding.mode.is_none_or(|mode| mode == state.mode)
             });
             let mut exact = None;
-            let mut prefix = false;
+            let mut longer_prefix = false;
             for binding in candidates {
                 if binding.sequence.starts_with(&state.pending) {
-                    prefix = true;
+                    if binding.sequence.len() > state.pending.len() {
+                        longer_prefix = true;
+                    }
                     if binding.sequence == state.pending {
-                        exact = Some(binding);
+                        exact.get_or_insert(binding);
                     }
                 }
+            }
+            if longer_prefix {
+                return ResolveResult::Pending;
             }
             if let Some(binding) = exact {
                 let args = match binding.args {
@@ -63,9 +69,6 @@ pub fn resolve(
                     args,
                     source: CommandSource::Keyboard,
                 });
-            }
-            if prefix {
-                return ResolveResult::Pending;
             }
         }
     }

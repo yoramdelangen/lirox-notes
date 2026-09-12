@@ -79,6 +79,88 @@ mod tests {
     }
 
     #[test]
+    fn exact_binding_waits_when_it_is_also_a_prefix() {
+        let bindings = vec![
+            binding(
+                InputScope::Global,
+                Some(InputMode::Normal),
+                &[Key::Char('g')],
+                "single",
+            ),
+            binding(
+                InputScope::Global,
+                Some(InputMode::Normal),
+                &[Key::Char('g'), Key::Char('g')],
+                "double",
+            ),
+        ];
+        let mut state = InputState::default();
+        assert!(matches!(
+            feed(&bindings, &mut state, Key::Char('g')),
+            ResolveResult::Pending
+        ));
+        assert_eq!(
+            feed(&bindings, &mut state, Key::Char('g'))
+                .invocation()
+                .unwrap()
+                .id
+                .as_str(),
+            "double"
+        );
+    }
+
+    #[test]
+    fn digits_after_pending_input_are_key_input() {
+        let bindings = vec![binding(
+            InputScope::Global,
+            Some(InputMode::Normal),
+            &[Key::Char('g'), Key::Char('1')],
+            "g_digit",
+        )];
+        let mut state = InputState::default();
+        assert!(matches!(
+            feed(&bindings, &mut state, Key::Char('g')),
+            ResolveResult::Pending
+        ));
+        assert_eq!(
+            feed(&bindings, &mut state, Key::Char('1'))
+                .invocation()
+                .unwrap()
+                .id
+                .as_str(),
+            "g_digit"
+        );
+        assert_eq!(state.count, None);
+    }
+
+    #[test]
+    fn duplicate_exact_bindings_use_first_declaration() {
+        let bindings = vec![
+            binding(
+                InputScope::Global,
+                Some(InputMode::Normal),
+                &[Key::Char('j')],
+                "first",
+            ),
+            binding(
+                InputScope::Global,
+                Some(InputMode::Normal),
+                &[Key::Char('j')],
+                "second",
+            ),
+        ];
+        let mut state = InputState::default();
+        assert_eq!(
+            feed(&bindings, &mut state, Key::Char('j'))
+                .invocation()
+                .unwrap()
+                .id
+                .as_str(),
+            "first"
+        );
+    }
+
+    #[test]
     fn more_specific_scope_wins() {
         let bindings = vec![
             binding(
