@@ -2,15 +2,15 @@ use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
 use crate::{
-    command::SurfaceId,
     ui::surfaces::{EditorSurface, FileTreeSurface},
-    workspace::{Axis, LayoutNode},
-    AppAction, AppContext, FocusTarget, SidebarMode,
+    workspace::{Axis, LayoutNode, SurfaceState, WorkspaceState},
+    AppAction, FocusTarget, SidebarMode,
 };
 
 #[component]
 pub fn LayoutRenderer(
     node: LayoutNode,
+    workspace: WorkspaceState,
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
@@ -18,25 +18,32 @@ pub fn LayoutRenderer(
     on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
-    let context = use_context::<AppContext>();
-    let active = context.state.read().workspace.focus.active_surface.clone();
+    let active = workspace.focus.active_surface.clone();
     match node {
-        LayoutNode::Surface(id) if id == SurfaceId::EDITOR => rsx! {
-            EditorSurface { view, active: active == SurfaceId::EDITOR }
-        },
-        LayoutNode::Surface(id) if id == SurfaceId::FILE_TREE => rsx! {
-            FileTreeSurface {
-                view,
-                active: active == SurfaceId::FILE_TREE,
-                focus,
-                sidebar_mode,
-                browser_dir,
-                on_action,
-                on_select_note,
+        LayoutNode::Surface(id) => {
+            let is_active = active == id;
+            match workspace.surface(id).cloned() {
+                Some(SurfaceState::Editor(_)) => rsx! {
+                    EditorSurface {
+                        view,
+                        active: is_active,
+                    }
+                },
+                Some(SurfaceState::FileTree(_)) => rsx! {
+                    FileTreeSurface {
+                        view,
+                        active: is_active,
+                        focus,
+                        sidebar_mode,
+                        browser_dir,
+                        on_action,
+                        on_select_note,
+                    }
+                },
+                None => rsx! {
+                    div { class: "p-4 text-[var(--lirox-muted)]", "Unknown surface" }
+                },
             }
-        },
-        LayoutNode::Surface(_) => {
-            rsx! { div { class: "p-4 text-[var(--lirox-muted)]", "Unknown surface" } }
         }
         LayoutNode::Split {
             axis,
@@ -48,15 +55,29 @@ pub fn LayoutRenderer(
                 Axis::Horizontal => "flex-row",
                 Axis::Vertical => "flex-col",
             };
+            let axis_class = match axis {
+                Axis::Horizontal => "workspace-split-horizontal",
+                Axis::Vertical => "workspace-split-vertical",
+            };
+            let divider_class = match axis {
+                Axis::Horizontal => "border-l border-[var(--lirox-border)]",
+                Axis::Vertical => "border-t border-[var(--lirox-border)]",
+            };
             let first_style = match axis {
                 Axis::Horizontal => format!("width: {}%;", ratio * 100.0),
                 Axis::Vertical => format!("height: {}%;", ratio * 100.0),
             };
+            let first_class = if contains_file_tree(&first, &workspace) {
+                "workspace-tree-pane"
+            } else {
+                ""
+            };
             rsx! {
-                div { class: "flex min-h-0 min-w-0 flex-1 {direction}",
-                    div { class: "min-h-0 min-w-0 shrink-0", style: first_style,
+                div { class: "workspace-split {axis_class} flex min-h-0 min-w-0 flex-1 {direction}",
+                    div { class: "workspace-split-first {first_class} min-h-0 min-w-0 shrink-0", style: first_style,
                         LayoutRenderer {
                             node: *first,
+                            workspace: workspace.clone(),
                             view: view.clone(),
                             focus,
                             sidebar_mode,
@@ -65,9 +86,10 @@ pub fn LayoutRenderer(
                             on_select_note,
                         }
                     }
-                    div { class: "min-h-0 min-w-0 flex-1 border-l border-[var(--lirox-border)]",
+                    div { class: "workspace-split-second min-h-0 min-w-0 flex-1 {divider_class}",
                         LayoutRenderer {
                             node: *second,
+                            workspace,
                             view,
                             focus,
                             sidebar_mode,
@@ -78,6 +100,20 @@ pub fn LayoutRenderer(
                     }
                 }
             }
+        }
+    }
+}
+
+fn contains_file_tree(node: &LayoutNode, workspace: &WorkspaceState) -> bool {
+    match node {
+        LayoutNode::Surface(id) => {
+            matches!(
+                workspace.surface(id.clone()),
+                Some(SurfaceState::FileTree(_))
+            )
+        }
+        LayoutNode::Split { first, second, .. } => {
+            contains_file_tree(first, workspace) || contains_file_tree(second, workspace)
         }
     }
 }

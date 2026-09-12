@@ -3,7 +3,7 @@ use liroxnotes_shared::{TreeKind, WorkspaceView};
 
 use crate::{
     app::{ApplicationState, Dispatcher},
-    command::{CommandArgs, CommandId, CommandInvocation, CommandSource},
+    command::{CommandArgs, CommandId, CommandInvocation, CommandSource, SurfaceId},
     AppAction, AppContext, FocusTarget, SidebarMode,
 };
 
@@ -74,8 +74,16 @@ fn open_note(
     on_select_note: Option<EventHandler<String>>,
     path: String,
 ) {
+    {
+        let mut state = state.write();
+        state
+            .workspace
+            .surface_mut(SurfaceId::FILE_TREE)
+            .map(|surface| surface.select(path.clone()));
+        state.domain.selected_note = Some(path.clone());
+    }
     if let Some(handler) = on_select_note.as_ref() {
-        handler.call(path);
+        handler.call(path.clone());
     }
     dispatcher.dispatch(
         &mut state.write(),

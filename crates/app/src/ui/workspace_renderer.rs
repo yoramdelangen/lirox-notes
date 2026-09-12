@@ -23,6 +23,7 @@ pub fn WorkspaceRenderer(
             aria_label: "Workspace",
             LayoutRenderer {
                 node: state.workspace.layout.clone(),
+                workspace: state.workspace.clone(),
                 view: view.clone(),
                 focus,
                 sidebar_mode,
