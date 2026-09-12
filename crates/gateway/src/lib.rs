@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     env, fs,
+    io::Write,
     path::{Component, Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
@@ -338,6 +339,19 @@ fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Resul
             workspace_root.display()
         ),
     )
+}
+
+fn mark_onboarding_complete(paths: &RuntimePaths) -> std::io::Result<()> {
+    let path = install_file(paths);
+    let contents = fs::read_to_string(&path)?;
+    if contents
+        .lines()
+        .any(|line| line.trim() == "onboarding_complete=true")
+    {
+        return Ok(());
+    }
+    let mut file = fs::OpenOptions::new().append(true).open(path)?;
+    writeln!(file, "onboarding_complete=true")
 }
 
 fn load_session(paths: &RuntimePaths) -> std::io::Result<Option<Session>> {
@@ -1577,7 +1591,12 @@ async fn create_workspace_api(
         .or_else(|| workspace_slug_from_repo_url(&repo_url))
         .unwrap_or_else(|| "workspace".to_string());
     let workspace_root = app_workspace_root(&state.paths)?;
-    mark_installed(&state.paths, &workspace_root)?;
+    if let Err(error) = mark_installed(&state.paths, &workspace_root) {
+        return Ok(api_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            &error.to_string(),
+        ));
+    }
     let config = GatewayConfig {
         workspace_slug: workspace_slug.clone(),
         workspace_name: request
@@ -1593,9 +1612,16 @@ async fn create_workspace_api(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "main".to_string()),
     };
-    ensure_workspace_for_config(&config)?;
-    configure_git_remote(&config)?;
-    save_config(&state.paths.config_file, &config)?;
+    if let Err(error) = ensure_workspace_for_config(&config)
+        .and_then(|_| configure_git_remote(&config))
+        .and_then(|_| save_config(&state.paths.config_file, &config))
+        .and_then(|_| mark_onboarding_complete(&state.paths))
+    {
+        return Ok(api_error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            &error.to_string(),
+        ));
+    }
 
     let mut response = HttpResponse::Created().json(workspace_summary(&config)?);
     cors(&mut response);

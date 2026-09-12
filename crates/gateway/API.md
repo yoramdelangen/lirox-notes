@@ -70,7 +70,7 @@ exists, rather than the JSON error object.
 | `POST` | `/api/auth/logout` | No | `200` `SessionResponse` + cleared cookie |
 | `POST` | `/api/setup` | Yes | `201` `SessionResponse` |
 | `GET` | `/api/workspaces` | Yes | `200` array of `WorkspaceResponse` |
-| `POST` | `/api/workspaces` | Conditional | `201` `WorkspaceResponse` |
+| `POST` | `/api/workspaces` | Yes | `201` `WorkspaceResponse` |
 | `GET` | `/api/workspaces/{workspace}` | Yes | `200` `WorkspaceResponse` |
 | `POST` | `/api/workspaces/{workspace}/sync` | Yes | `200` `SyncResponse` |
 | `POST` | `/api/workspaces/{workspace}/pull` | Yes | `200` `SyncResponse` |
@@ -168,8 +168,8 @@ Failure: `400` JSON `workspace is not configured`.
 Creates or replaces the configured workspace profile. It creates a local Git
 workspace, or clones a remote repository when `repo_mode` is `remote`.
 
-Authentication: required after installation has already configured a
-workspace; allowed without login during first workspace setup.
+Authentication: a valid `lirox_session` cookie is required. The route is used
+after passkey registration, before the workbench is available.
 
 Request body: JSON `WorkspaceRequest`.
 
@@ -183,10 +183,13 @@ Request body: JSON `WorkspaceRequest`.
 
 The workspace path is derived from the installed workspace root and the slug.
 
-Success: `201` with `WorkspaceResponse`.
+Success: `201` with `WorkspaceResponse`. After workspace creation, Git setup,
+and configuration persistence all succeed, the install marker also records
+`onboarding_complete=true`; the next bootstrap response reports `complete`.
 
 Failures: `401` when authentication is required; Git/filesystem failures may
-produce `500`. First workspace setup also marks the application installed.
+produce `500` using the common JSON error shape. A failed setup does not record
+onboarding completion and remains `workspace_required`.
 
 ### `GET /api/workspaces/{workspace}`
 
@@ -407,15 +410,15 @@ Success: `204` with no body and development CORS headers when CORS is enabled.
   "installed": true,
   "authenticated": true,
   "user": "local",
-  "auth_mode": "passwordless",
+  "auth_mode": "passkey",
   "workspace_required": false,
   "workspace_root": ".lirox-runtime/workspace"
 }
 ```
 
 Fields: `installed` and `authenticated` are booleans; `user`, `auth_mode`,
-and `workspace_root` are strings; `workspace_required` is true when no
-workspace configuration exists.
+and `workspace_root` are strings; `auth_mode` is always `passkey`; and
+`workspace_required` is true when no workspace configuration exists.
 
 ### `WorkspaceResponse`
 
@@ -499,12 +502,6 @@ operations never push, so `pushed` is always `false`.
 ```http
 ### Check session
 GET {{host}}/api/auth
-
-### Login
-POST {{host}}/api/auth/login
-Content-Type: application/json
-
-{"user":"local","password":""}
 
 ### Create a local workspace
 POST {{host}}/api/workspaces

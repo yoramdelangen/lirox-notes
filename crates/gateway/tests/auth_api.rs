@@ -67,6 +67,10 @@ impl Fixture {
         fixture
     }
 
+    fn authenticated_without_workspace() -> Self {
+        Self::authenticated()
+    }
+
     fn custom_installation() -> Self {
         let fixture = Self::authenticated();
         let custom_root = fixture.paths.config_file.with_file_name("custom-root");
@@ -194,6 +198,51 @@ async fn unauthenticated_workspace_json_is_rejected() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[actix_web::test]
+async fn workspace_creation_marks_onboarding_complete() {
+    let fixture = Fixture::authenticated_without_workspace();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/workspaces")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .set_json(serde_json::json!({
+                "repo_mode": "new",
+                "workspace_slug": "notes",
+                "workspace_name": "Notes",
+                "branch": "main"
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert!(
+        fs::read_to_string(fixture.paths.config_file.with_file_name("install"))
+            .unwrap()
+            .lines()
+            .any(|line| line == "onboarding_complete=true")
+    );
+
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/bootstrap")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .to_request(),
+    )
+    .await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(bootstrap.onboarding, OnboardingStatus::Complete);
 }
 
 #[actix_web::test]
