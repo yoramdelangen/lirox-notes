@@ -5,6 +5,7 @@ use std::{
     io::{self, ErrorKind, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
+    sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -191,6 +192,8 @@ pub struct AuthStore {
     paths: RuntimePaths,
 }
 
+static PERSISTENCE_LOCK: Mutex<()> = Mutex::new(());
+
 impl AuthStore {
     pub fn new(paths: RuntimePaths) -> Self {
         Self { paths }
@@ -205,6 +208,9 @@ impl AuthStore {
     }
 
     pub fn load_challenge(&self) -> io::Result<Option<ChallengeRecord>> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
         let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
             return Ok(None);
         };
@@ -220,6 +226,9 @@ impl AuthStore {
     }
 
     pub fn consume_challenge(&self, now: u64) -> io::Result<Option<ChallengeRecord>> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
         let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
             return Ok(None);
         };
@@ -257,6 +266,9 @@ impl AuthStore {
         value: &T,
         serializer: fn(&T) -> io::Result<String>,
     ) -> io::Result<()> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
         let path = self.record_path(name);
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
@@ -304,7 +316,23 @@ fn temporary_file(parent: &Path, name: &str) -> io::Result<(PathBuf, fs::File)> 
 fn replace_file(temporary: &Path, destination: &Path) -> io::Result<()> {
     #[cfg(windows)]
     if destination.exists() {
-        fs::remove_file(destination)?;
+        let backup = destination.with_file_name(format!(
+            ".{}.{}.bak",
+            destination
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::rename(destination, &backup)?;
+        return match fs::rename(temporary, destination) {
+            Ok(()) => fs::remove_file(backup),
+            Err(error) => {
+                let _ = fs::rename(&backup, destination);
+                let _ = fs::remove_file(temporary);
+                Err(error)
+            }
+        };
     }
     match fs::rename(temporary, destination) {
         Ok(()) => Ok(()),
@@ -347,6 +375,7 @@ pub fn bootstrap_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn credential(id: &str) -> CredentialRecord {
         CredentialRecord {
@@ -504,6 +533,41 @@ mod tests {
             std::fs::read_to_string(root.join(".account.json.0.tmp")).unwrap(),
             "sentinel"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_challenge_consumption_succeeds_once() {
+        let root = std::env::temp_dir().join(format!(
+            "lirox-auth-concurrent-{}-{}",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = Arc::new(AuthStore::new(RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        }));
+        store
+            .save_challenge(&ChallengeRecord {
+                version: 1,
+                challenge_id: "challenge-1".into(),
+                challenge: "opaque-challenge".into(),
+                operation: ChallengeOperation::Registration,
+                account_id: None,
+                expires_at: u64::MAX,
+            })
+            .unwrap();
+
+        let first = Arc::clone(&store);
+        let second = Arc::clone(&store);
+        let first = std::thread::spawn(move || first.consume_challenge(1).unwrap());
+        let second = std::thread::spawn(move || second.consume_challenge(1).unwrap());
+        let consumed = [first.join().unwrap(), second.join().unwrap()]
+            .into_iter()
+            .flatten()
+            .count();
+        assert_eq!(consumed, 1);
         let _ = std::fs::remove_dir_all(root);
     }
 }
