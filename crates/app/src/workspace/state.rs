@@ -45,6 +45,13 @@ impl WorkspaceState {
             }
         }
     }
+    pub fn toggle_file_tree(&mut self) {
+        if self.layout.contains(SurfaceId::FILE_TREE) {
+            self.layout = LayoutNode::focus();
+        } else {
+            self.layout = self.standard_layout.clone();
+        }
+    }
     pub fn open_file_tree_overlay(&mut self) {
         if self.overlays.top().map(|entry| entry.surface.clone()) != Some(SurfaceId::FILE_TREE) {
             self.overlays.push(OverlayEntry::file_tree());

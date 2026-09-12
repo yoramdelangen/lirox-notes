@@ -1,7 +1,9 @@
 use dioxus::prelude::*;
 use liroxnotes_shared::{mock_workspace_view, WorkspaceView};
 
+pub mod app;
 pub mod command;
+pub mod config;
 pub mod domain;
 pub mod input;
 pub mod workspace;
