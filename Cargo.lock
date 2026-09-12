@@ -2080,6 +2080,7 @@ dependencies = [
  "liroxnotes-app",
  "liroxnotes-shared",
  "serde",
+ "serde_json",
  "sha2",
 ]
 

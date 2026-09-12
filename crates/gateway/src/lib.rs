@@ -20,6 +20,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+pub mod auth;
 mod components;
 mod layouts;
 mod routes;
