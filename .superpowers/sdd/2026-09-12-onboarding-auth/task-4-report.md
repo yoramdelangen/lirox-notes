@@ -25,6 +25,28 @@
 - `cargo check --workspace --locked`: pass.
 - `cargo fmt --all -- --check`: pass.
 
+## Follow-up Review Fixes
+
+- Made the gateway fresh-install page executable: it invokes native WebAuthn registration, verifies the credential through the gateway, and presents workspace setup using `POST /api/workspaces`.
+- Made app effect draining reactive to auth state changes so bootstrap and subsequent command effects are executed.
+- Treated both `AbortError` and `NotAllowedError` as retryable passkey cancellation.
+- Mapped gateway HTTP 401 errors to `SessionExpired` and login UI state.
+- Added an accessible logout control using the semantic auth command path without modifying `WorkspaceShell`.
+- Removed the unreachable `Welcome` screen variant.
+- Added operation, expiry, bootstrap scheduling, cancellation, and SSR assertions.
+
+## Follow-up Verification
+
+- `cargo test -p liroxnotes-app -p liroxnotes-gateway`: pass, 43 app tests, 18 gateway unit tests, and 28 gateway integration tests.
+- `cargo check --workspace --locked`: pass.
+- `cargo check -p liroxnotes-app --target wasm32-unknown-unknown --locked`: pass.
+- `dx check --package liroxnotes-app`: pass.
+- `cargo fmt --all -- --check`: pass.
+
+## Follow-up Concerns
+
+- Native passkey and fresh-install browser flow are covered by compile/SSR checks but still need browser automation with a WebAuthn virtual authenticator.
+
 ## Concerns
 
 - The WebAuthn adapter intentionally does not persist credential material. Browser hardware execution still needs an end-to-end browser test.

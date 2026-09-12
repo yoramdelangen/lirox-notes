@@ -35,8 +35,50 @@ pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
 <div style="font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:#8b949e;">LiroxNotes</div>
 <h1 style="margin:0;font-size:1.7rem;">Secure access</h1>
 <p style="margin:0;color:#9aa4b2;line-height:1.6;">Create a passkey to protect your notes, then choose a workspace.</p>
-<p style="margin:0;color:#9aa4b2;line-height:1.6;">Passkey registration uses <code>/api/auth/passkeys</code>; workspace setup uses <code>/api/setup</code>.</p>
+<button id="register-passkey" type="button" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Create passkey</button>
+<p id="auth-status" role="status" style="margin:0;color:#9aa4b2;line-height:1.6;"></p>
 </section>
-</main>"#,
+</main>
+<script>
+(() => {
+  const button = document.getElementById("register-passkey");
+  const status = document.getElementById("auth-status");
+  const section = document.querySelector("section");
+  const bytes = value => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/") + "==="), c => c.charCodeAt(0));
+  const options = value => {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(options);
+    const result = {};
+    for (const [key, child] of Object.entries(value)) result[key] = ["challenge", "id"].includes(key) && typeof child === "string" ? bytes(child) : options(child);
+    return result;
+  };
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "Waiting for your passkey...";
+    try {
+      if (!window.PublicKeyCredential || !navigator.credentials) throw new Error("WebAuthn is not supported by this browser");
+      const response = await fetch("/api/auth/passkeys/register/options", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: "{}" });
+      if (!response.ok) throw new Error("Could not start passkey registration");
+      const envelope = await response.json();
+      const publicKey = options(envelope); delete publicKey.challenge_id;
+      const credential = await navigator.credentials.create({ publicKey });
+      const verified = await fetch("/api/auth/passkeys/register/verify", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ challenge_id: envelope.challenge_id, credential: credential.toJSON() }) });
+      if (!verified.ok) throw new Error("Passkey registration failed");
+      status.textContent = "Passkey ready. Choose a workspace.";
+      button.remove();
+      section.insertAdjacentHTML("beforeend", '<label>Workspace slug<br><input id="workspace-slug" value="notes"></label><label>Workspace name<br><input id="workspace-name" value="My Workspace"></label><button id="create-workspace" type="button">Create workspace</button>');
+      document.getElementById("create-workspace").addEventListener("click", async () => {
+        const workspace = { repo_mode: "new", workspace_slug: document.getElementById("workspace-slug").value, workspace_name: document.getElementById("workspace-name").value, branch: "main" };
+        const created = await fetch("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify(workspace) });
+        if (!created.ok) { status.textContent = "Workspace setup failed. Try again."; return; }
+        location.href = "/";
+      });
+    } catch (error) {
+      status.textContent = error.name === "NotAllowedError" || error.name === "AbortError" ? "Passkey registration cancelled. Try again." : error.message;
+      button.disabled = false;
+    }
+  });
+})();
+</script>"#,
     )
 }

@@ -67,6 +67,7 @@ pub fn App() -> Element {
         && state.read().auth.workspace.is_some();
     let effect_dispatcher = dispatcher.clone();
     use_effect(move || {
+        let _ = state.read().auth.operation.clone();
         let effect_dispatcher = effect_dispatcher.clone();
         spawn(async move {
             for effect in effect_dispatcher.take_effects() {
@@ -77,14 +78,27 @@ pub fn App() -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        if authenticated { WorkspaceShell {
-            view: state.read().auth.workspace.clone().unwrap_or_else(WorkspaceView::empty),
-            focus: FocusTarget::Editor,
-            sidebar_mode: SidebarMode::Tree,
-            browser_dir: String::new(),
-            on_action: None,
-            on_select_note: None,
-        } } else { auth::AuthShell {} }
+        if authenticated {
+            div {
+                class: "relative min-h-screen",
+                WorkspaceShell {
+                    view: state.read().auth.workspace.clone().unwrap_or_else(WorkspaceView::empty),
+                    focus: FocusTarget::Editor,
+                    sidebar_mode: SidebarMode::Tree,
+                    browser_dir: String::new(),
+                    on_action: None,
+                    on_select_note: None,
+                }
+                button {
+                    "aria-label": "Log out",
+                    class: "absolute right-4 top-3 z-10 rounded border border-[var(--lirox-border)] px-3 py-1 text-sm",
+                    onclick: move |_| dispatcher.dispatch_auth_command(&mut state.write(), app::AuthCommand::Logout),
+                    "Log out"
+                }
+            }
+        } else {
+            auth::AuthShell {}
+        }
     }
 }
 
@@ -96,6 +110,9 @@ async fn execute_effect(state: Signal<ApplicationState>, dispatcher: Dispatcher,
         let event = match result {
             Ok(Some(event)) => event,
             Ok(None) => return,
+            Err(message) if message.starts_with("gateway returned 401") => {
+                ApplicationEvent::Auth(app::AuthEvent::SessionExpired)
+            }
             Err(message) => ApplicationEvent::Auth(app::AuthEvent::OperationFailed(message)),
         };
         dispatcher.dispatch_event(&mut state.write(), event);

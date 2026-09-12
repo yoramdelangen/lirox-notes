@@ -55,7 +55,6 @@ impl BootstrapState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     Loading,
-    Welcome,
     RegisterPasskey,
     WorkspaceSetup,
     CreatingWorkspace,
@@ -161,7 +160,6 @@ pub fn AuthShell() -> Element {
             rsx! { h1 { "Something went wrong" } p { "{failure}" } button { onclick: move |_| retry.dispatch_auth_command(&mut state.write(), crate::app::AuthCommand::Retry), "Retry" } }
         }
         Screen::Workbench => rsx! {},
-        Screen::Welcome => rsx! { h1 { "Welcome to LiroxNotes" } },
     };
     rsx! { main { id: "auth-shell", class: "grid min-h-screen place-items-center bg-[var(--lirox-bg)] p-6 text-[var(--lirox-fg)]", section { class: "w-full max-w-md space-y-4 rounded-xl border border-[var(--lirox-border)] bg-[var(--lirox-surface)] p-8", {content} } } }
 }
@@ -237,5 +235,23 @@ mod tests {
         dispatcher.dispatch_auth_command(&mut state, crate::app::AuthCommand::Login);
         assert_eq!(state.auth.operation, AuthOperation::LoggingIn);
         assert_eq!(dispatcher.take_effects(), vec![crate::app::Effect::Login]);
+    }
+
+    #[test]
+    fn bootstrap_and_logout_facts_schedule_the_expected_transitions() {
+        let mut state = crate::app::ApplicationState::empty();
+        let bootstrap = crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(
+                BootstrapState::authenticated_complete(),
+            )),
+        );
+        assert_eq!(bootstrap, vec![crate::app::Effect::LoadWorkspace]);
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::SessionExpired),
+        );
+        assert_eq!(state.auth.screen, Screen::Login);
+        assert_eq!(state.auth.operation, AuthOperation::None);
     }
 }

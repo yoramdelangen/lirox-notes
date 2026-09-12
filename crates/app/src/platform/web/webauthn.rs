@@ -4,6 +4,10 @@ use wasm_bindgen::{JsCast, JsValue};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
 
+pub fn is_cancellation_name(name: &str) -> bool {
+    matches!(name, "AbortError" | "NotAllowedError")
+}
+
 #[cfg(target_arch = "wasm32")]
 pub async fn credentials(method: &str, options: JsValue) -> Result<JsValue, String> {
     let window = web_sys::window().ok_or_else(|| "browser unavailable".to_string())?;
@@ -29,7 +33,7 @@ pub async fn credentials(method: &str, options: JsValue) -> Result<JsValue, Stri
             let name = js_sys::Reflect::get(&error, &JsValue::from_str("name"))
                 .ok()
                 .and_then(|value| value.as_string());
-            if name.as_deref() == Some("AbortError") {
+            if name.as_deref().is_some_and(is_cancellation_name) {
                 "passkey operation cancelled".into()
             } else {
                 "WebAuthn failed".into()
@@ -127,4 +131,16 @@ pub fn base64url(bytes: &[u8]) -> String {
         index += 3;
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_cancellation_name;
+
+    #[test]
+    fn browser_cancellation_names_are_retryable() {
+        assert!(is_cancellation_name("AbortError"));
+        assert!(is_cancellation_name("NotAllowedError"));
+        assert!(!is_cancellation_name("SecurityError"));
+    }
 }

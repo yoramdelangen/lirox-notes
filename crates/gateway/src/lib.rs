@@ -1041,8 +1041,8 @@ mod ssr_tests {
 
         assert!(!body.contains("<form"));
         assert!(!body.contains("action=\"/install\""));
-        assert!(body.contains("/api/setup"));
-        assert!(body.contains("passkey"));
+        assert!(body.contains("/api/auth/passkeys/register/options"));
+        assert!(body.contains("/api/workspaces"));
     }
 
     #[test]
