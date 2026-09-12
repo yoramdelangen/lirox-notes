@@ -18,21 +18,9 @@ bun run build:css
 cargo run -p liroxnotes-gateway
 ```
 
-On first launch, the gateway opens onboarding and asks for workspace path, optional Git remote URL, and branch.
-
-The app starts with an empty workspace and renders empty File Tree and Editor states. The gateway exposes the existing login, workspace, note, Git, and sync endpoints, but frontend API wiring is deferred to a later phase.
-
-If you set a Git remote URL during onboarding or through `POST /api/repositories/{workspace}/connect`, manual sync runs `git pull --ff-only` and `git push` against that remote.
+The app starts with an empty workspace and renders empty File Tree and Editor states. The gateway routes remain available for later integration, but the frontend does not currently perform login, onboarding, note saves, Git commits, or synchronization. Frontend API wiring is deferred to a later phase.
 
 In development, config and the default workspace live under `.lirox-runtime/`. In release builds, config uses `$XDG_CONFIG_HOME/liroxnotes/config` and the default workspace uses `$XDG_DATA_HOME/liroxnotes/workspace`.
-
-Each Save writes the changed note and commits it to the configured local Git repo.
-
-Check commits with:
-
-```bash
-git -C .lirox-runtime/workspace log --oneline -5
-```
 
 Shortcut:
 
