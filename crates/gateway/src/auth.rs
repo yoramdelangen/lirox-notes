@@ -114,6 +114,40 @@ pub fn onboarding_status(registered: bool, workspace_configured: bool) -> Onboar
     }
 }
 
+pub fn persisted_onboarding_status(paths: &RuntimePaths) -> io::Result<OnboardingStatus> {
+    let registered = AuthStore::new(paths.clone())
+        .load_account()?
+        .is_some_and(|account| !account.credentials.is_empty());
+    let configured = load_config(&paths.config_file)?.is_some();
+    if !registered {
+        return Ok(OnboardingStatus::NotStarted);
+    }
+    let install = paths.config_file.with_file_name("install");
+    if fs::read_to_string(&install)
+        .map(|contents| {
+            contents
+                .lines()
+                .any(|line| line.trim() == "onboarding_complete=true")
+        })
+        .unwrap_or(false)
+    {
+        return Ok(if configured {
+            OnboardingStatus::Complete
+        } else {
+            OnboardingStatus::WorkspaceRequired
+        });
+    }
+    if configured {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(install)?;
+        writeln!(file, "onboarding_complete=true")?;
+        return Ok(OnboardingStatus::Complete);
+    }
+    Ok(OnboardingStatus::WorkspaceRequired)
+}
+
 pub fn serialize_account(account: &AccountRecord) -> io::Result<String> {
     serialize(account)
 }
@@ -684,12 +718,10 @@ pub fn bootstrap_response(
     user: Option<String>,
 ) -> io::Result<BootstrapResponse> {
     let installed = is_installed(paths)?;
-    let account = AuthStore::new(paths.clone()).load_account()?;
     let config = load_config(&paths.config_file)?;
-    let registered = account.is_some_and(|account| !account.credentials.is_empty());
     Ok(BootstrapResponse {
         installed,
-        onboarding: onboarding_status(registered, config.is_some()),
+        onboarding: persisted_onboarding_status(paths)?,
         authenticated,
         user,
         workspace_root: paths.default_workspace.to_string_lossy().into_owned(),

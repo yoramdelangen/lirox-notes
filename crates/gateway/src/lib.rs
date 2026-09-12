@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 use liroxnotes_app::WorkspaceShell;
 use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     env, fs,
@@ -347,7 +348,11 @@ fn load_session(paths: &RuntimePaths) -> std::io::Result<Option<Session>> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    Ok((session.expires_at > now).then_some(Session {
+    if session.expires_at <= now {
+        auth::AuthStore::new(paths.clone()).clear_session()?;
+        return Ok(None);
+    }
+    Ok(Some(Session {
         token: session.token,
         user: session.user,
     }))
@@ -363,9 +368,18 @@ fn request_session(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<O
     };
     let ok = req
         .cookie("lirox_session")
-        .map(|cookie| cookie.value() == session.token)
+        .map(|cookie| constant_time_token_eq(cookie.value(), &session.token))
         .unwrap_or(false);
     Ok(ok.then_some(session))
+}
+
+fn constant_time_token_eq(left: &str, right: &str) -> bool {
+    let left = Sha256::digest(left.as_bytes());
+    let right = Sha256::digest(right.as_bytes());
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
 }
 
 fn is_authenticated(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<bool> {
@@ -832,6 +846,10 @@ fn workspace_required(paths: &RuntimePaths) -> std::io::Result<bool> {
     Ok(load_config(&paths.config_file)?.is_none())
 }
 
+fn onboarding_status(paths: &RuntimePaths) -> std::io::Result<auth::OnboardingStatus> {
+    auth::persisted_onboarding_status(paths)
+}
+
 fn repo_mode_is_remote(mode: Option<&str>) -> bool {
     mode == Some("remote")
 }
@@ -1127,9 +1145,12 @@ async fn index(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
         Ok(true) => {}
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
-    match workspace_required(&state.paths) {
-        Ok(true) => return onboarding_page(&state.paths, None),
-        Ok(false) => {}
+    match onboarding_status(&state.paths) {
+        Ok(auth::OnboardingStatus::NotStarted) => return install_page(&state.paths),
+        Ok(auth::OnboardingStatus::WorkspaceRequired) => {
+            return onboarding_page(&state.paths, None)
+        }
+        Ok(auth::OnboardingStatus::Complete) => {}
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
 
@@ -1152,9 +1173,12 @@ async fn onboarding(state: web::Data<AppState>, req: HttpRequest) -> impl Respon
         Ok(true) => {}
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
-    match workspace_required(&state.paths) {
-        Ok(true) => return onboarding_page(&state.paths, None),
-        Ok(false) => {}
+    match onboarding_status(&state.paths) {
+        Ok(auth::OnboardingStatus::NotStarted) => return install_page(&state.paths),
+        Ok(auth::OnboardingStatus::WorkspaceRequired) => {
+            return onboarding_page(&state.paths, None)
+        }
+        Ok(auth::OnboardingStatus::Complete) => {}
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     }
 
@@ -1209,6 +1233,16 @@ async fn workspace_page(
     workspace: web::Path<String>,
 ) -> impl Responder {
     let workspace = workspace.into_inner();
+    match onboarding_status(&state.paths) {
+        Ok(auth::OnboardingStatus::NotStarted) => return install_page(&state.paths),
+        Ok(auth::OnboardingStatus::WorkspaceRequired) => {
+            return HttpResponse::SeeOther()
+                .append_header(("location", "/onboarding"))
+                .finish()
+        }
+        Ok(auth::OnboardingStatus::Complete) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
@@ -1236,6 +1270,16 @@ async fn note_page(
     route: web::Path<(String, String)>,
 ) -> impl Responder {
     let (workspace, path) = route.into_inner();
+    match onboarding_status(&state.paths) {
+        Ok(auth::OnboardingStatus::NotStarted) => return install_page(&state.paths),
+        Ok(auth::OnboardingStatus::WorkspaceRequired) => {
+            return HttpResponse::SeeOther()
+                .append_header(("location", "/onboarding"))
+                .finish()
+        }
+        Ok(auth::OnboardingStatus::Complete) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
@@ -1263,6 +1307,16 @@ async fn workspace_path_page(
     route: web::Path<(String, String)>,
 ) -> impl Responder {
     let (workspace, path) = route.into_inner();
+    match onboarding_status(&state.paths) {
+        Ok(auth::OnboardingStatus::NotStarted) => return install_page(&state.paths),
+        Ok(auth::OnboardingStatus::WorkspaceRequired) => {
+            return HttpResponse::SeeOther()
+                .append_header(("location", "/onboarding"))
+                .finish()
+        }
+        Ok(auth::OnboardingStatus::Complete) => {}
+        Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
+    }
     match is_authenticated(&req, &state.paths) {
         Ok(true) => {}
         Ok(false) => return login_redirect(),
@@ -1289,13 +1343,27 @@ async fn workspace_path_page(
 
 fn auth_response(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<HttpResponse> {
     let session = request_session(req, paths)?;
-    let mut response = HttpResponse::Ok().json(build_session_response(paths, session.as_ref())?);
+    let mut response = HttpResponse::Ok().json(auth::bootstrap_response(
+        paths,
+        session.is_some(),
+        session.map(|session| session.user),
+    )?);
     cors(&mut response);
     Ok(response)
 }
 
+#[get("/api/bootstrap")]
+async fn bootstrap_api(state: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse> {
+    Ok(auth_response(&req, &state.paths)?)
+}
+
 #[get("/api/auth")]
 async fn auth_root_api(state: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse> {
+    Ok(auth_response(&req, &state.paths)?)
+}
+
+#[get("/api/auth/session")]
+async fn auth_session_api(state: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse> {
     Ok(auth_response(&req, &state.paths)?)
 }
 
@@ -2004,4 +2072,9 @@ pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
     .bind(("127.0.0.1", port))?
     .run()
     .await
+}
+
+pub fn configure_app(cfg: &mut web::ServiceConfig, paths: RuntimePaths, auth: auth::AuthService) {
+    cfg.app_data(web::Data::new(AppState { paths, auth }))
+        .configure(routes::configure);
 }

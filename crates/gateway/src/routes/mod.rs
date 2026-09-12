@@ -8,6 +8,8 @@ pub(crate) fn configure(cfg: &mut web::ServiceConfig) {
         .service(crate::workspace_page)
         .service(crate::note_page)
         .service(crate::auth_root_api)
+        .service(crate::bootstrap_api)
+        .service(crate::auth_session_api)
         .service(crate::passkey_register_options)
         .service(crate::passkey_register_verify)
         .service(crate::passkey_login_options)
