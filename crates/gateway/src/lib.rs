@@ -11,7 +11,6 @@ use dioxus::prelude::*;
 use liroxnotes_app::WorkspaceShell;
 use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     env, fs,
@@ -96,11 +95,9 @@ struct WorkspaceRequest {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InstallRequest {
     workspace_root: Option<String>,
-    user: Option<String>,
-    auth_mode: Option<String>,
-    password: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -125,14 +122,6 @@ struct PasskeyOptions<T> {
 #[derive(Serialize)]
 struct PasskeySessionResponse {
     authenticated: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct UserRecord {
-    user: String,
-    auth_mode: String,
-    salt: String,
-    password_hash: String,
 }
 
 #[derive(Serialize)]
@@ -296,16 +285,8 @@ pub fn save_config(path: &Path, config: &GatewayConfig) -> std::io::Result<()> {
     fs::write(path, format_config(config))
 }
 
-fn session_file(paths: &RuntimePaths) -> PathBuf {
-    paths.config_file.with_file_name("session")
-}
-
 fn install_file(paths: &RuntimePaths) -> PathBuf {
     paths.config_file.with_file_name("install")
-}
-
-fn user_file(paths: &RuntimePaths) -> PathBuf {
-    paths.config_file.with_file_name("user")
 }
 
 fn default_workspace_root(paths: &RuntimePaths) -> PathBuf {
@@ -358,155 +339,22 @@ fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Resul
     )
 }
 
-fn parse_user_record(input: &str) -> Option<UserRecord> {
-    let mut user = None;
-    let mut auth_mode = None;
-    let mut salt = None;
-    let mut password_hash = None;
-    for line in input.lines() {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        match key.trim() {
-            "user" => user = Some(value.trim().to_string()),
-            "auth_mode" => auth_mode = Some(value.trim().to_string()),
-            "salt" => salt = Some(value.trim().to_string()),
-            "password_hash" => password_hash = Some(value.trim().to_string()),
-            _ => {}
-        }
-    }
-    Some(UserRecord {
-        user: user.filter(|value| !value.is_empty())?,
-        auth_mode: auth_mode.unwrap_or_else(|| "passwordless".to_string()),
-        salt: salt.filter(|value| !value.is_empty())?,
-        password_hash: password_hash.filter(|value| !value.is_empty())?,
-    })
-}
-
-fn load_user_record(paths: &RuntimePaths) -> std::io::Result<Option<UserRecord>> {
-    match fs::read_to_string(user_file(paths)) {
-        Ok(contents) => Ok(parse_user_record(&contents)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-fn hash_password(user: &str, password: &str, salt: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(user.as_bytes());
-    hasher.update(b":");
-    hasher.update(password.as_bytes());
-    hasher.update(b":");
-    hasher.update(salt.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-fn save_user_record(
-    paths: &RuntimePaths,
-    user: &str,
-    auth_mode: &str,
-    password: &str,
-) -> std::io::Result<()> {
-    let user = user.trim();
-    let auth_mode = if auth_mode == "password" {
-        "password"
-    } else {
-        "passwordless"
-    };
-    let password = password.trim();
-    if user.is_empty() || (auth_mode == "password" && password.is_empty()) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "user and password are required",
-        ));
-    }
-    let salt = format!(
-        "{:x}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    let password_hash = hash_password(user, password, &salt);
-    let path = user_file(paths);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        path,
-        format!(
-            "user={}\nauth_mode={}\nsalt={}\npassword_hash={}\n",
-            user, auth_mode, salt, password_hash
-        ),
-    )
-}
-
-fn validate_credentials(paths: &RuntimePaths, user: &str, password: &str) -> std::io::Result<bool> {
-    let Some(record) = load_user_record(paths)? else {
-        return Ok(false);
-    };
-    if record.user != user.trim() {
-        return Ok(false);
-    }
-    if record.auth_mode == "passwordless" {
-        return Ok(true);
-    }
-    Ok(record.password_hash == hash_password(&record.user, password.trim(), &record.salt))
-}
-
-fn parse_session(input: &str) -> Option<Session> {
-    let mut token = None;
-    let mut user = None;
-    for line in input.lines() {
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        match key.trim() {
-            "token" => token = Some(value.trim().to_string()),
-            "user" => user = Some(value.trim().to_string()),
-            _ => {}
-        }
-    }
-    Some(Session {
-        token: token.filter(|value| !value.is_empty())?,
-        user: user.filter(|value| !value.is_empty())?,
-    })
-}
-
 fn load_session(paths: &RuntimePaths) -> std::io::Result<Option<Session>> {
-    match fs::read_to_string(session_file(paths)) {
-        Ok(contents) => Ok(parse_session(&contents)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-fn save_session(paths: &RuntimePaths, user: &str) -> std::io::Result<Session> {
+    let Some(session) = auth::AuthStore::new(paths.clone()).load_session()? else {
+        return Ok(None);
+    };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos();
-    let session = Session {
-        token: format!("{now:x}"),
-        user: user.trim().to_string(),
-    };
-    let path = session_file(paths);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        path,
-        format!("token={}\nuser={}\n", session.token, session.user),
-    )?;
-    Ok(session)
+        .as_secs();
+    Ok((session.expires_at > now).then_some(Session {
+        token: session.token,
+        user: session.user,
+    }))
 }
 
 fn clear_session(paths: &RuntimePaths) -> std::io::Result<()> {
-    match fs::remove_file(session_file(paths)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
+    auth::AuthStore::new(paths.clone()).clear_session()
 }
 
 fn request_session(req: &HttpRequest, paths: &RuntimePaths) -> std::io::Result<Option<Session>> {
@@ -965,14 +813,8 @@ fn onboarding_page(paths: &RuntimePaths, error: Option<&str>) -> HttpResponse {
     )
 }
 
-fn login_page(error: Option<&str>) -> HttpResponse {
-    layouts::html_page("Log In To LiroxNotes", &components::login_page_body(error))
-}
-
 fn login_redirect() -> HttpResponse {
-    HttpResponse::SeeOther()
-        .append_header(("location", "/login"))
-        .finish()
+    HttpResponse::Unauthorized().body("passkey login required")
 }
 
 fn unauthorized() -> HttpResponse {
@@ -1026,61 +868,18 @@ fn form_decode(input: &str) -> String {
     String::from_utf8_lossy(&output).to_string()
 }
 
-fn parse_install_form(body: &str, default_workspace: &Path) -> (PathBuf, String, String, String) {
-    let mut workspace_root = default_workspace.to_path_buf();
-    let mut user = String::new();
-    let mut auth_mode = "passwordless".to_string();
-    let mut password = String::new();
-    for pair in body.split('&') {
-        let Some((key, value)) = pair.split_once('=') else {
-            continue;
-        };
-        let key = form_decode(key);
-        let value = form_decode(value);
-        match key.as_str() {
-            "workspace_root" if !value.trim().is_empty() => {
-                workspace_root = PathBuf::from(value.trim())
-            }
-            "user" => user = value.trim().to_string(),
-            "auth_mode" if value == "password" => auth_mode = value,
-            "password" => password = value,
-            _ => {}
-        }
-    }
-    (workspace_root, user, auth_mode, password)
-}
-
-fn parse_login_form(body: &str) -> (String, String) {
-    let mut user = String::new();
-    let mut password = String::new();
-    for pair in body.split('&') {
-        let Some((key, value)) = pair.split_once('=') else {
-            continue;
-        };
-        match form_decode(key).as_str() {
-            "user" => user = form_decode(value).trim().to_string(),
-            "password" => password = form_decode(value),
-            _ => {}
-        }
-    }
-    (user, password)
-}
-
 fn build_session_response(
     paths: &RuntimePaths,
     session: Option<&Session>,
 ) -> std::io::Result<SessionResponse> {
     let workspace_root = app_workspace_root(paths)?;
-    let auth_mode = load_user_record(paths)?
-        .map(|record| record.auth_mode)
-        .unwrap_or_else(|| "passwordless".to_string());
     Ok(SessionResponse {
         installed: is_installed(paths)?,
         authenticated: session.is_some(),
         user: session
             .map(|session| session.user.clone())
             .unwrap_or_default(),
-        auth_mode,
+        auth_mode: "passkey".to_string(),
         workspace_required: workspace_required(paths)?,
         workspace_root: workspace_root.to_string_lossy().to_string(),
     })
@@ -1198,6 +997,7 @@ fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpRes
 #[cfg(test)]
 mod ssr_tests {
     use super::*;
+    use actix_web::cookie::Cookie;
 
     #[test]
     fn workspace_shell_renders_without_parent_app_context() {
@@ -1212,6 +1012,88 @@ mod ssr_tests {
 
         assert!(body.contains("No notes available"));
         assert!(body.contains("No note selected"));
+    }
+
+    #[test]
+    fn json_passkey_sessions_authenticate_protected_requests() {
+        let root = std::env::temp_dir().join(format!("lirox-session-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        auth::AuthStore::new(paths.clone())
+            .save_session(&auth::StoredSession {
+                version: 1,
+                token: "passkey-token".into(),
+                user: "local".into(),
+                created_at: 1,
+                expires_at: u64::MAX,
+            })
+            .unwrap();
+        let request = actix_web::test::TestRequest::default()
+            .cookie(Cookie::new("lirox_session", "passkey-token"))
+            .to_http_request();
+        assert!(is_authenticated(&request, &paths).unwrap());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn secure_passkey_cookie_is_enabled_for_https_configuration() {
+        let root = std::env::temp_dir().join(format!("lirox-cookie-{}", std::process::id()));
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        let origin = webauthn_rs::prelude::Url::parse("https://localhost").unwrap();
+        let webauthn = webauthn_rs::prelude::WebauthnBuilder::new("localhost", &origin)
+            .unwrap()
+            .build()
+            .unwrap();
+        let mut service = auth::AuthService::new(auth::AuthStore::new(paths), webauthn, 60);
+        service.secure_cookies = true;
+        assert!(session_cookie(&service, "token", false).ends_with("; Secure"));
+    }
+
+    #[actix_web::test]
+    async fn password_login_route_is_unavailable_and_setup_requires_passkey() {
+        let root = std::env::temp_dir().join(format!("lirox-routes-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        let origin = webauthn_rs::prelude::Url::parse("http://localhost:3010").unwrap();
+        let webauthn = webauthn_rs::prelude::WebauthnBuilder::new("localhost", &origin)
+            .unwrap()
+            .build()
+            .unwrap();
+        let state = web::Data::new(AppState {
+            auth: auth::AuthService::new(auth::AuthStore::new(paths.clone()), webauthn, 2_592_000),
+            paths,
+        });
+        let app =
+            actix_web::test::init_service(App::new().app_data(state).configure(routes::configure))
+                .await;
+        let response = actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/login")
+                .set_payload("user=local&password=secret")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::NOT_FOUND);
+        let response = actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/setup")
+                .set_json(serde_json::json!({ "user": "local", "password": "secret" }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::BAD_REQUEST);
+        let _ = fs::remove_dir_all(root);
     }
 }
 
@@ -1250,42 +1132,6 @@ async fn index(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
     }
 }
 
-#[get("/login")]
-async fn login() -> impl Responder {
-    login_page(None)
-}
-
-#[post("/login")]
-async fn save_login(state: web::Data<AppState>, body: String) -> Result<HttpResponse> {
-    let (user, password) = parse_login_form(&body);
-    if !validate_credentials(&state.paths, &user, &password)? {
-        return Ok(login_page(Some("Invalid username or password.")));
-    }
-    let session = save_session(&state.paths, &user)?;
-    Ok(HttpResponse::SeeOther()
-        .append_header(("location", "/"))
-        .append_header((
-            "set-cookie",
-            format!(
-                "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
-                session.token
-            ),
-        ))
-        .finish())
-}
-
-#[post("/logout")]
-async fn logout(state: web::Data<AppState>) -> Result<HttpResponse> {
-    clear_session(&state.paths)?;
-    Ok(HttpResponse::SeeOther()
-        .append_header(("location", "/login"))
-        .append_header((
-            "set-cookie",
-            "lirox_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-        ))
-        .finish())
-}
-
 #[get("/onboarding")]
 async fn onboarding(state: web::Data<AppState>, req: HttpRequest) -> impl Responder {
     match is_installed(&state.paths) {
@@ -1321,7 +1167,7 @@ async fn save_onboarding(
             .append_header(("location", "/install"))
             .finish());
     }
-    if !workspace_required(&state.paths)? && !is_authenticated(&req, &state.paths)? {
+    if !is_authenticated(&req, &state.paths)? {
         return Ok(login_redirect());
     }
     let config = parse_onboarding_form(&body, &app_workspace_root(&state.paths)?);
@@ -1341,25 +1187,6 @@ async fn save_onboarding(
 #[get("/install")]
 async fn install(state: web::Data<AppState>) -> impl Responder {
     install_page(&state.paths)
-}
-
-#[post("/install")]
-async fn save_install(state: web::Data<AppState>, body: String) -> Result<HttpResponse> {
-    let (workspace_root, user, auth_mode, password) =
-        parse_install_form(&body, &default_workspace_root(&state.paths));
-    mark_installed(&state.paths, &workspace_root)?;
-    save_user_record(&state.paths, &user, &auth_mode, &password)?;
-    let session = save_session(&state.paths, &user)?;
-    Ok(HttpResponse::SeeOther()
-        .append_header(("location", "/onboarding"))
-        .append_header((
-            "set-cookie",
-            format!(
-                "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
-                session.token
-            ),
-        ))
-        .finish())
 }
 
 #[get("/workspace/{workspace}")]
@@ -1477,6 +1304,20 @@ fn passkey_error(error: auth::AuthError) -> HttpResponse {
     api_error(status, &error.to_string())
 }
 
+fn session_cookie(service: &auth::AuthService, token: &str, clear: bool) -> String {
+    let mut cookie = format!(
+        "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
+        if clear { "" } else { token }
+    );
+    if clear {
+        cookie.push_str("; Max-Age=0");
+    }
+    if service.secure_cookies() {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
 #[post("/api/auth/passkeys/register/options")]
 async fn passkey_register_options(state: web::Data<AppState>) -> Result<HttpResponse> {
     match state.auth.registration_options() {
@@ -1508,8 +1349,8 @@ async fn passkey_register_verify(
             response.headers_mut().insert(
                 actix_web::http::header::SET_COOKIE,
                 HeaderValue::from_str(&format!(
-                    "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
-                    session.token
+                    "{}",
+                    session_cookie(&state.auth, &session.token, false)
                 ))
                 .unwrap(),
             );
@@ -1551,8 +1392,8 @@ async fn passkey_login_verify(
             response.headers_mut().insert(
                 actix_web::http::header::SET_COOKIE,
                 HeaderValue::from_str(&format!(
-                    "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
-                    session.token
+                    "{}",
+                    session_cookie(&state.auth, &session.token, false)
                 ))
                 .unwrap(),
             );
@@ -1569,7 +1410,7 @@ async fn auth_logout_api(state: web::Data<AppState>) -> Result<HttpResponse> {
     let mut response = HttpResponse::Ok().json(build_session_response(&state.paths, None)?);
     response.headers_mut().insert(
         actix_web::http::header::SET_COOKIE,
-        HeaderValue::from_static("lirox_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"),
+        HeaderValue::from_str(&session_cookie(&state.auth, "", true)).unwrap(),
     );
     cors(&mut response);
     Ok(response)
@@ -1578,29 +1419,33 @@ async fn auth_logout_api(state: web::Data<AppState>) -> Result<HttpResponse> {
 #[post("/api/setup")]
 async fn install_api(
     state: web::Data<AppState>,
+    req: HttpRequest,
     request: web::Json<InstallRequest>,
 ) -> Result<HttpResponse> {
+    if let Some(response) = require_auth_api(&req, &state.paths)? {
+        return Ok(response);
+    }
+    if state.auth.store.load_account()?.is_none() {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "passkey registration required",
+        ));
+    }
     let workspace_root = request
         .workspace_root
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| default_workspace_root(&state.paths));
-    let user = request.user.as_deref().unwrap_or("local");
-    let auth_mode = request.auth_mode.as_deref().unwrap_or("passwordless");
-    let password = request.password.as_deref().unwrap_or_default();
     mark_installed(&state.paths, &workspace_root)?;
-    save_user_record(&state.paths, user, auth_mode, password)?;
-    let session = save_session(&state.paths, user)?;
+    let Some(session) = request_session(&req, &state.paths)? else {
+        return Ok(unauthorized());
+    };
     let mut response =
         HttpResponse::Created().json(build_session_response(&state.paths, Some(&session))?);
     response.headers_mut().insert(
         actix_web::http::header::SET_COOKIE,
-        HeaderValue::from_str(&format!(
-            "lirox_session={}; Path=/; HttpOnly; SameSite=Lax",
-            session.token
-        ))
-        .unwrap(),
+        HeaderValue::from_str(&session_cookie(&state.auth, &session.token, false)).unwrap(),
     );
     cors(&mut response);
     Ok(response)
@@ -1634,10 +1479,8 @@ async fn create_workspace_api(
             "application is not installed",
         ));
     }
-    if !workspace_required(&state.paths)? {
-        if let Some(response) = require_auth_api(&req, &state.paths)? {
-            return Ok(response);
-        }
+    if let Some(response) = require_auth_api(&req, &state.paths)? {
+        return Ok(response);
     }
     let repo_url = if repo_mode_is_remote(request.repo_mode.as_deref()) {
         request.repo_url.clone().unwrap_or_default()

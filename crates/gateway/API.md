@@ -17,15 +17,16 @@ context by an AI system.
 
 ## Authentication
 
-Login creates one server-side session stored in the configured session file.
+Passkey registration and login create one server-side JSON session stored by the
+gateway auth store.
 Send its cookie on protected requests:
 
 ```http
 Cookie: lirox_session=<token>
 ```
 
-The cookie is `HttpOnly`, `SameSite=Lax`, and scoped to `/`. A missing or
-invalid cookie returns:
+The cookie is `HttpOnly`, `SameSite=Lax`, and scoped to `/`; it also has
+`Secure` when `LIROX_RP_ORIGIN` uses HTTPS. A missing or invalid cookie returns:
 
 ```json
 {"error":"login required"}
@@ -67,7 +68,7 @@ exists, rather than the JSON error object.
 | `POST` | `/api/auth/passkeys/login/options` | No | `200` WebAuthn request options |
 | `POST` | `/api/auth/passkeys/login/verify` | No | `200` authenticated + cookie |
 | `POST` | `/api/auth/logout` | No | `200` `SessionResponse` + cleared cookie |
-| `POST` | `/api/setup` | No | `201` `SessionResponse` + cookie |
+| `POST` | `/api/setup` | Yes | `201` `SessionResponse` |
 | `GET` | `/api/workspaces` | Yes | `200` array of `WorkspaceResponse` |
 | `POST` | `/api/workspaces` | Conditional | `201` `WorkspaceResponse` |
 | `GET` | `/api/workspaces/{workspace}` | Yes | `200` `WorkspaceResponse` |
@@ -134,22 +135,20 @@ Success: `200` with an unauthenticated `SessionResponse` and
 
 ### `POST /api/setup`
 
-Initializes installation state and the local user, then signs that user in.
-This endpoint does not create the workspace configuration; call
-`POST /api/workspaces` afterward.
+Initializes installation state after a verified passkey session exists. It does
+not accept or persist usernames, passwords, or auth mode fields, and does not
+create workspace configuration.
 
 Request body: JSON `InstallRequest`.
 
 | Field | Type | Required | Default |
 |---|---|---:|---|
 | `workspace_root` | string | No | Configured default workspace root |
-| `user` | string | No | `local` |
-| `auth_mode` | string | No | `passwordless`; only exact `password` enables password auth |
-| `password` | string | No | Empty string; required when `auth_mode` is `password` |
 
-Success: `201`, `SessionResponse`, and a session cookie.
+Success: `201`, `SessionResponse`.
 
-Failure: invalid user/password or filesystem errors may produce `500`.
+Failure: missing passkey session returns `401`; filesystem errors may produce
+`500`.
 
 ## Workspaces
 

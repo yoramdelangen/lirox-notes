@@ -31,6 +31,8 @@ pub struct CredentialRecord {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AccountRecord {
     pub version: u8,
+    #[serde(default)]
+    pub account_id: String,
     pub credentials: Vec<CredentialRecord>,
 }
 
@@ -38,6 +40,15 @@ impl AccountRecord {
     pub fn with_credential(credential: CredentialRecord) -> Self {
         Self {
             version: RECORD_VERSION,
+            account_id: Uuid::new_v4().to_string(),
+            credentials: vec![credential],
+        }
+    }
+
+    pub fn with_account_id(account_id: String, credential: CredentialRecord) -> Self {
+        Self {
+            version: RECORD_VERSION,
+            account_id,
             credentials: vec![credential],
         }
     }
@@ -234,6 +245,7 @@ pub struct AuthService {
     pub store: AuthStore,
     pub webauthn: Webauthn,
     session_ttl: u64,
+    pub(crate) secure_cookies: bool,
 }
 
 impl AuthService {
@@ -242,6 +254,7 @@ impl AuthService {
             store,
             webauthn,
             session_ttl,
+            secure_cookies: false,
         }
     }
 
@@ -256,11 +269,14 @@ impl AuthService {
             .rp_name("LiroxNotes")
             .build()
             .map_err(|error| AuthError::Configuration(error.to_string()))?;
-        let session_ttl = std::env::var("LIROX_SESSION_TTL_SECONDS")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(2_592_000);
-        Ok(Self::new(AuthStore::new(paths), webauthn, session_ttl))
+        let session_ttl = parse_session_ttl(std::env::var("LIROX_SESSION_TTL_SECONDS").ok())?;
+        let mut service = Self::new(AuthStore::new(paths), webauthn, session_ttl);
+        service.secure_cookies = origin.scheme() == "https";
+        Ok(service)
+    }
+
+    pub fn secure_cookies(&self) -> bool {
+        self.secure_cookies
     }
 
     pub fn registration_options(&self) -> Result<(String, CreationChallengeResponse), AuthError> {
@@ -271,9 +287,15 @@ impl AuthService {
         {
             return Err(AuthError::RegistrationClosed);
         }
+        let account_id = Uuid::new_v4().to_string();
         let (options, state) = self
             .webauthn
-            .start_passkey_registration(Uuid::new_v4(), "local", "LiroxNotes", None)
+            .start_passkey_registration(
+                Uuid::parse_str(&account_id).map_err(|_| AuthError::VerificationFailed)?,
+                "local",
+                "LiroxNotes",
+                None,
+            )
             .map_err(|_| AuthError::VerificationFailed)?;
         let challenge_id = Uuid::new_v4().to_string();
         self.store.save_challenge(&ChallengeRecord {
@@ -282,7 +304,7 @@ impl AuthService {
             challenge: serde_json::to_string(&state)
                 .map_err(|error| AuthError::Storage(error.to_string()))?,
             operation: ChallengeOperation::Registration,
-            account_id: None,
+            account_id: Some(account_id),
             expires_at: unix_seconds().saturating_add(300),
         })?;
         Ok((challenge_id, options))
@@ -322,13 +344,16 @@ impl AuthService {
             .map_err(|error| AuthError::Storage(error.to_string()))?;
         let public_key = serde_json::to_string(&passkey)
             .map_err(|error| AuthError::Storage(error.to_string()))?;
-        self.store
-            .save_account(&AccountRecord::with_credential(CredentialRecord {
+        let account_id = challenge.account_id.ok_or(AuthError::ChallengeMismatch)?;
+        self.store.save_account(&AccountRecord::with_account_id(
+            account_id,
+            CredentialRecord {
                 credential_id,
                 public_key,
                 sign_count: 0,
                 label: "Passkey".into(),
-            }))?;
+            },
+        ))?;
         self.rotate_session()
     }
 
@@ -337,6 +362,9 @@ impl AuthService {
             .store
             .load_account()?
             .ok_or(AuthError::LoginUnavailable)?;
+        if account.account_id.is_empty() {
+            return Err(AuthError::LoginUnavailable);
+        }
         let credentials = account
             .credentials
             .iter()
@@ -354,7 +382,7 @@ impl AuthService {
             challenge: serde_json::to_string(&state)
                 .map_err(|error| AuthError::Storage(error.to_string()))?,
             operation: ChallengeOperation::Authentication,
-            account_id: None,
+            account_id: Some(account.account_id),
             expires_at: unix_seconds().saturating_add(300),
         })?;
         Ok((challenge_id, options))
@@ -381,13 +409,13 @@ impl AuthService {
             .webauthn
             .finish_passkey_authentication(credential, &state)
             .map_err(|_| AuthError::VerificationFailed)?;
-        self.store
-            .consume_challenge_record_matching(challenge_id, unix_seconds())?
-            .ok_or(AuthError::ChallengeNotFound)?;
         let mut account = self
             .store
             .load_account()?
             .ok_or(AuthError::LoginUnavailable)?;
+        if challenge.account_id.as_deref() != Some(account.account_id.as_str()) {
+            return Err(AuthError::ChallengeMismatch);
+        }
         let credential_id = serde_json::to_string(&result.cred_id())
             .map_err(|error| AuthError::Storage(error.to_string()))?;
         let record = account
@@ -396,6 +424,16 @@ impl AuthService {
             .find(|record| record.credential_id == credential_id)
             .ok_or(AuthError::VerificationFailed)?;
         record.sign_count = result.counter();
+        let mut passkey: Passkey =
+            serde_json::from_str(&record.public_key).map_err(|_| AuthError::VerificationFailed)?;
+        if passkey.update_credential(&result).is_none() {
+            return Err(AuthError::VerificationFailed);
+        }
+        record.public_key = serde_json::to_string(&passkey)
+            .map_err(|error| AuthError::Storage(error.to_string()))?;
+        self.store
+            .consume_challenge_record_matching(challenge_id, unix_seconds())?
+            .ok_or(AuthError::ChallengeNotFound)?;
         self.store.save_account(&account)?;
         self.rotate_session()
     }
@@ -430,6 +468,20 @@ impl AuthService {
         self.store.save_session(&session)?;
         Ok(session)
     }
+}
+
+fn parse_session_ttl(value: Option<String>) -> Result<u64, AuthError> {
+    let ttl = value
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                AuthError::Configuration("LIROX_SESSION_TTL_SECONDS must be an integer".into())
+            })
+        })
+        .transpose()?
+        .unwrap_or(2_592_000);
+    (ttl > 0).then_some(ttl).ok_or_else(|| {
+        AuthError::Configuration("LIROX_SESSION_TTL_SECONDS must be greater than zero".into())
+    })
 }
 
 static PERSISTENCE_LOCK: Mutex<()> = Mutex::new(());
@@ -511,6 +563,13 @@ impl AuthStore {
 
     pub fn save_session(&self, session: &StoredSession) -> io::Result<()> {
         self.save("session.json", session, serialize_session)
+    }
+
+    pub fn clear_session(&self) -> io::Result<()> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
+        self.remove("session.json")
     }
 
     fn record_path(&self, name: &str) -> PathBuf {
@@ -887,5 +946,26 @@ mod tests {
             service.consume_challenge("c", 100),
             Err(AuthError::ChallengeNotFound)
         ));
+    }
+
+    #[test]
+    fn invalid_session_ttl_configuration_is_rejected() {
+        assert!(matches!(
+            parse_session_ttl(Some("not-a-number".into())),
+            Err(AuthError::Configuration(_))
+        ));
+        assert!(matches!(
+            parse_session_ttl(Some("0".into())),
+            Err(AuthError::Configuration(_))
+        ));
+    }
+
+    #[test]
+    fn registration_challenge_persists_account_association() {
+        let service = test_service_at(100);
+        let (challenge_id, _) = service.registration_options().unwrap();
+        let challenge = service.store.load_challenge().unwrap().unwrap();
+        assert_eq!(challenge.challenge_id, challenge_id);
+        assert!(challenge.account_id.is_some());
     }
 }

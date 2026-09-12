@@ -2,11 +2,7 @@ use actix_web::web;
 
 pub(crate) fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(crate::index)
-        .service(crate::login)
-        .service(crate::save_login)
-        .service(crate::logout)
         .service(crate::install)
-        .service(crate::save_install)
         .service(crate::onboarding)
         .service(crate::save_onboarding)
         .service(crate::workspace_page)
