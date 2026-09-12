@@ -2,8 +2,9 @@ use crate::{is_installed, load_config, RuntimePaths};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fs,
-    io::{self, ErrorKind},
+    io::{self, ErrorKind, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -109,6 +110,15 @@ pub fn parse_account(input: &str) -> io::Result<AccountRecord> {
         || account.credentials.iter().any(|credential| {
             credential.credential_id.trim().is_empty() || credential.public_key.trim().is_empty()
         })
+        || account
+            .credentials
+            .iter()
+            .enumerate()
+            .any(|(index, credential)| {
+                account.credentials[..index]
+                    .iter()
+                    .any(|other| other.credential_id == credential.credential_id)
+            })
     {
         return invalid_record();
     }
@@ -120,8 +130,24 @@ pub fn serialize_challenge(challenge: &ChallengeRecord) -> io::Result<String> {
 }
 
 pub fn parse_challenge(input: &str) -> io::Result<ChallengeRecord> {
+    let challenge = parse_challenge_record(input)?;
+    if challenge.version != RECORD_VERSION
+        || challenge.challenge_id.trim().is_empty()
+        || challenge.challenge.trim().is_empty()
+        || challenge.expires_at <= unix_seconds()
+    {
+        return invalid_record();
+    }
+    Ok(challenge)
+}
+
+fn parse_challenge_record(input: &str) -> io::Result<ChallengeRecord> {
     let challenge: ChallengeRecord = parse(input)?;
-    if challenge.version != RECORD_VERSION || challenge.challenge_id.trim().is_empty() {
+    if challenge.version != RECORD_VERSION
+        || challenge.challenge_id.trim().is_empty()
+        || challenge.challenge.trim().is_empty()
+        || challenge.expires_at == 0
+    {
         return invalid_record();
     }
     Ok(challenge)
@@ -133,7 +159,12 @@ pub fn serialize_session(session: &StoredSession) -> io::Result<String> {
 
 pub fn parse_session(input: &str) -> io::Result<StoredSession> {
     let session: StoredSession = parse(input)?;
-    if session.version != RECORD_VERSION || session.token.trim().is_empty() {
+    if session.version != RECORD_VERSION
+        || session.token.trim().is_empty()
+        || session.user.trim().is_empty()
+        || session.created_at >= session.expires_at
+        || session.expires_at == 0
+    {
         return invalid_record();
     }
     Ok(session)
@@ -174,11 +205,26 @@ impl AuthStore {
     }
 
     pub fn load_challenge(&self) -> io::Result<Option<ChallengeRecord>> {
-        self.load("challenge.json", parse_challenge)
+        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
+            return Ok(None);
+        };
+        if challenge.expires_at <= unix_seconds() {
+            self.remove("challenge.json")?;
+            return Ok(None);
+        }
+        Ok(Some(challenge))
     }
 
     pub fn save_challenge(&self, challenge: &ChallengeRecord) -> io::Result<()> {
         self.save("challenge.json", challenge, serialize_challenge)
+    }
+
+    pub fn consume_challenge(&self, now: u64) -> io::Result<Option<ChallengeRecord>> {
+        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
+            return Ok(None);
+        };
+        self.remove("challenge.json")?;
+        Ok((challenge.expires_at > now).then_some(challenge))
     }
 
     pub fn load_session(&self) -> io::Result<Option<StoredSession>> {
@@ -214,17 +260,66 @@ impl AuthStore {
         let path = self.record_path(name);
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
-        let temporary = parent.join(format!(".{name}.{}.tmp", unique_suffix()));
-        fs::write(&temporary, serializer(value)?)?;
-        fs::rename(temporary, path)
+        let contents = serializer(value)?;
+        let (temporary, mut file) = temporary_file(parent, name)?;
+        if let Err(error) = file.write_all(contents.as_bytes()) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        drop(file);
+        replace_file(&temporary, &path)
+    }
+
+    fn remove(&self, name: &str) -> io::Result<()> {
+        match fs::remove_file(self.record_path(name)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 }
 
-fn unique_suffix() -> u128 {
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn temporary_file(parent: &Path, name: &str) -> io::Result<(PathBuf, fs::File)> {
+    for _ in 0..100 {
+        let suffix = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = parent.join(format!(".{name}.{}.{}.tmp", std::process::id(), suffix));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        ErrorKind::AlreadyExists,
+        "could not allocate temporary auth record",
+    ))
+}
+
+fn replace_file(temporary: &Path, destination: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    if destination.exists() {
+        fs::remove_file(destination)?;
+    }
+    match fs::rename(temporary, destination) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(temporary);
+            Err(error)
+        }
+    }
+}
+
+fn unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos()
+        .as_secs()
 }
 
 pub fn bootstrap_response(
@@ -288,6 +383,61 @@ mod tests {
         let encoded = serialize_account(&account).unwrap();
         assert_eq!(parse_account(&encoded).unwrap(), account);
         assert!(parse_account("{\"version\":1,\"credentials\":null}").is_err());
+
+        let duplicate = account.with_credential(credential("one"));
+        assert!(parse_account(&serialize_account(&duplicate).unwrap()).is_err());
+    }
+
+    #[test]
+    fn parsers_reject_invalid_auth_domains() {
+        let expired = ChallengeRecord {
+            version: 1,
+            challenge_id: "challenge-1".into(),
+            challenge: "challenge".into(),
+            operation: ChallengeOperation::Registration,
+            account_id: None,
+            expires_at: 1,
+        };
+        assert!(parse_challenge(&serialize_challenge(&expired).unwrap()).is_err());
+
+        let session = StoredSession {
+            version: 1,
+            token: "token".into(),
+            user: String::new(),
+            created_at: 10,
+            expires_at: 10,
+        };
+        assert!(parse_session(&serialize_session(&session).unwrap()).is_err());
+    }
+
+    #[test]
+    fn consuming_a_challenge_deletes_it_and_rejects_expiry() {
+        let root = std::env::temp_dir().join(format!("lirox-auth-consume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = AuthStore::new(RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        });
+        let challenge = ChallengeRecord {
+            version: 1,
+            challenge_id: "challenge-1".into(),
+            challenge: "opaque-challenge".into(),
+            operation: ChallengeOperation::Registration,
+            account_id: None,
+            expires_at: u64::MAX,
+        };
+        store.save_challenge(&challenge).unwrap();
+        assert!(store.consume_challenge(100).unwrap().is_some());
+        assert!(store.consume_challenge(100).unwrap().is_none());
+
+        let expired = ChallengeRecord {
+            expires_at: 1,
+            ..challenge
+        };
+        store.save_challenge(&expired).unwrap();
+        assert!(store.consume_challenge(2).unwrap().is_none());
+        assert!(store.load_challenge().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -306,14 +456,14 @@ mod tests {
             challenge: "opaque-challenge".into(),
             operation: ChallengeOperation::Registration,
             account_id: None,
-            expires_at: 100,
+            expires_at: u64::MAX,
         };
         let session = StoredSession {
             version: 1,
             token: "opaque-session".into(),
             user: "local".into(),
             created_at: 1,
-            expires_at: 100,
+            expires_at: u64::MAX,
         };
 
         store.save_account(&account).unwrap();
@@ -327,6 +477,33 @@ mod tests {
         assert!(!std::fs::read_to_string(root.join("nested/account.json"))
             .unwrap()
             .contains("password"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn atomic_save_does_not_reuse_an_existing_temp_file() {
+        let root = std::env::temp_dir().join(format!("lirox-auth-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".account.json.0.tmp"), "sentinel").unwrap();
+        AuthStore::new(paths)
+            .save_account(&AccountRecord::with_credential(credential("one")))
+            .unwrap();
+        assert_eq!(
+            parse_account(&std::fs::read_to_string(root.join("account.json")).unwrap())
+                .unwrap()
+                .credentials[0]
+                .credential_id,
+            "one"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".account.json.0.tmp")).unwrap(),
+            "sentinel"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
