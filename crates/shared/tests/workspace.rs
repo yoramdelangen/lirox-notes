@@ -60,6 +60,25 @@ fn builds_tree_and_selects_note_from_explicit_records() {
 }
 
 #[test]
+fn empty_selection_uses_the_effective_default_note() {
+    let notes = test_notes();
+    let view = workspace_view_from_notes(
+        "test",
+        "Test Workspace",
+        "main",
+        "local",
+        "notes/roadmap.md",
+        "",
+        0,
+        &notes,
+    );
+
+    assert_eq!(view.selected_note.path, "notes/roadmap.md");
+    assert!(view.selected_note.active);
+    assert_eq!(view.selected_note_body, "# Roadmap\n\n#welcome");
+}
+
+#[test]
 fn overrides_selected_note_body_for_labels() {
     let notes = [WorkspaceNote {
         path: "notes/welcome.md".to_string(),

@@ -31,8 +31,8 @@ Shared variables live in `http-client.env.json`. Select the `local` environment 
 {
   "local": {
     "host": "http://127.0.0.1:3010",
-    "workspace": "demo",
-    "repo": "demo",
+    "workspace": "notes",
+    "repo": "notes",
     "note": "notes/manual-test.md",
     "workspacePath": ".lirox-runtime/http-workspace"
   }

@@ -531,6 +531,30 @@ fn workspace_view_loads_configured_files() {
 }
 
 #[test]
+fn empty_configured_workspace_has_empty_view_state() {
+    let root = temp_root("empty-view");
+    ensure_workspace(&root).unwrap();
+    let config = GatewayConfig {
+        workspace_slug: "empty".to_string(),
+        workspace_name: "Empty Workspace".to_string(),
+        workspace_path: root.clone(),
+        repo_url: String::new(),
+        branch: "main".to_string(),
+    };
+
+    let view = workspace_view_for_config(&config, "").unwrap();
+
+    assert_eq!(view.note_count, 0);
+    assert!(view.tree.is_empty());
+    assert!(view.notes.is_empty());
+    assert!(!view.selected_note.active);
+    assert!(view.selected_note.path.is_empty());
+    assert!(view.selected_note_body.is_empty());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn parses_port_from_args() {
     assert_eq!(
         port_from_args(["bin".into(), "--port".into(), "4100".into()]),

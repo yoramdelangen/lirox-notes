@@ -3,12 +3,16 @@
 ```http
 @host = http://127.0.0.1:3010
 @workspace = /tmp/liroxnotes-workspace
+@workspaceSlug = notes
 @note = notes/manual.md
 ```
 
 Most API calls require the `lirox_session` cookie returned by login.
 
-## Implemented And Manually Tested
+## Gateway Routes
+
+These routes are implemented by the gateway. The Dioxus app currently starts
+empty and does not wire frontend API calls yet.
 
 ```http
 ### Open login form
@@ -31,24 +35,24 @@ GET {{host}}/onboarding
 
 ### Save onboarding configuration
 # Content-Type: application/x-www-form-urlencoded
-# Response: 303 See Other -> /workspace/demo
+# Response: 303 See Other -> /workspace/{{workspaceSlug}}
 POST {{host}}/onboarding
 Content-Type: application/x-www-form-urlencoded
 
 workspace_path={{workspace}}&repo_url=&branch=main
 
 ### Render configured workspace page
-GET {{host}}/workspace/demo
+GET {{host}}/workspace/{{workspaceSlug}}
 
 ### Render a selected note page
-GET {{host}}/workspace/demo/note/{{note}}
+GET {{host}}/workspace/{{workspaceSlug}}/note/{{note}}
 
 ### Load workspace JSON
 # Response: WorkspaceView JSON
 GET {{host}}/api/workspace/{{note}}
 
 ### Load default workspace JSON
-# Empty path selects notes/welcome.md
+# Empty path keeps the workspace unselected when it has no notes
 GET {{host}}/api/workspace/
 
 ### Workspace API CORS preflight
@@ -99,7 +103,7 @@ OPTIONS {{host}}/api/workspaces
 # Response: [WorkspaceSummary]
 GET {{host}}/api/workspaces
 
-### Create or configure the demo workspace
+### Create or configure a workspace
 # Response: 201 WorkspaceSummary
 POST {{host}}/api/workspaces
 Content-Type: application/json
@@ -112,19 +116,19 @@ Content-Type: application/json
 
 ### Get workspace
 # Response: WorkspaceSummary
-GET {{host}}/api/workspaces/demo
+GET {{host}}/api/workspaces/{{workspaceSlug}}
 
 ### Sync workspace
 # Local workspace without repo_url returns ok without pull/push.
-POST {{host}}/api/workspaces/demo/sync
+POST {{host}}/api/workspaces/{{workspaceSlug}}/sync
 
 ### Read workspace file
 # Response: { "path": "notes/manual.md", "body": "..." }
-GET {{host}}/api/workspaces/demo/files/{{note}}
+GET {{host}}/api/workspaces/{{workspaceSlug}}/files/{{note}}
 
 ### Save workspace file
 # Response: { "ok": true, "committed": true|false }
-PUT {{host}}/api/workspaces/demo/files/{{note}}
+PUT {{host}}/api/workspaces/{{workspaceSlug}}/files/{{note}}
 Content-Type: text/markdown
 
 # Manual API Note
@@ -133,15 +137,15 @@ Content-Type: text/markdown
 
 ### Delete workspace file
 # Response: { "ok": true, "committed": true }
-DELETE {{host}}/api/workspaces/demo/files/{{note}}
+DELETE {{host}}/api/workspaces/{{workspaceSlug}}/files/{{note}}
 
 ### Workspace conflicts
 # Response: { "items": [] }
-GET {{host}}/api/workspaces/demo/conflicts
+GET {{host}}/api/workspaces/{{workspaceSlug}}/conflicts
 
 ### Workspace trash
 # Response: { "items": [] }
-GET {{host}}/api/workspaces/demo/trash
+GET {{host}}/api/workspaces/{{workspaceSlug}}/trash
 
 ### List repositories
 # Response: [RepositorySummary]
@@ -149,11 +153,11 @@ GET {{host}}/api/repositories
 
 ### Get repository
 # Response: RepositorySummary
-GET {{host}}/api/repositories/demo
+GET {{host}}/api/repositories/{{workspaceSlug}}
 
 ### Connect repository
 # Configures git remote origin and saves repo_url/branch.
-POST {{host}}/api/repositories/demo/connect
+POST {{host}}/api/repositories/{{workspaceSlug}}/connect
 Content-Type: application/json
 
 {
@@ -163,7 +167,7 @@ Content-Type: application/json
 
 ### Disconnect repository
 # Removes git remote origin if present and clears repo_url.
-POST {{host}}/api/repositories/demo/disconnect
+POST {{host}}/api/repositories/{{workspaceSlug}}/disconnect
 ```
 
 ## Current Error Cases
@@ -212,11 +216,11 @@ GET {{host}}/api/repositories/missing
 # GET /api/workspaces before login -> 401
 # POST /login -> 303 /
 # GET / after login -> 200
-# POST /onboarding -> 303 /workspace/demo
-# GET /workspace/demo -> 200
-# PUT /api/notes/notes/mvp.md -> 200
-# GET /api/workspace/notes/mvp.md -> 200
-# git log includes "Update notes/mvp.md"
+# POST /onboarding -> 303 /workspace/{{workspaceSlug}}
+# GET /workspace/{{workspaceSlug}} -> 200
+# PUT /api/notes/notes/manual.md -> 200
+# GET /api/workspace/notes/manual.md -> 200
+# git log includes "Update notes/manual.md"
 # POST /logout -> 303 /login
 # GET /api/workspaces after logout -> 401
 #
@@ -226,16 +230,16 @@ GET {{host}}/api/repositories/missing
 # OPTIONS /api/workspaces -> 204
 # POST /api/workspaces -> 201
 # GET /api/workspaces -> 200
-# GET /api/workspaces/demo -> 200
-# POST /api/workspaces/demo/sync -> 200
-# PUT /api/workspaces/demo/files/notes/manual.md -> 200
-# GET /api/workspaces/demo/files/notes/manual.md -> 200
-# GET /api/workspaces/demo/conflicts -> 200
-# GET /api/workspaces/demo/trash -> 200
+# GET /api/workspaces/{{workspaceSlug}} -> 200
+# POST /api/workspaces/{{workspaceSlug}}/sync -> 200
+# PUT /api/workspaces/{{workspaceSlug}}/files/notes/manual.md -> 200
+# GET /api/workspaces/{{workspaceSlug}}/files/notes/manual.md -> 200
+# GET /api/workspaces/{{workspaceSlug}}/conflicts -> 200
+# GET /api/workspaces/{{workspaceSlug}}/trash -> 200
 # GET /api/repositories -> 200
-# GET /api/repositories/demo -> 200
-# POST /api/repositories/demo/connect -> 200
-# POST /api/repositories/demo/disconnect -> 200
-# DELETE /api/workspaces/demo/files/notes/manual.md -> 200
+# GET /api/repositories/{{workspaceSlug}} -> 200
+# POST /api/repositories/{{workspaceSlug}}/connect -> 200
+# POST /api/repositories/{{workspaceSlug}}/disconnect -> 200
+# DELETE /api/workspaces/{{workspaceSlug}}/files/notes/manual.md -> 200
 # GET /api/workspaces/missing -> 404
 ```

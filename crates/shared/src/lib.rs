@@ -90,14 +90,26 @@ pub fn workspace_view_from_notes(
     changed_notes: usize,
     note_records: &[WorkspaceNote],
 ) -> WorkspaceView {
-    let active_path = note_records
+    let effective_selected_note_path = note_records
         .iter()
-        .find(|note| note.path == selected_note_path)
+        .find(|note| !selected_note_path.is_empty() && note.path == selected_note_path)
+        .or_else(|| {
+            note_records
+                .iter()
+                .find(|note| note.path == _default_note_path)
+        })
+        .or_else(|| note_records.first())
         .map(|note| note.path.as_str());
 
     let notes: Vec<NoteSummary> = note_records
         .iter()
-        .map(|note| note_summary(&note.path, &note.body, active_path.unwrap_or("")))
+        .map(|note| {
+            note_summary(
+                &note.path,
+                &note.body,
+                effective_selected_note_path.unwrap_or(""),
+            )
+        })
         .collect();
     if notes.is_empty() {
         return WorkspaceView {
@@ -123,7 +135,7 @@ pub fn workspace_view_from_notes(
     }
     let selected_note = notes
         .iter()
-        .find(|note| Some(note.path.as_str()) == active_path)
+        .find(|note| Some(note.path.as_str()) == effective_selected_note_path)
         .cloned()
         .unwrap_or_else(|| notes[0].clone());
     let selected_note_body = note_records

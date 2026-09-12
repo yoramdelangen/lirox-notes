@@ -1,10 +1,10 @@
 # LiroxNotes
 
-Stage 6 MVP skeleton:
+Architectural UI slice:
 
 - `crates/app`: Dioxus UI component tree.
 - `crates/gateway`: Actix server that renders the app.
-- `crates/shared`: shared types and mock data.
+- `crates/shared`: shared domain and workspace view types.
 - `packages/editor`: Bun/Vite CodeMirror editor bundle.
 - `crates/app/assets/`: Tailwind source and built stylesheet bundled by `dx`.
 
@@ -20,9 +20,9 @@ cargo run -p liroxnotes-gateway
 
 On first launch, the gateway opens onboarding and asks for workspace path, optional Git remote URL, and branch.
 
-The MVP uses a local session login first. Open `http://127.0.0.1:3010`, enter any display name, configure a workspace, then edit a note and press Save or `Cmd/Ctrl+S`. Each save writes the Markdown file and creates a real Git commit in the configured workspace.
+The app starts with an empty workspace and renders empty File Tree and Editor states. The gateway exposes the existing login, workspace, note, Git, and sync endpoints, but frontend API wiring is deferred to a later phase.
 
-If you set a Git remote URL during onboarding or through `POST /api/repositories/demo/connect`, manual sync runs `git pull --ff-only` and `git push` against that remote.
+If you set a Git remote URL during onboarding or through `POST /api/repositories/{workspace}/connect`, manual sync runs `git pull --ff-only` and `git push` against that remote.
 
 In development, config and the default workspace live under `.lirox-runtime/`. In release builds, config uses `$XDG_CONFIG_HOME/liroxnotes/config` and the default workspace uses `$XDG_DATA_HOME/liroxnotes/workspace`.
 
