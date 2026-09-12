@@ -6,9 +6,17 @@ pub enum UiMode {
     Standard,
     Focus,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewportMode {
+    Wide,
+    Narrow,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkspaceState {
     pub ui_mode: UiMode,
+    pub viewport: ViewportMode,
     pub layout: LayoutNode,
     pub surfaces: SurfaceRegistry,
     pub focus: FocusState,
@@ -20,6 +28,7 @@ impl WorkspaceState {
         let layout = LayoutNode::standard();
         Self {
             ui_mode: UiMode::Standard,
+            viewport: ViewportMode::Wide,
             layout: layout.clone(),
             standard_layout: layout,
             surfaces: SurfaceRegistry::demo(),
@@ -46,7 +55,9 @@ impl WorkspaceState {
         }
     }
     pub fn toggle_file_tree(&mut self) {
-        if self.layout.contains(SurfaceId::FILE_TREE) {
+        if self.viewport == ViewportMode::Narrow || self.ui_mode == UiMode::Focus {
+            self.open_file_tree_overlay();
+        } else if self.layout.contains(SurfaceId::FILE_TREE) {
             self.layout = LayoutNode::focus();
         } else {
             self.layout = self.standard_layout.clone();
@@ -55,6 +66,18 @@ impl WorkspaceState {
     pub fn open_file_tree_overlay(&mut self) {
         if self.overlays.top().map(|entry| entry.surface.clone()) != Some(SurfaceId::FILE_TREE) {
             self.overlays.push(OverlayEntry::file_tree());
+        }
+    }
+
+    pub fn set_viewport(&mut self, viewport: ViewportMode) {
+        self.viewport = viewport;
+    }
+
+    pub fn render_layout(&self) -> LayoutNode {
+        if self.viewport == ViewportMode::Narrow {
+            LayoutNode::focus()
+        } else {
+            self.layout.clone()
         }
     }
 }

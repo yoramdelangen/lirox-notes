@@ -5,6 +5,7 @@ use crate::{
     input::InputEvent,
     platform::web::keyboard,
     ui::{bottom_bar::BottomBar, top_bar::TopBar, workspace_renderer::WorkspaceRenderer},
+    workspace::ViewportMode,
     AppAction, AppContext, FocusTarget, SidebarMode,
 };
 
@@ -18,6 +19,15 @@ pub fn WorkspaceShell(
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let context = use_context::<AppContext>();
+    let mut state = context.state;
+    use_effect(move || {
+        let viewport = if crate::platform::web::viewport::is_narrow() {
+            ViewportMode::Narrow
+        } else {
+            ViewportMode::Wide
+        };
+        state.write().workspace.set_viewport(viewport);
+    });
     let onkeydown = move |event: KeyboardEvent| {
         let Some(InputEvent::Key(stroke)) = keyboard::normalize_keyboard_event(&event) else {
             return;

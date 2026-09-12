@@ -22,7 +22,7 @@ pub fn WorkspaceRenderer(
             class: "relative flex min-h-0 min-w-0 flex-1",
             aria_label: "Workspace",
             LayoutRenderer {
-                node: state.workspace.layout.clone(),
+                node: state.workspace.render_layout(),
                 workspace: state.workspace.clone(),
                 view: view.clone(),
                 focus,

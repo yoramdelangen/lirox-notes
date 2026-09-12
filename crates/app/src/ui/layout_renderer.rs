@@ -67,14 +67,9 @@ pub fn LayoutRenderer(
                 Axis::Horizontal => format!("width: {}%;", ratio * 100.0),
                 Axis::Vertical => format!("height: {}%;", ratio * 100.0),
             };
-            let first_class = if contains_file_tree(&first, &workspace) {
-                "workspace-tree-pane"
-            } else {
-                ""
-            };
             rsx! {
                 div { class: "workspace-split {axis_class} flex min-h-0 min-w-0 flex-1 {direction}",
-                    div { class: "workspace-split-first {first_class} min-h-0 min-w-0 shrink-0", style: first_style,
+                    div { class: "workspace-split-first min-h-0 min-w-0 shrink-0", style: first_style,
                         LayoutRenderer {
                             node: *first,
                             workspace: workspace.clone(),
@@ -100,20 +95,6 @@ pub fn LayoutRenderer(
                     }
                 }
             }
-        }
-    }
-}
-
-fn contains_file_tree(node: &LayoutNode, workspace: &WorkspaceState) -> bool {
-    match node {
-        LayoutNode::Surface(id) => {
-            matches!(
-                workspace.surface(id.clone()),
-                Some(SurfaceState::FileTree(_))
-            )
-        }
-        LayoutNode::Split { first, second, .. } => {
-            contains_file_tree(first, workspace) || contains_file_tree(second, workspace)
         }
     }
 }
