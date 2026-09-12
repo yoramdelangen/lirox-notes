@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
 pub mod app;
+pub mod auth;
 pub mod command;
 pub mod config;
 pub mod domain;
@@ -47,22 +48,30 @@ pub enum AppAction {
 
 #[component]
 pub fn App() -> Element {
-    let state = use_signal(ApplicationState::empty);
+    let mut state = use_signal(ApplicationState::empty);
+    let dispatcher = Dispatcher::new();
     use_context_provider(|| AppContext {
         state,
-        dispatcher: Dispatcher::new(),
+        dispatcher: dispatcher.clone(),
     });
+    use_effect(move || {
+        dispatcher.dispatch_event(
+            &mut state.write(),
+            app::ApplicationEvent::Auth(app::AuthEvent::BootstrapRequested),
+        );
+    });
+    let authenticated = state.read().auth.screen == auth::Screen::Workbench;
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        WorkspaceShell {
+        if authenticated { WorkspaceShell {
             view: WorkspaceView::empty(),
             focus: FocusTarget::Editor,
             sidebar_mode: SidebarMode::Tree,
             browser_dir: String::new(),
             on_action: None,
             on_select_note: None,
-        }
+        } } else { auth::AuthShell {} }
     }
 }
 

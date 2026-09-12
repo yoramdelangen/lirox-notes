@@ -1,4 +1,4 @@
-use super::{ApplicationState, Effect};
+use super::{ApplicationEvent, ApplicationState, Effect};
 use crate::command::CommandInvocation;
 use std::{cell::RefCell, rc::Rc};
 
@@ -14,6 +14,11 @@ impl Dispatcher {
 
     pub fn dispatch(&self, state: &mut ApplicationState, invocation: CommandInvocation) {
         let effects = dispatch(state, invocation);
+        self.effects.borrow_mut().extend(effects);
+    }
+
+    pub fn dispatch_event(&self, state: &mut ApplicationState, event: ApplicationEvent) {
+        let effects = super::reducer::apply_event(state, event);
         self.effects.borrow_mut().extend(effects);
     }
 

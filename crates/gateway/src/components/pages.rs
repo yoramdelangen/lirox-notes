@@ -30,11 +30,12 @@ pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) ->
 
 pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
     String::from(
-        r#"<main style="min-height:100vh;display:grid;place-items:center;padding:1rem;background:#0d1117;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;">
+        r#"<main id="auth-shell" style="min-height:100vh;display:grid;place-items:center;padding:1rem;background:#0d1117;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;">
 <section style="width:min(100%,32rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
 <div style="font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:#8b949e;">LiroxNotes</div>
-<h1 style="margin:0;font-size:1.7rem;">Install application</h1>
-<p style="margin:0;color:#9aa4b2;line-height:1.6;">Passkey registration is required before application setup. Use the JSON passkey API, then submit the workspace root to <code>/api/setup</code> with the session cookie.</p>
+<h1 style="margin:0;font-size:1.7rem;">Secure access</h1>
+<p style="margin:0;color:#9aa4b2;line-height:1.6;">Create a passkey to protect your notes, then choose a workspace.</p>
+<p style="margin:0;color:#9aa4b2;line-height:1.6;">Passkey registration uses <code>/api/auth/passkeys</code>; workspace setup uses <code>/api/setup</code>.</p>
 </section>
 </main>"#,
     )

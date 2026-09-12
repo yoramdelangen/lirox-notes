@@ -1,4 +1,5 @@
 use crate::{
+    auth::AuthState,
     command::SurfaceId,
     config::AppConfig,
     domain::DomainState,
@@ -14,6 +15,7 @@ pub struct ApplicationState {
     pub domain: DomainState,
     pub config: AppConfig,
     pub status: StatusState,
+    pub auth: AuthState,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -29,6 +31,7 @@ impl ApplicationState {
             domain: DomainState::empty(),
             config: AppConfig::defaults(),
             status: StatusState::default(),
+            auth: AuthState::default(),
         }
     }
 

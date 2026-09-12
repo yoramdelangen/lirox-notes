@@ -1,4 +1,5 @@
-use super::{ApplicationEvent, ApplicationState, StatusEvent, WorkspaceEvent};
+use super::{ApplicationEvent, ApplicationState, AuthEvent, StatusEvent, WorkspaceEvent};
+use crate::auth::{screen_for, AuthOperation, OnboardingStatus, Screen};
 use crate::{
     command::{CommandArgs, CommandInvocation, Direction},
     input::InputMode,
@@ -9,6 +10,11 @@ use crate::{
 pub enum Effect {
     OpenCommandPalette,
     SaveDocument { path: String, content: String },
+    Bootstrap,
+    RegisterPasskey,
+    Login,
+    Logout,
+    CreateWorkspace(crate::auth::SetupFields),
 }
 
 pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec<Effect> {
@@ -21,8 +27,94 @@ pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec
             state.workspace.overlays.pop();
             state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
         }
+        ApplicationEvent::Auth(event) => return apply_auth_event(state, event),
     }
     Vec::new()
+}
+
+fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effect> {
+    let auth = &mut state.auth;
+    match event {
+        AuthEvent::BootstrapRequested => vec![Effect::Bootstrap],
+        AuthEvent::BootstrapLoaded(bootstrap) => {
+            auth.screen = screen_for(&bootstrap);
+            auth.bootstrap = Some(bootstrap);
+            auth.failure = None;
+            vec![]
+        }
+        AuthEvent::RegisterPasskey => {
+            auth.operation = AuthOperation::Registering;
+            vec![Effect::RegisterPasskey]
+        }
+        AuthEvent::Login => {
+            auth.operation = AuthOperation::LoggingIn;
+            vec![Effect::Login]
+        }
+        AuthEvent::Logout => {
+            auth.operation = AuthOperation::LoggingOut;
+            vec![Effect::Logout]
+        }
+        AuthEvent::CreateWorkspace(fields) => {
+            auth.setup = fields.clone();
+            auth.operation = AuthOperation::CreatingWorkspace;
+            auth.screen = Screen::CreatingWorkspace;
+            vec![Effect::CreateWorkspace(fields)]
+        }
+        AuthEvent::Retry => {
+            auth.failure = None;
+            auth.operation = AuthOperation::None;
+            auth.screen = auth
+                .bootstrap
+                .as_ref()
+                .map(screen_for)
+                .unwrap_or(Screen::Loading);
+            vec![Effect::Bootstrap]
+        }
+        AuthEvent::OperationFailed(message) => {
+            auth.failure = Some(message);
+            auth.operation = AuthOperation::None;
+            auth.screen = Screen::Failure;
+            vec![]
+        }
+        AuthEvent::RegistrationSucceeded => {
+            auth.operation = AuthOperation::None;
+            auth.screen = Screen::WorkspaceSetup;
+            if let Some(bootstrap) = auth.bootstrap.as_mut() {
+                bootstrap.onboarding = OnboardingStatus::WorkspaceRequired;
+                bootstrap.authenticated = true;
+            }
+            vec![]
+        }
+        AuthEvent::LoginSucceeded { user } => {
+            auth.operation = AuthOperation::None;
+            if let Some(bootstrap) = auth.bootstrap.as_mut() {
+                bootstrap.authenticated = true;
+                bootstrap.user = user;
+                auth.screen = screen_for(bootstrap);
+            }
+            vec![]
+        }
+        AuthEvent::WorkspaceCreated { slug, name } => {
+            auth.operation = AuthOperation::None;
+            if let Some(bootstrap) = auth.bootstrap.as_mut() {
+                bootstrap.onboarding = OnboardingStatus::Complete;
+                bootstrap.authenticated = true;
+                bootstrap.workspace = Some(crate::auth::WorkspaceSummary { slug, name });
+                auth.screen = Screen::Workbench;
+            }
+            vec![]
+        }
+        AuthEvent::SessionExpired => {
+            auth.operation = AuthOperation::None;
+            if let Some(bootstrap) = auth.bootstrap.as_mut() {
+                bootstrap.authenticated = false;
+                auth.screen = Screen::Login;
+            } else {
+                auth.screen = Screen::Loading;
+            }
+            vec![]
+        }
+    }
 }
 
 pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation) -> Vec<Effect> {
