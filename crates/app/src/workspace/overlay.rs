@@ -42,4 +42,18 @@ impl OverlayStack {
     pub fn top(&self) -> Option<&OverlayEntry> {
         self.entries.last()
     }
+    pub fn remove_surface(&mut self, surface: SurfaceId) -> bool {
+        let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.surface == surface)
+        else {
+            return false;
+        };
+        self.entries.remove(index);
+        true
+    }
+    pub fn contains_surface(&self, surface: SurfaceId) -> bool {
+        self.entries.iter().any(|entry| entry.surface == surface)
+    }
 }

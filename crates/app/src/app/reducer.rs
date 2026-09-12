@@ -90,6 +90,10 @@ fn direction(args: &CommandArgs, id: &str) -> Direction {
 }
 
 fn move_selection(state: &mut ApplicationState, direction: Direction) -> Vec<Effect> {
+    if state.domain.notes.is_empty() {
+        state.status.message = Some("Cannot move file-tree selection: no notes".into());
+        return Vec::new();
+    }
     let current = state.domain.selected_note.as_deref().unwrap_or("");
     let index = state
         .domain
@@ -117,7 +121,10 @@ fn open_selected(state: &mut ApplicationState) -> Vec<Effect> {
         state.domain.open_note(path);
     }
     state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
-    state.workspace.overlays.pop();
+    state
+        .workspace
+        .overlays
+        .remove_surface(crate::command::SurfaceId::FILE_TREE);
     Vec::new()
 }
 
