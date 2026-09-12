@@ -10,7 +10,7 @@
 ## Commits
 
 - `d8847a820be91f547cb2176ffbb80baead9da60c` `feat: add authoritative onboarding bootstrap`
-- Report commit: pending.
+- `aed332b34b00a54f3c5efd477dffa5d7bdcc8599` `docs: report onboarding bootstrap task`
 
 ## Commands and Results
 
