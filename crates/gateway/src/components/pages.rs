@@ -2,7 +2,7 @@ use crate::*;
 
 pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) -> String {
     let error = error
-        .map(|message| format!("<p style=\"color:#ff8f40\">{message}</p>"))
+        .map(|message| format!("<p style=\"color:#ff8f40\">{}</p>", html_escape(message)))
         .unwrap_or_default();
     format!(
         r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
@@ -28,46 +28,111 @@ pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) ->
     )
 }
 
-pub(crate) fn login_page_body(error: Option<&str>) -> String {
-    let error = error
-        .map(|message| format!("<p style=\"color:#ff8f40\">{message}</p>"))
-        .unwrap_or_default();
-    format!(
-        r#"<main style="min-height:100vh;background:#0f1419;color:#e6e1cf;font-family:system-ui;padding:3rem;display:grid;place-items:center;">
-<form method="post" action="/login" style="width:min(100%,28rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;">
-<h1 style="margin:0;font-size:1.7rem;">Log in</h1>
-<p style="margin:0;color:#9aa4b2;">Log in with the local account created during setup.</p>
-{error}
-<label>Name<br><input name="user" value="local" autocomplete="username" style="width:100%;box-sizing:border-box;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label>Password<br><input type="password" name="password" autocomplete="current-password" style="width:100%;box-sizing:border-box;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Continue</button>
-</form>
-</main>"#,
-    )
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_errors_are_html_escaped() {
+        let paths = RuntimePaths {
+            config_file: "config".into(),
+            default_workspace: "workspace".into(),
+        };
+        let body = onboarding_page_body(&paths, Some("<script>alert(1)</script> &"));
+        assert!(!body.contains("<script>alert(1)</script>"));
+        assert!(body.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp;"));
+    }
+
+    #[test]
+    fn install_flow_initializes_installation_and_supports_remote_workspace_fields() {
+        let body = install_page_body(&RuntimePaths {
+            config_file: "config".into(),
+            default_workspace: "workspace".into(),
+        });
+
+        assert!(body.contains("/api/setup"));
+        assert!(body.contains("repo_mode"));
+        assert!(body.contains("workspace_slug"));
+        assert!(body.contains("workspace_name"));
+        assert!(body.contains("repo_url"));
+        assert!(body.contains("branch"));
+        assert!(body.contains("required"));
+        assert!(body.contains("valid remote repository URL"));
+        assert!(body.contains("/api/workspaces"));
+    }
 }
 
-pub(crate) fn install_page_body(paths: &RuntimePaths) -> String {
-    format!(
-        r#"<main style="min-height:100vh;display:grid;place-items:center;padding:1rem;background:#0d1117;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;">
-<form method="post" action="/install" style="width:min(100%,32rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
+pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
+    String::from(
+        r#"<main id="auth-shell" style="min-height:100vh;display:grid;place-items:center;padding:1rem;background:#0d1117;color:#e6edf3;font-family:ui-sans-serif,system-ui,sans-serif;">
+<section style="width:min(100%,32rem);display:grid;gap:1rem;border:1px solid #272d38;background:#151b22;padding:2rem;border-radius:1rem;box-shadow:0 24px 80px rgba(0,0,0,.35);">
 <div style="font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:#8b949e;">LiroxNotes</div>
-<h1 style="margin:0;font-size:1.7rem;">Install application</h1>
-<p style="margin:0;color:#9aa4b2;line-height:1.6;">Initialize the local application, create the first user, then continue to workspace setup.</p>
-<label style="color:#9aa4b2;">Workspace root<br><input name="workspace_root" value="{}" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<label style="color:#9aa4b2;">Username<br><input name="user" value="local" autocomplete="username" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<fieldset style="display:grid;gap:.75rem;border:1px solid #3a4655;border-radius:.75rem;padding:1rem;">
-<legend style="padding:0 .5rem;color:#9aa4b2;">Login method</legend>
-<label><input type="radio" name="auth_mode" value="passwordless" checked> Passwordless for now</label>
-<label><input type="radio" name="auth_mode" value="password"> Use a password</label>
-</fieldset>
-<label style="color:#9aa4b2;">Password<br><input type="password" name="password" autocomplete="new-password" style="width:100%;box-sizing:border-box;margin-top:.5rem;padding:.7rem;background:#0f1419;color:#e6e1cf;border:1px solid #3a4655;border-radius:.5rem;"></label>
-<button type="submit" style="padding:.8rem 1rem;border:0;border-radius:.6rem;background:#38bdf8;color:#081018;font-weight:700;cursor:pointer;">Install</button>
-</form>
-</main>"#,
-        html_escape(
-            &app_workspace_root(paths)
-                .unwrap_or_else(|_| default_workspace_root(paths))
-                .to_string_lossy()
-        )
+<h1 style="margin:0;font-size:1.7rem;">Secure access</h1>
+<p style="margin:0;color:#9aa4b2;line-height:1.6;">Create a passkey to protect your notes, then choose a workspace.</p>
+<button id="register-passkey" type="button" style="padding:.8rem 1rem;border:0;border-radius:.5rem;background:#95e6cb;color:#0f1419;font-weight:700;">Create passkey</button>
+<p id="auth-status" role="status" style="margin:0;color:#9aa4b2;line-height:1.6;"></p>
+</section>
+</main>
+<script>
+(() => {
+  const button = document.getElementById("register-passkey");
+  const status = document.getElementById("auth-status");
+  const section = document.querySelector("section");
+  const bytes = value => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/") + "==="), c => c.charCodeAt(0));
+  const options = value => {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(options);
+    const result = {};
+    for (const [key, child] of Object.entries(value)) result[key] = ["challenge", "id"].includes(key) && typeof child === "string" ? bytes(child) : options(child);
+    return result;
+  };
+   const json = async response => {
+     const body = await response.json().catch(() => ({}));
+     if (!response.ok) throw new Error(body.error || "Request failed");
+     return body;
+   };
+   const workspaceForm = () => {
+     section.insertAdjacentHTML("beforeend", '<fieldset id="workspace-form"><legend>Workspace setup</legend><label><input type="radio" name="repo-mode" value="new" checked> Create local repository</label><label><input type="radio" name="repo-mode" value="remote"> Use existing remote</label><label>Workspace slug<br><input id="workspace-slug" value="notes" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*"></label><label>Workspace name<br><input id="workspace-name" value="My Workspace" required></label><label>Repository URL<br><input id="repo-url" placeholder="git@github.com:you/notes.git"></label><label>Branch<br><input id="branch" value="main" required></label><button id="create-workspace" type="button">Create workspace</button></fieldset>');
+     document.getElementById("create-workspace").addEventListener("click", async event => {
+       const create = event.currentTarget;
+       create.disabled = true;
+       try {
+         const mode = document.querySelector('input[name="repo-mode"]:checked').value;
+         const slug = document.getElementById("workspace-slug");
+         const name = document.getElementById("workspace-name");
+         const repoUrl = document.getElementById("repo-url");
+         const branch = document.getElementById("branch");
+         if (![slug, name, branch].every(field => field.checkValidity())) throw new Error("Complete the workspace fields.");
+         if (mode === "remote" && !/^(https?:\/\/|ssh:\/\/|git@)/.test(repoUrl.value.trim())) throw new Error("Enter a valid remote repository URL.");
+         await json(await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({}) }));
+         await json(await fetch("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ repo_mode: mode, workspace_slug: slug.value, workspace_name: name.value, repo_url: repoUrl.value, branch: branch.value }) }));
+         location.href = "/";
+       } catch (error) {
+         status.textContent = error.message + " Try again.";
+         create.disabled = false;
+       }
+     });
+   };
+   button.addEventListener("click", async () => {
+    button.disabled = true;
+    status.textContent = "Waiting for your passkey...";
+    try {
+      if (!window.PublicKeyCredential || !navigator.credentials) throw new Error("WebAuthn is not supported by this browser");
+      const response = await fetch("/api/auth/passkeys/register/options", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: "{}" });
+       const envelope = await json(response);
+      const publicKey = options(envelope); delete publicKey.challenge_id;
+      const credential = await navigator.credentials.create({ publicKey });
+      const verified = await fetch("/api/auth/passkeys/register/verify", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ challenge_id: envelope.challenge_id, credential: credential.toJSON() }) });
+       await json(verified);
+       status.textContent = "Passkey ready. Choose a workspace.";
+       button.remove();
+       workspaceForm();
+    } catch (error) {
+      status.textContent = error.name === "NotAllowedError" || error.name === "AbortError" ? "Passkey registration cancelled. Try again." : error.message;
+      button.disabled = false;
+    }
+  });
+})();
+</script>"#,
     )
 }

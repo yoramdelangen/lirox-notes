@@ -1,4 +1,5 @@
 use crate::{
+    auth::AuthState,
     command::SurfaceId,
     config::AppConfig,
     domain::DomainState,
@@ -7,13 +8,15 @@ use crate::{
 };
 use liroxnotes_shared::WorkspaceView;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ApplicationState {
     pub input: InputState,
     pub workspace: WorkspaceState,
     pub domain: DomainState,
     pub config: AppConfig,
     pub status: StatusState,
+    pub auth: AuthState,
+    pub effect_version: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -29,6 +32,8 @@ impl ApplicationState {
             domain: DomainState::empty(),
             config: AppConfig::defaults(),
             status: StatusState::default(),
+            auth: AuthState::default(),
+            effect_version: 0,
         }
     }
 
