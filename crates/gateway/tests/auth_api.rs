@@ -298,6 +298,64 @@ async fn workspace_creation_marks_onboarding_complete() {
 }
 
 #[actix_web::test]
+async fn setup_retry_preserves_existing_onboarding_completion() {
+    let fixture = Fixture::authenticated();
+    save_config(
+        &fixture.paths.config_file,
+        &GatewayConfig {
+            workspace_slug: "notes".into(),
+            workspace_name: "Notes".into(),
+            workspace_path: fixture.paths.default_workspace.join("notes"),
+            repo_url: String::new(),
+            branch: "main".into(),
+        },
+    )
+    .unwrap();
+    fs::write(
+        fixture.paths.config_file.with_file_name("install"),
+        format!(
+            "installed=true\nworkspace_root={}\nonboarding_complete=true\n",
+            fixture.paths.default_workspace.display()
+        ),
+    )
+    .unwrap();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/setup")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .set_json(serde_json::json!({}))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert!(
+        fs::read_to_string(fixture.paths.config_file.with_file_name("install"))
+            .unwrap()
+            .lines()
+            .any(|line| line == "onboarding_complete=true")
+    );
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/bootstrap")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .to_request(),
+    )
+    .await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(bootstrap.onboarding, OnboardingStatus::Complete);
+}
+
+#[actix_web::test]
 async fn workspace_creation_failure_keeps_onboarding_required_and_returns_json_error() {
     let fixture = Fixture::authenticated_without_install();
     let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;

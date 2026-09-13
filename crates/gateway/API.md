@@ -172,7 +172,8 @@ Request body: JSON `InstallRequest`.
 
 Success: `201`, `SessionResponse`. This endpoint must be called after passkey
 registration and before workspace creation when starting from a fresh install;
-it is safe to retry.
+it is safe to retry. On an already-complete installation, it preserves the
+`onboarding_complete=true` marker and remains idempotent.
 
 Failures use the common JSON error envelope: missing passkey session returns
 `401`; filesystem errors return `500`.

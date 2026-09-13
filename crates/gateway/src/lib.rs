@@ -331,13 +331,21 @@ fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Resul
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(
-        path,
-        format!(
-            "installed=true\nworkspace_root={}\n",
-            workspace_root.display()
-        ),
-    )
+    let completed = match fs::read_to_string(&path) {
+        Ok(contents) => contents
+            .lines()
+            .any(|line| line.trim() == "onboarding_complete=true"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    let mut contents = format!(
+        "installed=true\nworkspace_root={}\n",
+        workspace_root.display()
+    );
+    if completed {
+        contents.push_str("onboarding_complete=true\n");
+    }
+    fs::write(path, contents)
 }
 
 fn mark_onboarding_complete(paths: &RuntimePaths) -> std::io::Result<()> {

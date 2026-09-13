@@ -106,3 +106,68 @@ wave were left untouched.
 - `cargo check --target wasm32-unknown-unknown -p liroxnotes-app --locked`:
   passed.
 - `git diff --check`: passed.
+
+## Scoped Review Follow-Up
+
+### Findings Addressed
+
+- `/api/setup` now preserves an existing `onboarding_complete=true` marker
+  when rewriting installation metadata. A lost setup response can therefore
+  be retried without regressing an already-complete bootstrap state.
+- The fallback workspace controls use native `required` attributes and a
+  lowercase slug pattern. Before requests, the browser checks required fields
+  and requires remote URLs to use `https://`, `http://`, `ssh://`, or `git@`
+  syntax. Gateway validation remains authoritative.
+- API documentation now explicitly describes setup idempotency for complete
+  installations.
+
+### Added Regression Coverage
+
+- A complete installation can retry `POST /api/setup` and still returns
+  `onboarding: Complete` from `GET /api/bootstrap`.
+- The fallback HTML test checks the required controls and remote validation
+  message.
+
+### Follow-Up Results
+
+- Focused marker-idempotency and fallback-validation tests: passed.
+- Full gateway/workspace/app tests, locked check, formatting, `dx check`, and
+  WASM check: passed.
+
+## Latest Scoped Review Fix
+
+### Findings
+
+- `/api/setup` rewrote the install marker without carrying forward
+  `onboarding_complete=true`, so a retry after a lost workspace response could
+  regress an installation from `Complete` to `WorkspaceRequired`.
+- The dynamically-created fallback workspace form lacked native required
+  constraints and client-side checks for malformed local slugs or remote URLs.
+
+### Changes
+
+- `mark_installed` now preserves an existing completion marker while updating
+  installation metadata. Fresh installs still create the normal marker, and
+  setup remains retryable and idempotent for completed installs.
+- Fallback slug, workspace name, and branch fields now use `required`; slug
+  uses a lowercase kebab-case pattern. Remote mode checks for `https://`,
+  `http://`, `ssh://`, or `git@` repository syntax before submitting. These
+  checks are advisory only; Gateway validation remains authoritative.
+- `API.md` documents setup idempotency.
+
+### Regression Coverage
+
+- A complete installation can retry `/api/setup` and still reports
+  `onboarding: Complete` from `/api/bootstrap`.
+- Fallback HTML coverage checks the required controls and remote URL validation.
+
+### Final Validation
+
+- `cargo test --workspace`: passed, 46 app, 22 gateway unit, 12 auth API, 22
+  Git workspace, and 7 shared tests.
+- `cargo check --workspace --locked`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `dx check --package liroxnotes-app`: passed with `No issues found`.
+- `cargo check --target wasm32-unknown-unknown -p liroxnotes-app --locked`:
+  passed.
+- `git diff --check`: passed.

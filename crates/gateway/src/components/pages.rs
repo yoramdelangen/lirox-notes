@@ -56,6 +56,8 @@ mod tests {
         assert!(body.contains("workspace_name"));
         assert!(body.contains("repo_url"));
         assert!(body.contains("branch"));
+        assert!(body.contains("required"));
+        assert!(body.contains("valid remote repository URL"));
         assert!(body.contains("/api/workspaces"));
     }
 }
@@ -90,14 +92,20 @@ pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
      return body;
    };
    const workspaceForm = () => {
-     section.insertAdjacentHTML("beforeend", '<fieldset id="workspace-form"><legend>Workspace setup</legend><label><input type="radio" name="repo-mode" value="new" checked> Create local repository</label><label><input type="radio" name="repo-mode" value="remote"> Use existing remote</label><label>Workspace slug<br><input id="workspace-slug" value="notes"></label><label>Workspace name<br><input id="workspace-name" value="My Workspace"></label><label>Repository URL<br><input id="repo-url" placeholder="git@github.com:you/notes.git"></label><label>Branch<br><input id="branch" value="main"></label><button id="create-workspace" type="button">Create workspace</button></fieldset>');
+     section.insertAdjacentHTML("beforeend", '<fieldset id="workspace-form"><legend>Workspace setup</legend><label><input type="radio" name="repo-mode" value="new" checked> Create local repository</label><label><input type="radio" name="repo-mode" value="remote"> Use existing remote</label><label>Workspace slug<br><input id="workspace-slug" value="notes" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*"></label><label>Workspace name<br><input id="workspace-name" value="My Workspace" required></label><label>Repository URL<br><input id="repo-url" placeholder="git@github.com:you/notes.git"></label><label>Branch<br><input id="branch" value="main" required></label><button id="create-workspace" type="button">Create workspace</button></fieldset>');
      document.getElementById("create-workspace").addEventListener("click", async event => {
        const create = event.currentTarget;
        create.disabled = true;
        try {
-         await json(await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({}) }));
          const mode = document.querySelector('input[name="repo-mode"]:checked').value;
-         await json(await fetch("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ repo_mode: mode, workspace_slug: document.getElementById("workspace-slug").value, workspace_name: document.getElementById("workspace-name").value, repo_url: document.getElementById("repo-url").value, branch: document.getElementById("branch").value }) }));
+         const slug = document.getElementById("workspace-slug");
+         const name = document.getElementById("workspace-name");
+         const repoUrl = document.getElementById("repo-url");
+         const branch = document.getElementById("branch");
+         if (![slug, name, branch].every(field => field.checkValidity())) throw new Error("Complete the workspace fields.");
+         if (mode === "remote" && !/^(https?:\/\/|ssh:\/\/|git@)/.test(repoUrl.value.trim())) throw new Error("Enter a valid remote repository URL.");
+         await json(await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({}) }));
+         await json(await fetch("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ repo_mode: mode, workspace_slug: slug.value, workspace_name: name.value, repo_url: repoUrl.value, branch: branch.value }) }));
          location.href = "/";
        } catch (error) {
          status.textContent = error.message + " Try again.";
