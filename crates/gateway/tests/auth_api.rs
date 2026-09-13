@@ -328,7 +328,9 @@ async fn setup_retry_preserves_existing_onboarding_completion() {
                 "lirox_session",
                 "valid-token",
             ))
-            .set_json(serde_json::json!({}))
+            .set_json(serde_json::json!({
+                "workspace_root": fixture.paths.default_workspace.join("other-root")
+            }))
             .to_request(),
     )
     .await;
@@ -338,6 +340,17 @@ async fn setup_retry_preserves_existing_onboarding_completion() {
             .unwrap()
             .lines()
             .any(|line| line == "onboarding_complete=true")
+    );
+    assert!(
+        fs::read_to_string(fixture.paths.config_file.with_file_name("install"))
+            .unwrap()
+            .lines()
+            .any(|line| {
+                line == format!(
+                    "workspace_root={}",
+                    fixture.paths.default_workspace.display()
+                )
+            })
     );
     let response = test::call_service(
         &app,

@@ -18,6 +18,7 @@ use std::{
     io::Write,
     path::{Component, Path, PathBuf},
     process::Command,
+    sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
@@ -327,6 +328,15 @@ pub fn is_installed(paths: &RuntimePaths) -> std::io::Result<bool> {
 }
 
 fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Result<()> {
+    let _lock = INSTALL_MARKER_LOCK
+        .lock()
+        .map_err(|_| std::io::Error::other("install marker lock poisoned"))?;
+    mark_installed_unlocked(paths, workspace_root)
+}
+
+static INSTALL_MARKER_LOCK: Mutex<()> = Mutex::new(());
+
+fn mark_installed_unlocked(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Result<()> {
     let path = install_file(paths);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -338,6 +348,9 @@ fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Resul
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
+    if completed {
+        return Ok(());
+    }
     let mut contents = format!(
         "installed=true\nworkspace_root={}\n",
         workspace_root.display()
@@ -348,7 +361,15 @@ fn mark_installed(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Resul
     fs::write(path, contents)
 }
 
-fn mark_onboarding_complete(paths: &RuntimePaths) -> std::io::Result<()> {
+fn mark_workspace_ready(paths: &RuntimePaths, workspace_root: &Path) -> std::io::Result<()> {
+    let _lock = INSTALL_MARKER_LOCK
+        .lock()
+        .map_err(|_| std::io::Error::other("install marker lock poisoned"))?;
+    mark_installed_unlocked(paths, workspace_root)?;
+    mark_onboarding_complete_unlocked(paths)
+}
+
+fn mark_onboarding_complete_unlocked(paths: &RuntimePaths) -> std::io::Result<()> {
     let path = install_file(paths);
     let contents = fs::read_to_string(&path)?;
     if contents
@@ -1108,6 +1129,43 @@ mod ssr_tests {
         assert!(session_cookie(&service, "token", false).ends_with("; Secure"));
     }
 
+    #[test]
+    fn concurrent_install_and_completion_writes_keep_completion_marker() {
+        let root = std::env::temp_dir().join(format!("lirox-marker-race-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            paths.config_file.with_file_name("install"),
+            "installed=true\nworkspace_root=first\n",
+        )
+        .unwrap();
+
+        let mut workers = Vec::new();
+        for worker_id in 0..32 {
+            let paths = paths.clone();
+            workers.push(std::thread::spawn(move || {
+                if worker_id % 2 == 0 {
+                    mark_installed(&paths, Path::new("setup-root")).unwrap();
+                } else {
+                    mark_workspace_ready(&paths, Path::new("workspace-root")).unwrap();
+                }
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        let marker = fs::read_to_string(root.join("install")).unwrap();
+        assert!(marker
+            .lines()
+            .any(|line| line == "onboarding_complete=true"));
+        let _ = fs::remove_dir_all(root);
+    }
+
     #[actix_web::test]
     async fn password_login_route_is_unavailable_and_setup_requires_passkey() {
         let root = std::env::temp_dir().join(format!("lirox-routes-{}", std::process::id()));
@@ -1634,8 +1692,7 @@ async fn create_workspace_api(
     if let Err(error) = ensure_workspace_for_config(&config)
         .and_then(|_| configure_git_remote(&config))
         .and_then(|_| save_config(&state.paths.config_file, &config))
-        .and_then(|_| mark_installed(&state.paths, &workspace_root))
-        .and_then(|_| mark_onboarding_complete(&state.paths))
+        .and_then(|_| mark_workspace_ready(&state.paths, &workspace_root))
     {
         return Ok(api_error(
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,

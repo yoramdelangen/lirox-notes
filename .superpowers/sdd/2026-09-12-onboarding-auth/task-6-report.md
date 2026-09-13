@@ -107,6 +107,44 @@ wave were left untouched.
   passed.
 - `git diff --check`: passed.
 
+## Setup Retry Race Follow-Up
+
+### Finding Addressed
+
+`mark_installed` previously read and rewrote the install marker without
+sharing the persistence critical section with the completion append. A setup
+request could therefore overwrite a completion marker written by a concurrent
+workspace request.
+
+### Changes
+
+- Added a shared install-marker mutex covering the complete read/merge/write
+  operation.
+- Kept the lock across workspace installation and completion-marker append,
+  preventing setup from interleaving between those operations.
+- Completed setup is now a no-op for marker metadata, preserving the first
+  completed workspace root even when a retry supplies a different root.
+- Fresh setup behavior, passkey-only authorization, client validation, and API
+  documentation remain unchanged.
+
+### Regression Coverage
+
+- Concurrent install/completion writers always retain
+  `onboarding_complete=true`.
+- A completed `/api/setup` retry preserves the original root and bootstrap
+  `onboarding: Complete` state.
+
+### Final Validation
+
+- Focused concurrency and completed-root tests: passed.
+- `cargo test --workspace`: passed, 46 app, 23 gateway unit, 12 auth API, 22
+  Git workspace, and 7 shared tests.
+- `cargo check --workspace --locked`: passed.
+- `cargo fmt --all -- --check`: passed.
+- `dx check --package liroxnotes-app`: passed with `No issues found`.
+- `cargo check --target wasm32-unknown-unknown -p liroxnotes-app --locked`:
+  passed.
+
 ## Scoped Review Follow-Up
 
 ### Findings Addressed
