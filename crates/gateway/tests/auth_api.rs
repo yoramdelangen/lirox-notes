@@ -208,6 +208,51 @@ async fn unauthenticated_workspace_json_is_rejected() {
 }
 
 #[actix_web::test]
+async fn unauthenticated_workspace_creation_is_rejected() {
+    let fixture = Fixture::authenticated();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/workspaces")
+            .set_json(serde_json::json!({"workspace_slug": "notes"}))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = to_bytes(response.into_body()).await.unwrap();
+    assert!(serde_json::from_slice::<serde_json::Value>(&body)
+        .unwrap()
+        .get("error")
+        .is_some());
+}
+
+#[actix_web::test]
+async fn malformed_json_uses_error_envelope_for_setup_and_workspaces() {
+    let fixture = Fixture::fresh();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+
+    for uri in ["/api/setup", "/api/workspaces"] {
+        let response = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(uri)
+                .insert_header((header::CONTENT_TYPE, "application/json"))
+                .set_payload("{")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body()).await.unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(error
+            .get("error")
+            .and_then(|value| value.as_str())
+            .is_some());
+    }
+}
+
+#[actix_web::test]
 async fn workspace_creation_marks_onboarding_complete() {
     let fixture = Fixture::authenticated_without_workspace();
     let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;

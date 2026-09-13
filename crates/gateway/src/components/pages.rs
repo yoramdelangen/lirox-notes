@@ -42,6 +42,22 @@ mod tests {
         assert!(!body.contains("<script>alert(1)</script>"));
         assert!(body.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp;"));
     }
+
+    #[test]
+    fn install_flow_initializes_installation_and_supports_remote_workspace_fields() {
+        let body = install_page_body(&RuntimePaths {
+            config_file: "config".into(),
+            default_workspace: "workspace".into(),
+        });
+
+        assert!(body.contains("/api/setup"));
+        assert!(body.contains("repo_mode"));
+        assert!(body.contains("workspace_slug"));
+        assert!(body.contains("workspace_name"));
+        assert!(body.contains("repo_url"));
+        assert!(body.contains("branch"));
+        assert!(body.contains("/api/workspaces"));
+    }
 }
 
 pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
@@ -68,27 +84,41 @@ pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
     for (const [key, child] of Object.entries(value)) result[key] = ["challenge", "id"].includes(key) && typeof child === "string" ? bytes(child) : options(child);
     return result;
   };
-  button.addEventListener("click", async () => {
+   const json = async response => {
+     const body = await response.json().catch(() => ({}));
+     if (!response.ok) throw new Error(body.error || "Request failed");
+     return body;
+   };
+   const workspaceForm = () => {
+     section.insertAdjacentHTML("beforeend", '<fieldset id="workspace-form"><legend>Workspace setup</legend><label><input type="radio" name="repo-mode" value="new" checked> Create local repository</label><label><input type="radio" name="repo-mode" value="remote"> Use existing remote</label><label>Workspace slug<br><input id="workspace-slug" value="notes"></label><label>Workspace name<br><input id="workspace-name" value="My Workspace"></label><label>Repository URL<br><input id="repo-url" placeholder="git@github.com:you/notes.git"></label><label>Branch<br><input id="branch" value="main"></label><button id="create-workspace" type="button">Create workspace</button></fieldset>');
+     document.getElementById("create-workspace").addEventListener("click", async event => {
+       const create = event.currentTarget;
+       create.disabled = true;
+       try {
+         await json(await fetch("/api/setup", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({}) }));
+         const mode = document.querySelector('input[name="repo-mode"]:checked').value;
+         await json(await fetch("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ repo_mode: mode, workspace_slug: document.getElementById("workspace-slug").value, workspace_name: document.getElementById("workspace-name").value, repo_url: document.getElementById("repo-url").value, branch: document.getElementById("branch").value }) }));
+         location.href = "/";
+       } catch (error) {
+         status.textContent = error.message + " Try again.";
+         create.disabled = false;
+       }
+     });
+   };
+   button.addEventListener("click", async () => {
     button.disabled = true;
     status.textContent = "Waiting for your passkey...";
     try {
       if (!window.PublicKeyCredential || !navigator.credentials) throw new Error("WebAuthn is not supported by this browser");
       const response = await fetch("/api/auth/passkeys/register/options", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: "{}" });
-      if (!response.ok) throw new Error("Could not start passkey registration");
-      const envelope = await response.json();
+       const envelope = await json(response);
       const publicKey = options(envelope); delete publicKey.challenge_id;
       const credential = await navigator.credentials.create({ publicKey });
       const verified = await fetch("/api/auth/passkeys/register/verify", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ challenge_id: envelope.challenge_id, credential: credential.toJSON() }) });
-      if (!verified.ok) throw new Error("Passkey registration failed");
-      status.textContent = "Passkey ready. Choose a workspace.";
-      button.remove();
-      section.insertAdjacentHTML("beforeend", '<label>Workspace slug<br><input id="workspace-slug" value="notes"></label><label>Workspace name<br><input id="workspace-name" value="My Workspace"></label><button id="create-workspace" type="button">Create workspace</button>');
-      document.getElementById("create-workspace").addEventListener("click", async () => {
-        const workspace = { repo_mode: "new", workspace_slug: document.getElementById("workspace-slug").value, workspace_name: document.getElementById("workspace-name").value, branch: "main" };
-        const created = await fetch("/api/workspaces", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify(workspace) });
-        if (!created.ok) { status.textContent = "Workspace setup failed. Try again."; return; }
-        location.href = "/";
-      });
+       await json(verified);
+       status.textContent = "Passkey ready. Choose a workspace.";
+       button.remove();
+       workspaceForm();
     } catch (error) {
       status.textContent = error.name === "NotAllowedError" || error.name === "AbortError" ? "Passkey registration cancelled. Try again." : error.message;
       button.disabled = false;

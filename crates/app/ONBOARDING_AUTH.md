@@ -49,9 +49,10 @@ logout returns the user to the unauthenticated route.
 
 ## Workspace Contract
 
-Workspace setup submits the documented workspace form to the gateway. The app
-keeps the form state for retry and advances to the workbench only after a
-successful response followed by bootstrap confirmation. A pre-existing config
+Workspace setup initializes installation with `POST /api/setup`, then submits
+the documented workspace form to `POST /api/workspaces`. The app keeps the
+form state for retry and advances to the workbench only after a successful
+response followed by bootstrap confirmation. A pre-existing config
 without `onboarding_complete=true` is not migrated automatically, so it stays
 on `workspace_required` until explicit workspace setup succeeds.
 

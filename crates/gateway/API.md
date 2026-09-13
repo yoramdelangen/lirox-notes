@@ -52,6 +52,9 @@ Common statuses for endpoints documented as using the JSON envelope:
 | `404` | Workspace or repository identifier does not match the configured one |
 | `500` | Filesystem, Git, or configuration failure, returned as the JSON envelope |
 
+Malformed JSON on any JSON request returns `400` with the same `{"error":"..."}`
+envelope. HTML routes continue to use their existing HTML or plain-text responses.
+
 Protected endpoints generally check authentication before workspace
 configuration. The legacy `GET /api/workspace/{path}` and `PUT /api/notes/{path}`
 routes return their documented `400` errors as plain text; all other documented
@@ -167,7 +170,9 @@ Request body: JSON `InstallRequest`.
 |---|---|---:|---|
 | `workspace_root` | string | No | Configured default workspace root |
 
-Success: `201`, `SessionResponse`.
+Success: `201`, `SessionResponse`. This endpoint must be called after passkey
+registration and before workspace creation when starting from a fresh install;
+it is safe to retry.
 
 Failures use the common JSON error envelope: missing passkey session returns
 `401`; filesystem errors return `500`.
@@ -190,8 +195,10 @@ Failure: `400` JSON `workspace is not configured`.
 Creates or replaces the configured workspace profile. It creates a local Git
 workspace, or clones a remote repository when `repo_mode` is `remote`.
 
-Authentication: a valid `lirox_session` cookie is required. The route is used
-after passkey registration, before the workbench is available.
+Authentication: a valid `lirox_session` cookie is required. Passkey registration
+must precede this route; there is no unauthenticated workspace-creation
+allowance. The route is used after `/api/setup` and before the workbench is
+available.
 
 Request body: JSON `WorkspaceRequest`.
 
@@ -212,7 +219,8 @@ If marker writing is interrupted after the install marker is written but before
 the completion line is appended, bootstrap remains `WorkspaceRequired` and the
 same workspace request can be retried.
 
-Failures: `401` when authentication is required; Git/filesystem and
+Failures: malformed JSON returns `400` with `{"error":"invalid JSON request"}`;
+`401` when authentication is required; Git/filesystem and
 configuration-persistence failures return `500` using the common JSON error
 shape. A failed setup does not write installation or completion markers and
 normally remains `workspace_required`; if only the install marker was written

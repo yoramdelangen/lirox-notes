@@ -2105,6 +2105,16 @@ pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
+            .app_data(web::JsonConfig::default().error_handler(|_, _| {
+                actix_web::error::InternalError::from_response(
+                    "invalid JSON request",
+                    api_error(
+                        actix_web::http::StatusCode::BAD_REQUEST,
+                        "invalid JSON request",
+                    ),
+                )
+                .into()
+            }))
             .app_data(state.clone())
             .configure(routes::configure)
             .service(Files::new("/assets", "crates/app/assets"))
@@ -2115,6 +2125,16 @@ pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
 }
 
 pub fn configure_app(cfg: &mut web::ServiceConfig, paths: RuntimePaths, auth: auth::AuthService) {
-    cfg.app_data(web::Data::new(AppState { paths, auth }))
-        .configure(routes::configure);
+    cfg.app_data(web::JsonConfig::default().error_handler(|_, _| {
+        actix_web::error::InternalError::from_response(
+            "invalid JSON request",
+            api_error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "invalid JSON request",
+            ),
+        )
+        .into()
+    }))
+    .app_data(web::Data::new(AppState { paths, auth }))
+    .configure(routes::configure);
 }
