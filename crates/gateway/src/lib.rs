@@ -111,6 +111,7 @@ struct ExistingWorkspaceResponse {
 #[derive(Deserialize)]
 struct InstallRequest {
     workspace_root: Option<String>,
+    user_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1840,6 +1841,9 @@ async fn install_api(
             .map(PathBuf::from)
             .unwrap_or_else(|| default_workspace_root(&state.paths));
         mark_installed(&state.paths, &workspace_root)?;
+        if let Some(user_name) = request.user_name.as_deref() {
+            auth::save_install_user_name(&state.paths, user_name)?;
+        }
         let Some(session) = request_session(&req, &state.paths)? else {
             return Ok(unauthorized());
         };

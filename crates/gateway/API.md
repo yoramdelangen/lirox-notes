@@ -126,10 +126,13 @@ state used by the app startup gate.
 Response: `200` with `BootstrapResponse`:
 
 ```json
-{"installed":true,"passkey_exists":true,"onboarding":"Complete","authenticated":true,"user":"local","workspace_root":"/path/to/workspaces","workspace":{"slug":"notes","name":"Notes"}}
+{"installed":true,"passkey_exists":true,"onboarding":"Complete","authenticated":true,"user":"local","display_name":"Yoram","workspace_root":"/path/to/workspaces","workspace":{"slug":"notes","name":"Notes"}}
 ```
 
-`onboarding` is `NotStarted`, `WorkspaceRequired`, or `Complete`. `Complete`
+`display_name` contains the persisted onboarding name, or `null` when the
+authenticated passkey has no profile name yet. `user` remains the session
+identity. `onboarding` is
+`NotStarted`, `WorkspaceRequired`, or `Complete`. `Complete`
 is only returned after explicit workspace bootstrap completion is persisted.
 `passkey_exists` indicates that the gateway has a registered passkey and allows
 the client to attempt existing-passkey discovery during onboarding.
@@ -164,15 +167,16 @@ Success: `200` with an unauthenticated `SessionResponse` and
 
 ### `POST /api/setup`
 
-Initializes installation state after a verified passkey session exists. It does
-not accept or persist usernames, passwords, or auth mode fields, and does not
-create workspace configuration.
+Initializes installation state after a verified passkey session exists. It
+persists the optional onboarding display name and does not create workspace
+configuration.
 
 Request body: JSON `InstallRequest`.
 
 | Field | Type | Required | Default |
 |---|---|---:|---|
 | `workspace_root` | string | No | Configured default workspace root |
+| `user_name` | string | No | Display name captured during onboarding; trimmed, control characters removed, and limited to 80 characters |
 
 Success: `201`, `SessionResponse`. This endpoint must be called after passkey
 registration and before workspace creation when starting from a fresh install;

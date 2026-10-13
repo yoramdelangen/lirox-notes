@@ -14,6 +14,7 @@ pub enum Effect {
     LoadWorkspace,
     LoadWorkspaceNote(String),
     RegisterPasskey,
+    SetupInstallation(String),
     Login,
     AutoLogin,
     Logout,
@@ -54,6 +55,18 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             auth.bootstrap = Some(bootstrap);
             auth.operation = AuthOperation::None;
             auth.failure = None;
+            if auth.screen == Screen::WorkspaceSetup {
+                auth.setup.step = if auth
+                    .bootstrap
+                    .as_ref()
+                    .and_then(|bootstrap| bootstrap.display_name.as_ref())
+                    .is_some()
+                {
+                    crate::auth::SetupStep::ChooseWorkspace
+                } else {
+                    crate::auth::SetupStep::Name
+                };
+            }
             if auth.screen == Screen::Loading {
                 vec![Effect::LoadWorkspace]
             } else {
@@ -83,10 +96,16 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             vec![Effect::CreateWorkspace(fields)]
         }
         AuthEvent::SetSetupStep(step) => {
+            let persist_name = auth.setup.step == crate::auth::SetupStep::Name
+                && step == crate::auth::SetupStep::ChooseWorkspace;
             auth.setup.step = step;
             auth.failure = None;
             auth.operation = AuthOperation::None;
-            vec![]
+            if persist_name {
+                vec![Effect::SetupInstallation(auth.setup.name.clone())]
+            } else {
+                vec![]
+            }
         }
         AuthEvent::SelectExistingWorkspace(workspace) => {
             auth.setup.remote = true;
@@ -140,7 +159,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
                 bootstrap.onboarding = OnboardingStatus::WorkspaceRequired;
                 bootstrap.authenticated = true;
             }
-            vec![]
+            vec![Effect::SetupInstallation(auth.setup.name.clone())]
         }
         AuthEvent::LoginSucceeded { user } => {
             auth.operation = AuthOperation::None;
@@ -154,6 +173,13 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
                 } else {
                     screen_for(bootstrap)
                 };
+                if bootstrap.onboarding == OnboardingStatus::WorkspaceRequired {
+                    auth.setup.step = if bootstrap.display_name.is_some() {
+                        crate::auth::SetupStep::ChooseWorkspace
+                    } else {
+                        crate::auth::SetupStep::Name
+                    };
+                }
                 if auth.screen == Screen::Loading {
                     return vec![Effect::LoadWorkspace];
                 }

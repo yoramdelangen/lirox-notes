@@ -463,7 +463,7 @@ fn onboarding_form_decodes_values_and_defaults() {
 #[test]
 fn onboarding_form_prefers_custom_workspace_slug() {
     let config = parse_onboarding_form(
-        "repo_mode=remote&workspace_slug=team-space&workspace_path=%2Ftmp%2Fworkspaces&repo_url=git%40gitea.com%3Ayoramdelangen%2Fnotes.git",
+        "repo_mode=remote&workspace_slug=team-space&workspace_path=%2Ftmp%2Fworkspaces&repo_url=git%40gitea.com%3Aexample%2Fnotes.git",
         PathBuf::from("/tmp/default").as_path(),
     );
 
@@ -477,7 +477,7 @@ fn onboarding_form_prefers_custom_workspace_slug() {
 #[test]
 fn onboarding_form_clears_remote_for_new_repository() {
     let config = parse_onboarding_form(
-        "repo_mode=new&workspace_slug=notes&workspace_path=%2Ftmp%2Fworkspaces&repo_url=git%40gitea.com%3Ayoramdelangen%2Fnotes.git",
+        "repo_mode=new&workspace_slug=notes&workspace_path=%2Ftmp%2Fworkspaces&repo_url=git%40gitea.com%3Aexample%2Fnotes.git",
         PathBuf::from("/tmp/default").as_path(),
     );
 

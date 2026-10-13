@@ -298,6 +298,40 @@ async fn workspace_creation_marks_onboarding_complete() {
 }
 
 #[actix_web::test]
+async fn setup_persists_display_name_in_bootstrap() {
+    let fixture = Fixture::authenticated_without_workspace();
+    let app = test::init_service(App::new().configure(|cfg| fixture.configure(cfg))).await;
+    let response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/setup")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .set_json(serde_json::json!({"user_name": "Example User"}))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/bootstrap")
+            .cookie(actix_web::cookie::Cookie::new(
+                "lirox_session",
+                "valid-token",
+            ))
+            .to_request(),
+    )
+    .await;
+    let body = to_bytes(response.into_body()).await.unwrap();
+    let bootstrap: BootstrapResponse = serde_json::from_slice(&body).unwrap();
+    assert_eq!(bootstrap.display_name.as_deref(), Some("Example User"));
+}
+
+#[actix_web::test]
 async fn setup_retry_preserves_existing_onboarding_completion() {
     let fixture = Fixture::authenticated();
     save_config(

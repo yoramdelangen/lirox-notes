@@ -35,7 +35,103 @@ button {
 
 #auth-shell > section {
     display: grid;
-    gap: 1rem;
+    gap: 1.5rem;
+    animation: auth-rise 420ms ease-out both;
+}
+
+.auth-card {
+    border: 1px solid var(--lirox-border);
+    border-radius: .75rem;
+    background: var(--lirox-surface);
+    padding: clamp(1.5rem, 5vw, 2.5rem);
+    box-shadow: 0 1.5rem 4rem rgb(0 0 0 / .18);
+}
+
+.auth-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--lirox-border);
+    color: var(--lirox-subtle);
+    font-size: .7rem;
+    letter-spacing: .12em;
+}
+
+.auth-topline strong {
+    color: var(--lirox-accent);
+    font-size: .8rem;
+    letter-spacing: .08em;
+}
+
+.auth-heading {
+    display: grid;
+    gap: .5rem;
+}
+
+.auth-heading h1 {
+    margin: 0;
+    color: var(--lirox-fg);
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    letter-spacing: -.04em;
+    line-height: 1.1;
+}
+
+.auth-heading p,
+.auth-help {
+    margin: 0;
+    color: var(--lirox-muted);
+    font-size: .9rem;
+    line-height: 1.6;
+}
+
+.auth-step {
+    border-bottom: 1px solid var(--lirox-border);
+    color: var(--lirox-accent);
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.auth-field {
+    display: grid;
+    gap: .5rem;
+}
+
+.auth-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+.auth-actions .dx-button:first-child {
+    min-width: 9.5rem;
+}
+
+.auth-actions .dx-button {
+    min-height: 2.75rem;
+}
+
+.auth-help {
+    color: var(--lirox-subtle);
+    font-size: .78rem;
+}
+
+.auth-loading {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    color: var(--lirox-info);
+    font-size: .8rem;
+}
+
+.auth-loading-dot {
+    width: .45rem;
+    height: .45rem;
+    border-radius: 50%;
+    background: var(--lirox-accent);
+    box-shadow: 0 0 0 .25rem var(--lirox-accent-soft);
+    animation: auth-pulse 1.5s ease-in-out infinite;
 }
 
 #auth-shell form,
@@ -53,12 +149,24 @@ button {
 }
 
 #auth-shell input {
+    min-height: 2.75rem;
     min-width: 0;
     border: 1px solid var(--lirox-border);
     border-radius: .35rem;
     background: var(--lirox-bg);
     color: var(--lirox-fg);
     padding: .65rem .75rem;
+    transition: border-color 150ms, background-color 150ms, box-shadow 150ms;
+}
+
+#auth-shell input::placeholder {
+    color: var(--lirox-subtle);
+}
+
+#auth-shell input:focus {
+    border-color: var(--lirox-accent);
+    background: var(--lirox-bg-alt);
+    box-shadow: 0 0 0 3px var(--lirox-accent-soft);
 }
 
 #auth-shell input:focus-visible,
@@ -90,5 +198,47 @@ button {
 @media (min-width: 40rem) {
     #auth-shell .onboarding-choice-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 28rem) {
+    #auth-shell {
+        padding: 1rem;
+    }
+
+    .auth-card {
+        padding: 1.25rem;
+    }
+
+    .auth-topline span {
+        display: none;
+    }
+
+    .auth-actions,
+    .auth-actions .dx-button {
+        width: 100%;
+    }
+}
+
+@keyframes auth-rise {
+    from {
+        opacity: 0;
+        transform: translateY(.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes auth-pulse {
+    0%, 100% { opacity: .55; transform: scale(.9); }
+    50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #auth-shell > section,
+    .auth-loading-dot {
+        animation: none;
     }
 }

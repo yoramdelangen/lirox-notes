@@ -12,8 +12,10 @@ or reuse a workspace subpath inside an existing repository.
 
 ## Flow
 
-- Capture the user's name and create a passkey.
-- Choose `New repository` or `Existing repository`.
+- New passkey: collect the user's name on the same screen as passkey creation.
+- Existing passkey: authenticate first; if `display_name` is empty, collect the
+  name before showing workspace choices.
+- Then choose `New repository` or `Existing repository`.
 - New repository: enter a new remote URL and branch, then confirm the workspace.
 - Existing repository: choose a repository subpath; repository roots are not
   valid existing workspaces.

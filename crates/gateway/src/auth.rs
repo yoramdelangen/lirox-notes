@@ -97,6 +97,7 @@ pub struct BootstrapResponse {
     pub onboarding: OnboardingStatus,
     pub authenticated: bool,
     pub user: Option<String>,
+    pub display_name: Option<String>,
     pub workspace_root: String,
     pub workspace: Option<GatewayConfigResponse>,
 }
@@ -141,6 +142,38 @@ pub fn persisted_onboarding_status(paths: &RuntimePaths) -> io::Result<Onboardin
     // A legacy config is not evidence that workspace bootstrap completed.
     // It must be explicitly recreated through POST /api/workspaces.
     Ok(OnboardingStatus::WorkspaceRequired)
+}
+
+pub fn install_user_name(input: &str) -> Option<String> {
+    input.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "user_name" && !value.trim().is_empty()).then(|| value.trim().to_string())
+    })
+}
+
+pub fn save_install_user_name(paths: &RuntimePaths, value: &str) -> io::Result<()> {
+    let name: String = value
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(80)
+        .collect();
+    if name.is_empty() {
+        return Ok(());
+    }
+
+    let path = paths.config_file.with_file_name("install");
+    let contents = fs::read_to_string(&path).unwrap_or_default();
+    let mut output = contents
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("user_name="))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !output.is_empty() {
+        output.push('\n');
+    }
+    output.push_str(&format!("user_name={name}\n"));
+    fs::write(path, output)
 }
 
 pub fn serialize_account(account: &AccountRecord) -> io::Result<String> {
@@ -777,12 +810,16 @@ pub fn bootstrap_response(
         .is_some_and(|account| !account.credentials.is_empty());
     let onboarding = persisted_onboarding_status(paths)?;
     let config = load_config(&paths.config_file)?;
+    let display_name = fs::read_to_string(paths.config_file.with_file_name("install"))
+        .ok()
+        .and_then(|contents| install_user_name(&contents));
     Ok(BootstrapResponse {
         installed,
         passkey_exists,
         onboarding: onboarding.clone(),
         authenticated,
         user,
+        display_name,
         workspace_root: app_workspace_root(paths)?.to_string_lossy().into_owned(),
         workspace: (onboarding == OnboardingStatus::Complete)
             .then(|| config)
@@ -819,6 +856,15 @@ mod tests {
             OnboardingStatus::WorkspaceRequired
         );
         assert_eq!(onboarding_status(true, true), OnboardingStatus::Complete);
+    }
+
+    #[test]
+    fn install_marker_reads_a_persisted_display_name() {
+        assert_eq!(
+            install_user_name("installed=true\nuser_name=Example User\n"),
+            Some("Example User".into())
+        );
+        assert_eq!(install_user_name("installed=true\n"), None);
     }
 
     #[test]

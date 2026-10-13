@@ -20,6 +20,7 @@ pub struct BootstrapState {
     pub onboarding: OnboardingStatus,
     pub authenticated: bool,
     pub user: Option<String>,
+    pub display_name: Option<String>,
     pub workspace_root: String,
     pub workspace: Option<WorkspaceSummary>,
 }
@@ -57,6 +58,7 @@ impl BootstrapState {
             onboarding,
             authenticated,
             user: None,
+            display_name: None,
             workspace_root: String::new(),
             workspace: None,
         }
@@ -98,6 +100,7 @@ pub struct SetupFields {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum SetupStep {
+    Name,
     ChooseWorkspace,
     ConnectRepository,
     ExistingWorkspace,
@@ -117,7 +120,7 @@ impl Default for SetupFields {
         Self {
             step: SetupStep::ChooseWorkspace,
             slug: String::new(),
-            name: "My Workspace".into(),
+            name: String::new(),
             repo_url: String::new(),
             repository_path: String::new(),
             branch: "main".into(),
@@ -235,6 +238,28 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
     let setup = auth.setup.clone();
     let step = setup.step;
     let content = match step {
+        SetupStep::Name => {
+            let name_dispatcher = dispatcher.clone();
+            rsx! {
+                h1 { "What should we call you?" }
+                p { "Your name is used to personalize LiroxNotes." }
+                label { r#for: "display-name", "Your name"
+                    input {
+                        id: "display-name",
+                        required: true,
+                        value: "{setup.name}",
+                        oninput: move |event| state.write().auth.setup.name = event.value()
+                    }
+                }
+                form {
+                    onsubmit: move |event| {
+                        event.prevent_default();
+                        dispatch_auth(state, name_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(SetupStep::ChooseWorkspace));
+                    },
+                    Button { r#type: "submit", "Continue" }
+                }
+            }
+        }
         SetupStep::ChooseWorkspace => {
             let new_dispatcher = dispatcher.clone();
             let existing_dispatcher = dispatcher.clone();
@@ -398,42 +423,96 @@ pub fn AuthShell() -> Element {
     });
     let content = match auth.screen {
         Screen::Loading => {
-            rsx! { h1 { "Welcome to LiroxNotes" } p { "Checking secure access..." } }
+            rsx! {
+                div { class: "auth-heading",
+                    h1 { "Welcome to LiroxNotes" }
+                    p { "Checking secure access..." }
+                }
+                div { class: "auth-loading", aria_live: "polite",
+                    span { class: "auth-loading-dot" }
+                    "Preparing your secure workspace"
+                }
+            }
         }
         Screen::RegisterPasskey => {
             rsx! {
-                h1 { "Secure access" }
-                p { "Create a passkey to protect your notes." }
-                label { r#for: "display-name", "Your name"
-                    input {
-                        id: "display-name",
-                        required: true,
-                        value: "{auth.setup.name}",
-                        oninput: move |event| state.write().auth.setup.name = event.value()
+                div { class: "auth-heading",
+                    h1 { "Secure access" }
+                    p { "Create a passkey to keep your notes private. No password to remember." }
+                }
+                div { class: "auth-step", "Step 1 of 2" }
+                div { class: "auth-field",
+                    label { r#for: "display-name", "Your name"
+                        input {
+                            id: "display-name",
+                            required: true,
+                            placeholder: "e.g. Alex Morgan",
+                            value: "{auth.setup.name}",
+                            oninput: move |event| state.write().auth.setup.name = event.value()
+                        }
                     }
                 }
                 input { class: "sr-only", autocomplete: "username webauthn", aria_label: "Use an existing passkey" }
-                 Button { autofocus: true, disabled: auth.operation != AuthOperation::None, aria_label: "Create passkey", onclick: move |_| dispatch_auth(state, register.clone(), crate::app::AuthCommand::RegisterPasskey), "Create passkey" }
-                 if auth.bootstrap.as_ref().is_some_and(|bootstrap| bootstrap.passkey_exists) {
-                     Button { r#type: "button", variant: ButtonVariant::Outline, disabled: auth.operation != AuthOperation::None, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), "Use existing passkey" }
-                 }
+                div { class: "auth-actions",
+                    Button { autofocus: true, disabled: auth.operation != AuthOperation::None || auth.setup.name.trim().is_empty(), aria_label: if auth.operation == AuthOperation::Registering { "Creating passkey" } else { "Create passkey" }, onclick: move |_| dispatch_auth(state, register.clone(), crate::app::AuthCommand::RegisterPasskey), if auth.operation == AuthOperation::Registering { "Creating passkey..." } else { "Create passkey" } }
+                    if auth.bootstrap.as_ref().is_some_and(|bootstrap| bootstrap.passkey_exists) {
+                        Button { r#type: "button", variant: ButtonVariant::Outline, disabled: auth.operation != AuthOperation::None, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), "Use existing passkey" }
+                    }
+                }
+                p { class: "auth-help", "Your browser will ask you to confirm this passkey." }
             }
         }
         Screen::WorkspaceSetup => {
             rsx! { WorkspaceSetupForm { auth } }
         }
         Screen::CreatingWorkspace => {
-            rsx! { h1 { "Creating workspace" } p { "Preparing your notes..." } }
+            rsx! {
+                div { class: "auth-heading",
+                    h1 { "Creating workspace" }
+                    p { "Preparing your notes..." }
+                }
+                div { class: "auth-loading", aria_live: "polite",
+                    span { class: "auth-loading-dot" }
+                    "This usually takes a moment"
+                }
+            }
         }
         Screen::Login => {
-            rsx! { h1 { "Welcome back" } p { "Use your passkey to continue." } Button { autofocus: true, disabled: auth.operation != AuthOperation::None, aria_label: if auth.operation == AuthOperation::LoggingIn { "Signing in" } else { "Sign in with passkey" }, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), if auth.operation == AuthOperation::LoggingIn { "Signing in..." } else { "Sign in with passkey" } } }
+            rsx! {
+                div { class: "auth-heading",
+                    h1 { "Welcome back" }
+                    p { "Use your passkey to return to your notes." }
+                }
+                div { class: "auth-actions",
+                    Button { autofocus: true, disabled: auth.operation != AuthOperation::None, aria_label: if auth.operation == AuthOperation::LoggingIn { "Signing in" } else { "Sign in with passkey" }, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), if auth.operation == AuthOperation::LoggingIn { "Signing in..." } else { "Sign in with passkey" } }
+                }
+                p { class: "auth-help", "Your browser will ask you to confirm this passkey." }
+            }
         }
         Screen::Failure => {
-            rsx! { h1 { "Something went wrong" } p { "{failure}" } Button { onclick: move |_| dispatch_auth(state, retry.clone(), crate::app::AuthCommand::Retry), "Retry" } }
+            rsx! {
+                div { class: "auth-heading",
+                    h1 { "Something went wrong" }
+                    p { "{failure}" }
+                }
+                div { class: "auth-actions",
+                    Button { onclick: move |_| dispatch_auth(state, retry.clone(), crate::app::AuthCommand::Retry), "Try again" }
+                }
+            }
         }
         Screen::Workbench => rsx! {},
     };
-    rsx! { main { id: "auth-shell", class: "grid min-h-screen place-items-center bg-[var(--lirox-bg)] p-6 text-[var(--lirox-fg)]", section { class: "w-full max-w-md space-y-4 rounded-xl border border-[var(--lirox-border)] bg-[var(--lirox-surface)] p-8", {content} } } }
+    rsx! {
+        main { id: "auth-shell", class: "grid min-h-screen place-items-center bg-[var(--lirox-bg)] p-6 text-[var(--lirox-fg)]",
+            section { class: "auth-card w-full max-w-md",
+                header { class: "auth-topline",
+                    strong { "LIROXNOTES" }
+                    span { "PRIVATE BY DEFAULT" }
+                }
+                {content}
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn onboarding_starts_at_workspace_choice_after_registration() {
+    fn onboarding_starts_at_workspace_choice_after_new_passkey() {
         let mut state = crate::app::ApplicationState::empty();
         crate::app::apply_event(
             &mut state,
@@ -481,6 +560,60 @@ mod tests {
         );
 
         assert_eq!(state.auth.setup.step, SetupStep::ChooseWorkspace);
+    }
+
+    #[test]
+    fn new_passkey_registration_persists_the_submitted_name() {
+        let mut state = crate::app::ApplicationState::empty();
+        state.auth.setup.name = "Example User".into();
+        let dispatcher = crate::app::Dispatcher::new();
+
+        dispatcher.dispatch_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::RegistrationSucceeded),
+        );
+
+        assert_eq!(
+            dispatcher.take_effects(),
+            vec![crate::app::Effect::SetupInstallation("Example User".into())]
+        );
+    }
+
+    #[test]
+    fn authenticated_existing_passkey_without_name_stays_on_name_step() {
+        let mut state = crate::app::ApplicationState::empty();
+        let dispatcher = crate::app::Dispatcher::new();
+        let mut bootstrap = BootstrapState::workspace_required();
+        bootstrap.display_name = Some("Example User".into());
+
+        dispatcher.dispatch_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(bootstrap)),
+        );
+        dispatcher.dispatch_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::LoginSucceeded { user: None }),
+        );
+
+        assert_eq!(state.auth.setup.step, SetupStep::ChooseWorkspace);
+    }
+
+    #[test]
+    fn submitting_name_schedules_display_name_persistence() {
+        let mut state = crate::app::ApplicationState::empty();
+        state.auth.setup.name = "Example User".into();
+        state.auth.setup.step = SetupStep::Name;
+        let dispatcher = crate::app::Dispatcher::new();
+
+        dispatcher.dispatch_auth_command(
+            &mut state,
+            crate::app::AuthCommand::SetSetupStep(SetupStep::ChooseWorkspace),
+        );
+
+        assert_eq!(
+            dispatcher.take_effects(),
+            vec![crate::app::Effect::SetupInstallation("Example User".into())]
+        );
     }
 
     #[test]

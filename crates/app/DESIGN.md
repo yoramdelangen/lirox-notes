@@ -39,8 +39,10 @@ Onboarding is a separate setup surface and does not render the workbench shell,
 file tree, editor, Vim status bars, or command palette. It uses a centered,
 single-task flow:
 
-1. Capture the user's name and create a passkey.
-2. Choose a new repository or an existing repository workspace.
+1. New passkey creation collects the user's name on the same screen.
+2. Existing passkeys authenticate first; a missing display name routes to a
+   name step before repository choice.
+3. Choose a new repository or an existing repository workspace.
 3. For a new repository, connect the new local repository to a remote URL and
    branch.
 4. For an existing repository, select a non-empty subpath inside the repository;

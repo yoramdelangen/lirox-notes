@@ -15,7 +15,7 @@ pub mod platform;
 pub mod ui;
 pub mod workspace;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use app::ApplicationEvent;
 use app::{ApplicationState, Dispatcher, Effect};
 pub use ui::WorkspaceShell;
@@ -117,20 +117,29 @@ async fn execute_effect(state: Signal<ApplicationState>, dispatcher: Dispatcher,
     {
         let mut state = state;
         let auto_login = matches!(&effect, Effect::AutoLogin);
-        let result = platform_effect(effect).await;
+        let result = platform_effect(effect.clone()).await;
         let event = match result {
             Ok(Some(event)) => event,
             Ok(None) => return,
-            Err(message) if message.starts_with("gateway returned 401") => {
-                ApplicationEvent::Auth(app::AuthEvent::SessionExpired)
-            }
-            Err(_message) if auto_login => ApplicationEvent::Auth(app::AuthEvent::AutoLoginFailed),
-            Err(message) => ApplicationEvent::Auth(app::AuthEvent::OperationFailed(message)),
+            Err(message) => auth_error_event(&effect, message),
         };
         dispatcher.dispatch_event(&mut state.write(), event);
     }
     #[cfg(not(target_arch = "wasm32"))]
     let _ = (state, dispatcher, effect);
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn auth_error_event(effect: &Effect, message: String) -> ApplicationEvent {
+    if matches!(effect, Effect::AutoLogin) {
+        ApplicationEvent::Auth(app::AuthEvent::AutoLoginFailed)
+    } else if matches!(effect, Effect::Login) {
+        ApplicationEvent::Auth(app::AuthEvent::OperationFailed(message))
+    } else if message.starts_with("gateway returned 401") {
+        ApplicationEvent::Auth(app::AuthEvent::SessionExpired)
+    } else {
+        ApplicationEvent::Auth(app::AuthEvent::OperationFailed(message))
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -183,6 +192,15 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
             Ok(Some(ApplicationEvent::Auth(
                 app::AuthEvent::RegistrationSucceeded,
             )))
+        }
+        Effect::SetupInstallation(user_name) => {
+            web_json(
+                "/api/setup",
+                "POST",
+                Some(serde_json::json!({"user_name": user_name}).to_string()),
+            )
+            .await?;
+            Ok(None)
         }
         effect @ (Effect::Login | Effect::AutoLogin) => {
             let auto = matches!(&effect, Effect::AutoLogin);
@@ -360,6 +378,8 @@ pub fn workspace_note_path_from_location(path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::Effect;
+
     #[test]
     fn parses_note_routes_and_folder_routes() {
         assert_eq!(
@@ -404,5 +424,16 @@ mod tests {
             super::discoverable_public_key_options(&options).unwrap(),
             serde_json::json!({"challenge": "encoded"})
         );
+    }
+
+    #[test]
+    fn login_verification_401_is_a_failed_login_not_a_session_expiry() {
+        let event = super::auth_error_event(&Effect::Login, "gateway returned 401".into());
+
+        assert!(matches!(
+            event,
+            crate::app::ApplicationEvent::Auth(crate::app::AuthEvent::OperationFailed(message))
+                if message == "gateway returned 401"
+        ));
     }
 }
