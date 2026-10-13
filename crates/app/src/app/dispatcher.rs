@@ -33,8 +33,17 @@ impl Dispatcher {
         let event = match command {
             AuthCommand::RegisterPasskey => AuthEvent::RegisterPasskey,
             AuthCommand::Login => AuthEvent::Login,
+            AuthCommand::AutoLogin => AuthEvent::AutoLogin,
             AuthCommand::Logout => AuthEvent::Logout,
             AuthCommand::CreateWorkspace(fields) => AuthEvent::CreateWorkspace(fields),
+            AuthCommand::SetSetupStep(step) => AuthEvent::SetSetupStep(step),
+            AuthCommand::SelectExistingWorkspace(workspace) => {
+                AuthEvent::SelectExistingWorkspace(workspace)
+            }
+            AuthCommand::LoadExistingWorkspaces => AuthEvent::LoadExistingWorkspaces,
+            AuthCommand::InspectRepository { repo_url, branch } => {
+                AuthEvent::InspectRepository { repo_url, branch }
+            }
             AuthCommand::Retry => AuthEvent::Retry,
         };
         self.dispatch_event(state, ApplicationEvent::Auth(event));

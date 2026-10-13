@@ -18,7 +18,11 @@ bun run build:css
 cargo run -p liroxnotes-gateway
 ```
 
-The app starts with an empty workspace and renders empty File Tree and Editor states. The gateway routes remain available for later integration, but the frontend does not currently perform login, onboarding, note saves, Git commits, or synchronization. Frontend API wiring is deferred to a later phase.
+The app starts with passkey onboarding when no workspace is configured. The
+onboarding flow supports creating a repository workspace with a new remote or
+selecting a non-empty subpath inside an existing repository. After setup, the
+app renders the empty or loaded File Tree and Editor states. Note saves, Git
+commits, and synchronization remain separate gateway capabilities.
 
 In development, config and the default workspace live under `.lirox-runtime/`. In release builds, config uses `$XDG_CONFIG_HOME/liroxnotes/config` and the default workspace uses `$XDG_DATA_HOME/liroxnotes/workspace`.
 

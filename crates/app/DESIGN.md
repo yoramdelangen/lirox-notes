@@ -22,6 +22,8 @@ parsing, backend data loading, or backend effects yet.
 - Show the active workspace, selected note when available, surface, mode, and
   pending key sequence.
 - Keep the backend boundary ready without coupling the UI to transport details.
+- Use the existing `packages/editor` CodeMirror surface for Markdown editing;
+  Dioxus owns the surrounding surface chrome and application state.
 
 ## v1 Non-Goals
 
@@ -30,6 +32,24 @@ parsing, backend data loading, or backend effects yet.
 - Search implementation, diagnostics, settings, or a complete command palette.
 - Remote API calls, persistence, Git operations, or filesystem access.
 - A general-purpose layout editor.
+
+## Onboarding Surface
+
+Onboarding is a separate setup surface and does not render the workbench shell,
+file tree, editor, Vim status bars, or command palette. It uses a centered,
+single-task flow:
+
+1. Capture the user's name and create a passkey.
+2. Choose a new repository or an existing repository workspace.
+3. For a new repository, connect the new local repository to a remote URL and
+   branch.
+4. For an existing repository, select a non-empty subpath inside the repository;
+   the repository root is not a valid workspace.
+5. Confirm the workspace name and optional path before saving.
+
+Loading, empty, validation, cancellation, connection, creation, and retryable
+failure states use the same semantic tokens and visible focus treatment as the
+workbench, but remain visually quieter than the editor shell.
 
 ## Product Model
 
@@ -119,6 +139,29 @@ Tailwind CSS is the primary styling system. Use Tailwind utility classes for
 layout, spacing, typography, responsive behavior, and component states. Keep
 custom CSS for shared theme variables, complex surface styling, and browser or
 editor integration only.
+
+### Editor Integration
+
+The Editor surface uses the existing `packages/editor` bundle rather than a
+second textarea-based editor implementation. CodeMirror provides Markdown
+editing, selection, cursor behavior, and editor-local interactions. Dioxus
+provides the title/path header, mode indicator, active-surface treatment, and
+the stable mount root.
+
+The integration follows this direction:
+
+```text
+active note/document state
+        -> EditorSurface mount/update
+        -> packages/editor CodeMirror instance
+        -> lirox-editor-change event
+        -> document state + changed indicator
+```
+
+The editor bundle must be mounted once per root and updated when a different
+note is opened. Saving is still an application command; the editor does not
+call the gateway or persist content itself. Editor-specific CSS belongs in the
+package, while shell, surface chrome, and theme tokens remain app-owned.
 
 ### Theme Tokens
 

@@ -5,4 +5,8 @@ pub enum InputMode {
     #[default]
     Normal,
     Insert,
+    Visual,
+    VisualLine,
+    VisualBlock,
+    Replace,
 }

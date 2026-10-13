@@ -3,6 +3,7 @@ use liroxnotes_shared::WorkspaceView;
 
 use crate::{
     command::{CommandArgs, CommandId, CommandInvocation, CommandSource},
+    components::button::{Button, ButtonSize, ButtonVariant},
     ui::surfaces::FileTreeSurface,
     workspace::{OverlayInputPolicy, OverlayPlacement},
     AppAction, AppContext,
@@ -34,8 +35,10 @@ pub fn OverlayRenderer(
                 aria_label: "File tree overlay",
                 aria_modal: "true",
                 tabindex: "-1",
-                button {
-                    class: "absolute right-3 top-3 z-10 rounded border border-[var(--lirox-border)] bg-[var(--lirox-surface)] px-2 py-1 text-xs hover:bg-[var(--lirox-surface-alt)] focus:outline-none focus:ring-1 focus:ring-[var(--lirox-accent)]",
+                 Button {
+                     class: "absolute right-3 top-3 z-10",
+                     size: ButtonSize::Sm,
+                     variant: ButtonVariant::Outline,
                     autofocus: true,
                     aria_label: "Close file tree overlay",
                     onclick: move |_| dispatcher.dispatch(

@@ -93,6 +93,7 @@ pub struct StoredSession {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct BootstrapResponse {
     pub installed: bool,
+    pub passkey_exists: bool,
     pub onboarding: OnboardingStatus,
     pub authenticated: bool,
     pub user: Option<String>,
@@ -347,7 +348,7 @@ impl AuthService {
     ) -> Result<StoredSession, AuthError> {
         let challenge = self
             .store
-            .load_challenge()?
+            .load_challenge_matching(challenge_id)?
             .ok_or(AuthError::ChallengeNotFound)?;
         if challenge.challenge_id != challenge_id {
             return Err(AuthError::ChallengeMismatch);
@@ -382,9 +383,6 @@ impl AuthService {
     }
 
     pub fn login_options(&self) -> Result<(String, RequestChallengeResponse), AuthError> {
-        if persisted_onboarding_status(&self.store.paths)? != OnboardingStatus::Complete {
-            return Err(AuthError::LoginUnavailable);
-        }
         let account = self
             .store
             .load_account()?
@@ -420,12 +418,9 @@ impl AuthService {
         challenge_id: &str,
         credential: &PublicKeyCredential,
     ) -> Result<StoredSession, AuthError> {
-        if persisted_onboarding_status(&self.store.paths)? != OnboardingStatus::Complete {
-            return Err(AuthError::LoginUnavailable);
-        }
         let challenge = self
             .store
-            .load_challenge()?
+            .load_challenge_matching(challenge_id)?
             .ok_or(AuthError::ChallengeNotFound)?;
         if challenge.challenge_id != challenge_id {
             return Err(AuthError::ChallengeMismatch);
@@ -533,40 +528,72 @@ impl AuthStore {
         let _lock = PERSISTENCE_LOCK
             .lock()
             .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
-        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
+        for name in self.challenge_names()? {
+            let Some(challenge) = self.load(&name, parse_challenge_record)? else {
+                continue;
+            };
+            if challenge.expires_at <= unix_seconds() {
+                self.remove(&name)?;
+                continue;
+            }
+            return Ok(Some(challenge));
+        }
+        Ok(None)
+    }
+
+    fn load_challenge_matching(&self, challenge_id: &str) -> io::Result<Option<ChallengeRecord>> {
+        let _lock = PERSISTENCE_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
+        let name = Self::challenge_name(challenge_id);
+        let name = if self.record_path(&name).is_file() {
+            name
+        } else {
+            "challenge.json".to_string()
+        };
+        let Some(challenge) = self.load(&name, parse_challenge_record)? else {
             return Ok(None);
         };
         if challenge.expires_at <= unix_seconds() {
-            self.remove("challenge.json")?;
+            self.remove(&name)?;
             return Ok(None);
         }
-        Ok(Some(challenge))
+        Ok((challenge.challenge_id == challenge_id).then_some(challenge))
     }
 
     pub fn save_challenge(&self, challenge: &ChallengeRecord) -> io::Result<()> {
-        self.save("challenge.json", challenge, serialize_challenge)
+        self.save(
+            &Self::challenge_name(&challenge.challenge_id),
+            challenge,
+            serialize_challenge,
+        )
     }
 
     pub fn consume_challenge(&self, now: u64) -> io::Result<Option<ChallengeRecord>> {
         let _lock = PERSISTENCE_LOCK
             .lock()
             .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
-        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
-            return Ok(None);
-        };
-        self.remove("challenge.json")?;
-        Ok((challenge.expires_at > now).then_some(challenge))
+        for name in self.challenge_names()? {
+            let Some(challenge) = self.load(&name, parse_challenge_record)? else {
+                continue;
+            };
+            self.remove(&name)?;
+            return Ok((challenge.expires_at > now).then_some(challenge));
+        }
+        Ok(None)
     }
 
     fn consume_challenge_record(&self) -> io::Result<Option<ChallengeRecord>> {
         let _lock = PERSISTENCE_LOCK
             .lock()
             .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
-        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
-            return Ok(None);
-        };
-        self.remove("challenge.json")?;
-        Ok(Some(challenge))
+        for name in self.challenge_names()? {
+            if let Some(challenge) = self.load(&name, parse_challenge_record)? {
+                self.remove(&name)?;
+                return Ok(Some(challenge));
+            }
+        }
+        Ok(None)
     }
 
     fn consume_challenge_record_matching(
@@ -577,14 +604,45 @@ impl AuthStore {
         let _lock = PERSISTENCE_LOCK
             .lock()
             .map_err(|_| io::Error::other("auth persistence lock poisoned"))?;
-        let Some(challenge) = self.load("challenge.json", parse_challenge_record)? else {
+        let name = Self::challenge_name(challenge_id);
+        let name = if self.record_path(&name).is_file() {
+            name
+        } else {
+            "challenge.json".to_string()
+        };
+        let Some(challenge) = self.load(&name, parse_challenge_record)? else {
             return Ok(None);
         };
         if challenge.challenge_id != challenge_id || challenge.expires_at <= now {
             return Ok(None);
         }
-        self.remove("challenge.json")?;
+        self.remove(&name)?;
         Ok(Some(challenge))
+    }
+
+    fn challenge_name(challenge_id: &str) -> String {
+        format!("challenge-{challenge_id}.json")
+    }
+
+    fn challenge_names(&self) -> io::Result<Vec<String>> {
+        let parent = self
+            .paths
+            .config_file
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        let mut names = Vec::new();
+        if self.record_path("challenge.json").is_file() {
+            names.push("challenge.json".to_string());
+        }
+        if let Ok(entries) = fs::read_dir(parent) {
+            for entry in entries {
+                let name = entry?.file_name().to_string_lossy().into_owned();
+                if name.starts_with("challenge-") && name.ends_with(".json") {
+                    names.push(name);
+                }
+            }
+        }
+        Ok(names)
     }
 
     pub fn load_session(&self) -> io::Result<Option<StoredSession>> {
@@ -714,17 +772,25 @@ pub fn bootstrap_response(
     user: Option<String>,
 ) -> io::Result<BootstrapResponse> {
     let installed = is_installed(paths)?;
+    let passkey_exists = AuthStore::new(paths.clone())
+        .load_account()?
+        .is_some_and(|account| !account.credentials.is_empty());
+    let onboarding = persisted_onboarding_status(paths)?;
     let config = load_config(&paths.config_file)?;
     Ok(BootstrapResponse {
         installed,
-        onboarding: persisted_onboarding_status(paths)?,
+        passkey_exists,
+        onboarding: onboarding.clone(),
         authenticated,
         user,
         workspace_root: app_workspace_root(paths)?.to_string_lossy().into_owned(),
-        workspace: config.map(|config| GatewayConfigResponse {
-            slug: config.workspace_slug,
-            name: config.workspace_name,
-        }),
+        workspace: (onboarding == OnboardingStatus::Complete)
+            .then(|| config)
+            .flatten()
+            .map(|config| GatewayConfigResponse {
+                slug: config.workspace_slug,
+                name: config.workspace_name,
+            }),
     })
 }
 
@@ -783,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    fn login_is_rejected_before_explicit_completion() {
+    fn login_options_are_available_before_workspace_completion() {
         let root =
             std::env::temp_dir().join(format!("lirox-auth-login-gate-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
@@ -807,7 +873,7 @@ mod tests {
             .build()
             .unwrap();
         let service = AuthService::new(store, webauthn, 60);
-        assert!(matches!(
+        assert!(!matches!(
             service.login_options(),
             Err(AuthError::LoginUnavailable)
         ));
@@ -881,6 +947,42 @@ mod tests {
         store.save_challenge(&expired).unwrap();
         assert!(store.consume_challenge(2).unwrap().is_none());
         assert!(store.load_challenge().unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn challenge_records_do_not_overwrite_each_other() {
+        let root =
+            std::env::temp_dir().join(format!("lirox-auth-challenges-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let store = AuthStore::new(RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        });
+        let first = ChallengeRecord {
+            version: 1,
+            challenge_id: "first".into(),
+            challenge: "one".into(),
+            operation: ChallengeOperation::Authentication,
+            account_id: Some("account".into()),
+            expires_at: u64::MAX,
+        };
+        let second = ChallengeRecord {
+            challenge_id: "second".into(),
+            challenge: "two".into(),
+            ..first.clone()
+        };
+        store.save_challenge(&first).unwrap();
+        store.save_challenge(&second).unwrap();
+        assert_eq!(
+            store
+                .consume_challenge_record_matching("first", 0)
+                .unwrap()
+                .unwrap()
+                .challenge,
+            "one"
+        );
+        assert_eq!(store.load_challenge().unwrap().unwrap().challenge, "two");
         let _ = std::fs::remove_dir_all(root);
     }
 

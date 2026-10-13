@@ -120,7 +120,7 @@ pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
       if (!window.PublicKeyCredential || !navigator.credentials) throw new Error("WebAuthn is not supported by this browser");
       const response = await fetch("/api/auth/passkeys/register/options", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: "{}" });
        const envelope = await json(response);
-      const publicKey = options(envelope); delete publicKey.challenge_id;
+       const publicKey = options(envelope.publicKey);
       const credential = await navigator.credentials.create({ publicKey });
       const verified = await fetch("/api/auth/passkeys/register/verify", { method: "POST", headers: { "content-type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ challenge_id: envelope.challenge_id, credential: credential.toJSON() }) });
        await json(verified);

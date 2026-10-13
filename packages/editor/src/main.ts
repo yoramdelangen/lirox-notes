@@ -2,6 +2,7 @@ import { minimalSetup } from "codemirror";
 import { javascriptLanguage } from "@codemirror/lang-javascript";
 import { EditorSelection, EditorState, StateField } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
+import { getCM, vim } from "@replit/codemirror-vim";
 import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { Decoration, DecorationSet, EditorView, WidgetType, lineNumbers, showPanel, type Panel } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
@@ -18,6 +19,7 @@ type EditorRoot = HTMLElement & {
 
 type EditorEventDetail = {
   doc: string;
+  mode: string;
   title: string;
   hasHeading: boolean;
   headingLevel: number;
@@ -561,6 +563,11 @@ const getTitleText = (doc: string) => {
   return heading.title;
 };
 
+const readEditorMode = (view: EditorView) => {
+  const vimState = (getCM(view)?.state as unknown as { vim?: { mode?: string } }).vim;
+  return vimState?.mode ?? "normal";
+};
+
 const readEditorDetail = (view: EditorView): EditorEventDetail => {
   const doc = view.state.doc.toString();
   const heading = splitHeading(doc);
@@ -568,6 +575,7 @@ const readEditorDetail = (view: EditorView): EditorEventDetail => {
 
   return {
     doc,
+    mode: readEditorMode(view),
     title: getTitleText(doc),
     hasHeading: heading.exists,
     headingLevel: heading.level,
@@ -911,6 +919,7 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
   root.style.margin = "0 auto";
 
   const extensions = [
+    vim(),
     minimalSetup,
     EditorView.lineWrapping,
     markdown({ defaultCodeLanguage: javascriptLanguage }),
@@ -944,6 +953,8 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
     state,
     parent: root
   });
+
+  getCM(view)?.on("vim-mode-change", () => emitEditorState(root, view));
 
   emitEditorState(root, view);
 
@@ -986,4 +997,19 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", mountAllLiroxNotesEditors, { once: true });
 } else {
   mountAllLiroxNotesEditors();
+}
+
+if (document.documentElement) {
+  const observer = new MutationObserver(() => {
+    if (!document.querySelector("[data-lirox-editor-root]")) {
+      return;
+    }
+    mountAllLiroxNotesEditors();
+    observer.disconnect();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  if (document.querySelector("[data-lirox-editor-root]")) {
+    mountAllLiroxNotesEditors();
+    observer.disconnect();
+  }
 }

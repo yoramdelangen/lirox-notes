@@ -12,10 +12,14 @@ pub enum Effect {
     SaveDocument { path: String, content: String },
     Bootstrap,
     LoadWorkspace,
+    LoadWorkspaceNote(String),
     RegisterPasskey,
     Login,
+    AutoLogin,
     Logout,
     CreateWorkspace(crate::auth::SetupFields),
+    LoadExistingWorkspaces,
+    InspectRepository { repo_url: String, branch: String },
 }
 
 pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec<Effect> {
@@ -64,6 +68,10 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             auth.operation = AuthOperation::LoggingIn;
             vec![Effect::Login]
         }
+        AuthEvent::AutoLogin => {
+            auth.operation = AuthOperation::LoggingIn;
+            vec![Effect::AutoLogin]
+        }
         AuthEvent::Logout => {
             auth.operation = AuthOperation::LoggingOut;
             vec![Effect::Logout]
@@ -73,6 +81,35 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             auth.operation = AuthOperation::CreatingWorkspace;
             auth.screen = Screen::CreatingWorkspace;
             vec![Effect::CreateWorkspace(fields)]
+        }
+        AuthEvent::SetSetupStep(step) => {
+            auth.setup.step = step;
+            auth.failure = None;
+            auth.operation = AuthOperation::None;
+            vec![]
+        }
+        AuthEvent::SelectExistingWorkspace(workspace) => {
+            auth.setup.remote = true;
+            auth.setup.repository_path = workspace.repository;
+            auth.setup.branch = workspace.branch;
+            auth.setup.path = workspace.path;
+            if let Some(name) = workspace.workspace_name {
+                auth.setup.name = name.clone();
+                auth.setup.slug = crate::auth::slug_from_name(&name);
+            }
+            auth.setup.step = crate::auth::SetupStep::Finish;
+            auth.operation = AuthOperation::None;
+            vec![]
+        }
+        AuthEvent::LoadExistingWorkspaces => vec![Effect::LoadExistingWorkspaces],
+        AuthEvent::ExistingWorkspacesLoaded(workspaces) => {
+            auth.existing_workspaces = workspaces;
+            auth.operation = AuthOperation::None;
+            vec![]
+        }
+        AuthEvent::InspectRepository { repo_url, branch } => {
+            auth.operation = AuthOperation::InspectingRepository;
+            vec![Effect::InspectRepository { repo_url, branch }]
         }
         AuthEvent::Retry => {
             auth.failure = None;
@@ -90,9 +127,15 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             auth.screen = Screen::Failure;
             vec![]
         }
+        AuthEvent::AutoLoginFailed => {
+            auth.operation = AuthOperation::None;
+            auth.screen = Screen::RegisterPasskey;
+            vec![]
+        }
         AuthEvent::RegistrationSucceeded => {
             auth.operation = AuthOperation::None;
             auth.screen = Screen::WorkspaceSetup;
+            auth.setup.step = crate::auth::SetupStep::ChooseWorkspace;
             if let Some(bootstrap) = auth.bootstrap.as_mut() {
                 bootstrap.onboarding = OnboardingStatus::WorkspaceRequired;
                 bootstrap.authenticated = true;
@@ -127,6 +170,9 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             vec![]
         }
         AuthEvent::WorkspaceLoaded(view) => {
+            let hydrated = ApplicationState::from_workspace_view(&view);
+            state.domain = hydrated.domain;
+            state.workspace = hydrated.workspace;
             auth.operation = AuthOperation::None;
             auth.workspace = Some(view);
             if auth.bootstrap.as_ref().is_some_and(|bootstrap| {
@@ -134,6 +180,16 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             }) {
                 auth.screen = Screen::Workbench;
             }
+            vec![]
+        }
+        AuthEvent::RepositoryInspected { name, slug } => {
+            if let Some(name) = name {
+                auth.setup.name = name;
+            }
+            if let Some(slug) = slug {
+                auth.setup.slug = slug;
+            }
+            auth.operation = AuthOperation::None;
             vec![]
         }
         AuthEvent::SessionExpired => {
@@ -166,18 +222,19 @@ pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation
             Vec::new()
         }
         "workspace.focus_next_surface" => {
-            if state
-                .workspace
-                .layout
-                .contains(crate::command::SurfaceId::FILE_TREE)
-            {
-                state.workspace.focus.active_surface = crate::command::SurfaceId::FILE_TREE;
+            if state.workspace.focus.active_surface == crate::command::SurfaceId::FILE_TREE {
+                state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
             }
             Vec::new()
         }
         "workspace.focus_previous_surface" => {
-            if state.workspace.focus.active_surface == crate::command::SurfaceId::FILE_TREE {
-                state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
+            if state.workspace.focus.active_surface == crate::command::SurfaceId::EDITOR
+                && state
+                    .workspace
+                    .layout
+                    .contains(crate::command::SurfaceId::FILE_TREE)
+            {
+                state.workspace.focus.active_surface = crate::command::SurfaceId::FILE_TREE;
             }
             Vec::new()
         }
@@ -241,15 +298,12 @@ fn move_selection(state: &mut ApplicationState, direction: Direction) -> Vec<Eff
 
 fn open_selected(state: &mut ApplicationState) -> Vec<Effect> {
     let path = state.domain.selected_note.clone();
-    if let Some(path) = path.as_deref() {
-        state.domain.open_note(path);
-    }
     state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
     state
         .workspace
         .overlays
         .remove_surface(crate::command::SurfaceId::FILE_TREE);
-    Vec::new()
+    path.map(Effect::LoadWorkspaceNote).into_iter().collect()
 }
 
 fn save_document(state: &mut ApplicationState) -> Vec<Effect> {

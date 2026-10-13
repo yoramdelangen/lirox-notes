@@ -12,8 +12,8 @@ context by an AI system.
   recommended.
 - The server binds to `127.0.0.1` only. The port defaults to `3010`.
 - API responses receive development CORS headers in debug builds, or when
-  `LIROX_DEV_CORS` is set. Allowed origin is `http://localhost:8989` and
-  credentials are allowed.
+  `LIROX_DEV_CORS` is set. The allowed origin is `LIROX_RP_ORIGIN` when set,
+  otherwise `http://localhost:8989`; credentials are allowed.
 
 ## Authentication
 
@@ -74,7 +74,8 @@ JSON API failures use the JSON envelope.
 | `POST` | `/api/auth/passkeys/login/verify` | No | `200` authenticated + cookie |
 | `POST` | `/api/auth/logout` | No | `200` `SessionResponse` + cleared cookie |
 | `POST` | `/api/setup` | Yes | `201` `SessionResponse` |
-| `GET` | `/api/workspaces` | Yes | `200` array of `WorkspaceResponse` |
+| `GET` | `/api/workspaces` | Yes | `200` array of `ExistingWorkspaceResponse` |
+| `POST` | `/api/workspaces/inspect` | Yes | `200` `RepositoryMetadata` |
 | `POST` | `/api/workspaces` | Yes | `201` `WorkspaceResponse` |
 | `GET` | `/api/workspaces/{workspace}` | Yes | `200` `WorkspaceResponse` |
 | `POST` | `/api/workspaces/{workspace}/sync` | Yes | `200` `SyncResponse` |
@@ -110,8 +111,9 @@ may register a fresh passkey.
 
 `POST /api/auth/passkeys/login/options` returns library-generated request
 options and a short-lived `challenge_id`. Its verify request has the same JSON
-shape, with the browser authentication response in `credential`. Login before
-explicit onboarding completion is rejected with `400`.
+shape, with the browser authentication response in `credential`. Login is also
+available before workspace completion so an existing passkey can resume
+onboarding; successful authentication still requires workspace setup.
 
 Missing, expired, reused, mismatched, or invalid challenges return the common
 JSON error envelope with a stable non-sensitive message.
@@ -124,11 +126,13 @@ state used by the app startup gate.
 Response: `200` with `BootstrapResponse`:
 
 ```json
-{"installed":true,"onboarding":"Complete","authenticated":true,"user":"local","workspace_root":"/path/to/workspaces","workspace":{"slug":"notes","name":"Notes"}}
+{"installed":true,"passkey_exists":true,"onboarding":"Complete","authenticated":true,"user":"local","workspace_root":"/path/to/workspaces","workspace":{"slug":"notes","name":"Notes"}}
 ```
 
 `onboarding` is `NotStarted`, `WorkspaceRequired`, or `Complete`. `Complete`
 is only returned after explicit workspace bootstrap completion is persisted.
+`passkey_exists` indicates that the gateway has a registered passkey and allows
+the client to attempt existing-passkey discovery during onboarding.
 
 ### `GET /api/auth`
 
@@ -182,19 +186,23 @@ Failures use the common JSON error envelope: missing passkey session returns
 
 ### `GET /api/workspaces`
 
-Lists configured workspaces. The current implementation returns an array with
-zero or one item, not a multi-workspace store.
+Lists reusable workspace subpaths discovered beneath the configured workspace
+root. Repository roots are omitted because an existing workspace must select a
+non-empty subpath inside a repository.
 
-Requirements: valid session and configured workspace.
+Requirements: valid session.
 
-Success: `200` with `WorkspaceResponse[]`.
+Success: `200` with an array such as:
 
-Failure: `400` JSON `workspace is not configured`.
+```json
+[{"repository":"notes","branch":"main","path":"personal","workspace_name":null}]
+```
 
 ### `POST /api/workspaces`
 
-Creates or replaces the configured workspace profile. It creates a local Git
-workspace, or clones a remote repository when `repo_mode` is `remote`.
+Creates or replaces the configured workspace profile. A new workspace creates
+a local Git repository and attaches `repo_url` as `origin` when supplied. An
+existing workspace reuses a repository and a non-empty subpath inside it.
 
 Authentication: a valid `lirox_session` cookie is required. Passkey registration
 must precede this route; there is no unauthenticated workspace-creation
@@ -205,13 +213,18 @@ Request body: JSON `WorkspaceRequest`.
 
 | Field | Type | Required | Behavior |
 |---|---|---:|---|
-| `repo_mode` | string | No | Only `remote` uses `repo_url`; other values create a local workspace |
+| `repo_mode` | string | No | `existing` reuses a repository subpath; other values create a local workspace |
 | `workspace_slug` | string | No | Slugified; defaults to the repo name or `workspace` |
 | `workspace_name` | string | No | Defaults to `My Workspace` |
-| `repo_url` | string | No | Remote URL when `repo_mode` is `remote`; otherwise cleared |
+| `repo_url` | string | No | Remote URL or scp-style SSH remote such as `git@host:owner/repo.git` for a new workspace |
+| `repository_path` | string | No | Existing repository path relative to the configured workspace root; required for `repo_mode=existing` |
+| `workspace_path` | string | No | Existing workspace subpath inside `repository_path`; required and non-empty for `repo_mode=existing` |
 | `branch` | string | No | Defaults to `main` |
 
-The workspace path is derived from the installed workspace root and the slug.
+For new workspaces, the path is derived from the installed workspace root and
+the slug. For existing workspaces, the selected repository and subpath form
+the configured path; repository roots and paths escaping the workspace root
+are rejected.
 
 Success: `201` with `WorkspaceResponse`. After workspace creation, Git setup,
 and configuration persistence all succeed, the install marker also records
@@ -229,6 +242,31 @@ before a later operation failed, the missing completion line keeps the state
 retryable. A pre-existing config without the explicit
 completion marker is treated the same way; legacy password records are ignored
 and require fresh passkey registration rather than being authenticated.
+
+### `POST /api/workspaces/inspect`
+
+Clones a remote repository into a temporary directory and reads optional
+workspace metadata from `.lirox.toml` under `[workspace]`. The temporary clone
+is removed before the response is returned.
+
+Authentication: a valid `lirox_session` cookie is required.
+
+Request body:
+
+```json
+{"repo_url":"https://example.com/notes.git","branch":"main"}
+```
+
+`branch` is optional and defaults to `main`.
+
+Success: `200` with `RepositoryMetadata`:
+
+```json
+{"name":"Team Notes","slug":"team-notes"}
+```
+
+Both fields are optional. Missing or unreadable metadata returns `{}`. Clone,
+URL, or branch failures return `400` with the common JSON error envelope.
 
 ### `GET /api/workspaces/{workspace}`
 

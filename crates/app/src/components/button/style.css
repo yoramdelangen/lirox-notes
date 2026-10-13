@@ -1,0 +1,66 @@
+.dx-button {
+  display: inline-flex;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--lirox-border);
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  gap: 0.5rem;
+  line-height: 1.25rem;
+  outline: none;
+  transition: background-color 150ms, border-color 150ms, color 150ms;
+  white-space: nowrap;
+}
+
+.dx-button[data-style="primary"] {
+  background: var(--lirox-accent);
+  color: var(--lirox-bg);
+}
+
+.dx-button[data-style="secondary"],
+.dx-button[data-style="outline"] {
+  background: var(--lirox-surface);
+  color: var(--lirox-fg);
+}
+
+.dx-button[data-style="ghost"] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--lirox-fg);
+}
+
+.dx-button[data-style="destructive"] {
+  background: var(--lirox-error);
+  color: var(--lirox-bg);
+}
+
+.dx-button[data-style="link"] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--lirox-accent);
+  text-decoration: underline;
+}
+
+.dx-button:not(:disabled):hover {
+  background: var(--lirox-surface-alt);
+}
+
+.dx-button[data-style="primary"]:not(:disabled):hover {
+  background: var(--lirox-fg);
+}
+
+.dx-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--lirox-accent);
+}
+
+.dx-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

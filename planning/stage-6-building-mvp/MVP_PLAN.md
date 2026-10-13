@@ -31,6 +31,7 @@
 - Create the workspace structure.
 - Serve a Dioxus app from Actix.
 - Show the Zed/Bear-inspired shell with mock workspace data.
-- Open and edit one Markdown note through CodeMirror.
+- Open and edit one Markdown note through the existing `packages/editor`
+  CodeMirror bundle mounted inside the Dioxus Editor surface.
 - Save the note through the gateway into a temporary workspace folder.
 - Show changed state in the file tree, notes overview, and status bar.

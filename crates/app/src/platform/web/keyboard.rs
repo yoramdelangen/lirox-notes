@@ -23,6 +23,8 @@ fn normalize_key(
             }
         }
         dioxus::html::Key::Enter => Key::Enter,
+        dioxus::html::Key::ArrowUp => Key::ArrowUp,
+        dioxus::html::Key::ArrowDown => Key::ArrowDown,
         dioxus::html::Key::Escape => Key::Escape,
         dioxus::html::Key::Tab => Key::Tab,
         dioxus::html::Key::Backspace => Key::Backspace,
@@ -112,6 +114,24 @@ mod tests {
         assert_eq!(
             normalize_key(BrowserKey::Character(" ".into()), BrowserModifiers::empty()),
             Some(InputEvent::Key(KeyStroke::new(Key::Space, Modifiers::NONE)))
+        );
+    }
+
+    #[test]
+    fn normalizes_vertical_arrows() {
+        assert_eq!(
+            normalize_key(BrowserKey::ArrowUp, BrowserModifiers::empty()),
+            Some(InputEvent::Key(KeyStroke::new(
+                Key::ArrowUp,
+                Modifiers::NONE
+            )))
+        );
+        assert_eq!(
+            normalize_key(BrowserKey::ArrowDown, BrowserModifiers::empty()),
+            Some(InputEvent::Key(KeyStroke::new(
+                Key::ArrowDown,
+                Modifiers::NONE
+            )))
         );
     }
 }

@@ -55,6 +55,23 @@ pub fn defaults() -> AppConfig {
             CommandArgs::None,
         ),
         binding(
+            InputScope::Workspace,
+            normal,
+            keys([Key::Tab]),
+            "workspace.focus_next_surface",
+            CommandArgs::None,
+        ),
+        binding(
+            InputScope::Workspace,
+            normal,
+            KeySequence::from(vec![KeyStroke::new(
+                Key::Tab,
+                Modifiers::new(false, false, true, false),
+            )]),
+            "workspace.focus_previous_surface",
+            CommandArgs::None,
+        ),
+        binding(
             global.clone(),
             None,
             keys([Key::Escape]),
@@ -74,6 +91,20 @@ pub fn defaults() -> AppConfig {
             keys([Key::Char('k')]),
             "file_tree.move_up",
             CommandArgs::Direction(Direction::Up),
+        ),
+        binding(
+            file_tree.clone(),
+            normal,
+            keys([Key::ArrowUp]),
+            "file_tree.move_up",
+            CommandArgs::Direction(Direction::Up),
+        ),
+        binding(
+            file_tree.clone(),
+            normal,
+            keys([Key::ArrowDown]),
+            "file_tree.move_down",
+            CommandArgs::Direction(Direction::Down),
         ),
         binding(
             file_tree,

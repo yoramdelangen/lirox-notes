@@ -10,6 +10,10 @@ pub fn BottomBar(view: WorkspaceView, browser_dir: String) -> Element {
     let mode = match state.input.mode {
         InputMode::Normal => "NORMAL",
         InputMode::Insert => "INSERT",
+        InputMode::Visual => "VISUAL",
+        InputMode::VisualLine => "VISUAL LINE",
+        InputMode::VisualBlock => "VISUAL BLOCK",
+        InputMode::Replace => "REPLACE",
     };
     let surface = if state.workspace.focus.active_surface == SurfaceId::FILE_TREE {
         "FILE TREE"

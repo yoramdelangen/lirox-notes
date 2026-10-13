@@ -17,10 +17,11 @@ use std::{
     env, fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    process::Command,
+    process::{Command, Output, Stdio},
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use uuid::Uuid;
 use webauthn_rs::prelude::{PublicKeyCredential, RegisterPublicKeyCredential};
 
 pub mod auth;
@@ -94,12 +95,28 @@ struct WorkspaceRequest {
     workspace_slug: Option<String>,
     workspace_name: Option<String>,
     repo_url: Option<String>,
+    repository_path: Option<String>,
+    workspace_path: Option<String>,
     branch: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ExistingWorkspaceResponse {
+    repository: String,
+    branch: String,
+    path: String,
+    workspace_name: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct InstallRequest {
     workspace_root: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RepositoryInspectRequest {
+    repo_url: String,
+    branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -454,6 +471,11 @@ fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(workspace)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env(
+            "GIT_SSH_COMMAND",
+            "ssh -o BatchMode=yes -o ConnectTimeout=15",
+        )
         .output()?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -466,17 +488,14 @@ fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
 }
 
 fn clone_git(repo_url: &str, branch: &str, destination: &Path) -> std::io::Result<()> {
-    let output = Command::new("git")
-        .args(["clone", "--branch", branch, "--single-branch", repo_url])
-        .arg(destination)
-        .output()?;
+    let output = git_clone_command(
+        ["clone", "--branch", branch, "--single-branch", repo_url],
+        destination,
+    )?;
     if output.status.success() {
         Ok(())
     } else if String::from_utf8_lossy(&output.stderr).contains("Remote branch") {
-        let fallback = Command::new("git")
-            .args(["clone", repo_url])
-            .arg(destination)
-            .output()?;
+        let fallback = git_clone_command(["clone", repo_url], destination)?;
         if fallback.status.success() {
             Ok(())
         } else {
@@ -491,6 +510,54 @@ fn clone_git(repo_url: &str, branch: &str, destination: &Path) -> std::io::Resul
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ))
     }
+}
+
+fn git_clone_command<const N: usize>(
+    args: [&str; N],
+    destination: &Path,
+) -> std::io::Result<Output> {
+    let mut child = Command::new("git")
+        .args(args)
+        .arg(destination)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env(
+            "GIT_SSH_COMMAND",
+            "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=3",
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        if child.try_wait()?.is_some() {
+            return child.wait_with_output();
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            let _ = child.wait_with_output();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Git clone timed out after 60 seconds",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn inspect_repository(repo_url: &str, branch: &str) -> std::io::Result<RepositoryMetadata> {
+    let destination = env::temp_dir().join(format!("lirox-inspect-{}", Uuid::new_v4()));
+    let result = clone_git(repo_url, branch, &destination).and_then(|_| {
+        let config = [".lirox.toml", ".liroxnotes.toml"]
+            .iter()
+            .map(|name| destination.join(name))
+            .find(|path| path.is_file());
+        Ok(config
+            .and_then(|path| fs::read_to_string(path).ok())
+            .and_then(|contents| parse_lirox_toml(&contents))
+            .unwrap_or_default())
+    });
+    let _ = fs::remove_dir_all(&destination);
+    result
 }
 
 fn workspace_slug_from_repo_url(repo_url: &str) -> Option<String> {
@@ -520,6 +587,37 @@ pub fn slugify(value: &str) -> Option<String> {
         slug.pop();
     }
     (!slug.is_empty()).then_some(slug)
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+struct RepositoryMetadata {
+    name: Option<String>,
+    slug: Option<String>,
+}
+
+fn parse_lirox_toml(input: &str) -> Option<RepositoryMetadata> {
+    let mut metadata = RepositoryMetadata::default();
+    let mut in_workspace = false;
+    for line in input.lines() {
+        let line = line.split_once('#').map_or(line, |(line, _)| line).trim();
+        if line.starts_with('[') {
+            in_workspace = line == "[workspace]";
+            continue;
+        }
+        if !in_workspace {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches(['"', '\'']);
+        match key.trim() {
+            "name" if !value.is_empty() => metadata.name = Some(value.to_string()),
+            "slug" if !value.is_empty() => metadata.slug = slugify(value),
+            _ => {}
+        }
+    }
+    (metadata.name.is_some() || metadata.slug.is_some()).then_some(metadata)
 }
 
 pub fn ensure_workspace(workspace: &Path) -> std::io::Result<()> {
@@ -796,10 +894,12 @@ fn cors(response: &mut HttpResponse) {
         return;
     }
 
-    response.headers_mut().insert(
-        ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("http://localhost:8989"),
-    );
+    let origin = env::var("LIROX_RP_ORIGIN").unwrap_or_else(|_| "http://localhost:8989".into());
+    if let Ok(origin) = HeaderValue::try_from(origin) {
+        response
+            .headers_mut()
+            .insert(ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+    }
     response.headers_mut().insert(
         ACCESS_CONTROL_ALLOW_CREDENTIALS,
         HeaderValue::from_static("true"),
@@ -895,6 +995,103 @@ fn onboarding_status(paths: &RuntimePaths) -> std::io::Result<auth::OnboardingSt
 
 fn repo_mode_is_remote(mode: Option<&str>) -> bool {
     mode == Some("remote")
+}
+
+fn repo_mode_is_existing(mode: Option<&str>) -> bool {
+    mode == Some("existing")
+}
+
+fn valid_existing_workspace_subpath(value: &str) -> bool {
+    let path = Path::new(value.trim());
+    !value.trim().is_empty()
+        && path != Path::new(".")
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| !matches!(component, Component::ParentDir))
+}
+
+fn valid_relative_path(value: &str) -> bool {
+    let path = Path::new(value.trim());
+    !value.trim().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn valid_repository_path(value: &str) -> bool {
+    value.trim() == "." || valid_relative_path(value)
+}
+
+fn existing_workspaces(root: &Path) -> std::io::Result<Vec<ExistingWorkspaceResponse>> {
+    fs::create_dir_all(root)?;
+    let mut repositories = Vec::new();
+    discover_repositories(root, root, &mut repositories)?;
+    let mut workspaces = Vec::new();
+    for repository in repositories {
+        let branch = run_git(&repository, &["branch", "--show-current"])
+            .unwrap_or_else(|_| "main".to_string());
+        let repository_name = repository
+            .strip_prefix(root)
+            .unwrap_or(&repository)
+            .to_string_lossy()
+            .trim_matches('/')
+            .to_string();
+        let repository_name = if repository_name.is_empty() {
+            ".".to_string()
+        } else {
+            repository_name
+        };
+        let mut children = Vec::new();
+        collect_subpaths(&repository, &repository, &mut children)?;
+        for path in children {
+            workspaces.push(ExistingWorkspaceResponse {
+                repository: repository_name.clone(),
+                branch: branch.clone(),
+                path,
+                workspace_name: None,
+            });
+        }
+    }
+    Ok(workspaces)
+}
+
+fn discover_repositories(
+    root: &Path,
+    dir: &Path,
+    repositories: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    if dir.join(".git").exists() {
+        repositories.push(dir.to_path_buf());
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() && path.file_name().and_then(|name| name.to_str()) != Some(".git") {
+            discover_repositories(root, &path, repositories)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_subpaths(root: &Path, dir: &Path, paths: &mut Vec<String>) -> std::io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if !path.is_dir() || path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+        if valid_existing_workspace_subpath(&relative) {
+            paths.push(relative);
+        }
+        collect_subpaths(root, &path, paths)?;
+    }
+    Ok(())
 }
 
 fn install_page(paths: &RuntimePaths) -> HttpResponse {
@@ -1086,6 +1283,29 @@ mod ssr_tests {
         assert!(!body.contains("action=\"/install\""));
         assert!(body.contains("/api/auth/passkeys/register/options"));
         assert!(body.contains("/api/workspaces"));
+    }
+
+    #[test]
+    fn derives_workspace_slug_from_name() {
+        assert_eq!(slugify("Team Notes").as_deref(), Some("team-notes"));
+    }
+
+    #[test]
+    fn existing_workspace_subpaths_must_not_be_repository_roots() {
+        assert!(!valid_existing_workspace_subpath(""));
+        assert!(!valid_existing_workspace_subpath("."));
+        assert!(!valid_existing_workspace_subpath("../notes"));
+        assert!(!valid_existing_workspace_subpath("notes/../../outside"));
+        assert!(valid_existing_workspace_subpath("projects/notes"));
+    }
+
+    #[test]
+    fn parses_workspace_metadata_from_lirox_toml() {
+        let metadata =
+            parse_lirox_toml("[workspace]\nname = \"Team Notes\"\nslug = \"team-notes\"\n")
+                .unwrap();
+        assert_eq!(metadata.name.as_deref(), Some("Team Notes"));
+        assert_eq!(metadata.slug.as_deref(), Some("team-notes"));
     }
 
     #[test]
@@ -1532,7 +1752,10 @@ async fn passkey_register_verify(
             cors(&mut response);
             Ok(response)
         }
-        Err(error) => Ok(passkey_error(error)),
+        Err(error) => {
+            eprintln!("passkey registration verification failed: {error:?}");
+            Ok(passkey_error(error))
+        }
     }
 }
 
@@ -1575,7 +1798,10 @@ async fn passkey_login_verify(
             cors(&mut response);
             Ok(response)
         }
-        Err(error) => Ok(passkey_error(error)),
+        Err(error) => {
+            eprintln!("passkey login verification failed: {error:?}");
+            Ok(passkey_error(error))
+        }
     }
 }
 
@@ -1641,13 +1867,36 @@ async fn workspaces_api(state: web::Data<AppState>, req: HttpRequest) -> Result<
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    let Some(config) = configured(&state)? else {
-        return Ok(api_error(
-            actix_web::http::StatusCode::BAD_REQUEST,
-            "workspace is not configured",
-        ));
+    let root = app_workspace_root(&state.paths)?;
+    let mut response = HttpResponse::Ok().json(existing_workspaces(&root)?);
+    cors(&mut response);
+    Ok(response)
+}
+
+#[post("/api/workspaces/inspect")]
+async fn inspect_workspace_api(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    request: web::Json<RepositoryInspectRequest>,
+) -> Result<HttpResponse> {
+    if let Some(response) = require_auth_api(&req, &state.paths)? {
+        return Ok(response);
+    }
+    let branch = request
+        .branch
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("main");
+    let metadata = match inspect_repository(&request.repo_url, branch) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Ok(api_error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                &error.to_string(),
+            ))
+        }
     };
-    let mut response = HttpResponse::Ok().json(vec![workspace_summary(&config)?]);
+    let mut response = HttpResponse::Ok().json(metadata);
     cors(&mut response);
     Ok(response)
 }
@@ -1661,10 +1910,41 @@ async fn create_workspace_api(
     if let Some(response) = require_auth_api(&req, &state.paths)? {
         return Ok(response);
     }
-    let repo_url = if repo_mode_is_remote(request.repo_mode.as_deref()) {
-        request.repo_url.clone().unwrap_or_default()
+    let existing = repo_mode_is_existing(request.repo_mode.as_deref());
+    let workspace_root = app_workspace_root(&state.paths)?;
+    let repository_path = request.repository_path.as_deref().unwrap_or("");
+    let subpath = request.workspace_path.as_deref().unwrap_or("");
+    let (repo_url, workspace_path) = if existing {
+        if !valid_repository_path(repository_path) || !valid_existing_workspace_subpath(subpath) {
+            return Ok(api_error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "existing workspaces require a repository and non-empty relative subpath",
+            ));
+        }
+        let repository = workspace_root.join(repository_path);
+        if !repository.join(".git").exists() {
+            return Ok(api_error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                "repository not found",
+            ));
+        }
+        let repo_url = run_git(&repository, &["remote", "get-url", "origin"]).unwrap_or_default();
+        (repo_url, repository.join(subpath))
     } else {
-        String::new()
+        (
+            request.repo_url.clone().unwrap_or_default(),
+            workspace_root.clone().join(
+                request
+                    .workspace_slug
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                    .and_then(|value| slugify(&value))
+                    .or_else(|| {
+                        workspace_slug_from_repo_url(request.repo_url.as_deref().unwrap_or(""))
+                    })
+                    .unwrap_or_else(|| "workspace".to_string()),
+            ),
+        )
     };
     let workspace_slug = request
         .workspace_slug
@@ -1673,7 +1953,6 @@ async fn create_workspace_api(
         .and_then(|value| slugify(&value))
         .or_else(|| workspace_slug_from_repo_url(&repo_url))
         .unwrap_or_else(|| "workspace".to_string());
-    let workspace_root = app_workspace_root(&state.paths)?;
     let config = GatewayConfig {
         workspace_slug: workspace_slug.clone(),
         workspace_name: request
@@ -1681,7 +1960,7 @@ async fn create_workspace_api(
             .clone()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "My Workspace".to_string()),
-        workspace_path: workspace_root.join(workspace_slug),
+        workspace_path,
         repo_url,
         branch: request
             .branch

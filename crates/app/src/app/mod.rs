@@ -53,6 +53,15 @@ mod tests {
     }
 
     #[test]
+    fn focus_previous_from_editor_selects_the_file_tree() {
+        let mut state = ApplicationState::empty();
+
+        dispatch(&mut state, command("workspace.focus_previous_surface"));
+
+        assert_eq!(state.workspace.focus.active_surface, SurfaceId::FILE_TREE);
+    }
+
+    #[test]
     fn moving_file_tree_selection_with_no_notes_sets_status_without_panicking() {
         let mut state = ApplicationState::empty();
 
@@ -88,6 +97,22 @@ mod tests {
         let mut docked = ApplicationState::empty();
         dispatch(&mut docked, command("file_tree.open_selected"));
         assert_eq!(docked.workspace.overlays.top(), None);
+    }
+
+    #[test]
+    fn opening_selected_note_requests_its_document() {
+        let mut state = ApplicationState::empty();
+        state.domain.notes = vec![crate::domain::Note {
+            path: "notes/second.md".into(),
+            title: "Second".into(),
+            body: String::new(),
+        }];
+        state.domain.selected_note = Some("notes/second.md".into());
+
+        assert_eq!(
+            dispatch(&mut state, command("file_tree.open_selected")),
+            vec![Effect::LoadWorkspaceNote("notes/second.md".into())]
+        );
     }
 
     #[test]

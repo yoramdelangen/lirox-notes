@@ -3,6 +3,7 @@ use liroxnotes_shared::WorkspaceView;
 
 use crate::{
     command::{CommandArgs, CommandId, CommandInvocation, CommandSource},
+    components::button::{Button, ButtonSize, ButtonVariant},
     AppAction, AppContext,
 };
 
@@ -23,8 +24,9 @@ pub fn TopBar(view: WorkspaceView, on_action: Option<EventHandler<AppAction>>) -
                 p { class: "truncate text-xs text-[var(--lirox-muted)]", "{view.branch} · {view.selected_note.path}" }
             }
             nav { class: "flex shrink-0 gap-2", "aria-label": "Workspace actions",
-                button {
-                    class: "rounded border border-[var(--lirox-border)] px-2 py-1 text-xs hover:bg-[var(--lirox-surface-alt)] focus:outline-none focus:ring-1 focus:ring-[var(--lirox-accent)]",
+                 Button {
+                     size: ButtonSize::Sm,
+                     variant: ButtonVariant::Outline,
                     "aria-label": "Toggle file tree",
                     onclick: move |_| {
                         if let Some(handler) = tree_action.as_ref() {
@@ -39,8 +41,9 @@ pub fn TopBar(view: WorkspaceView, on_action: Option<EventHandler<AppAction>>) -
                     },
                     "Tree"
                 }
-                button {
-                    class: "rounded border border-[var(--lirox-border)] px-2 py-1 text-xs hover:bg-[var(--lirox-surface-alt)] focus:outline-none focus:ring-1 focus:ring-[var(--lirox-accent)]",
+                 Button {
+                     size: ButtonSize::Sm,
+                     variant: ButtonVariant::Outline,
                     "aria-label": "Toggle focus mode",
                     onclick: move |_| {
                         if let Some(handler) = focus_action.as_ref() {

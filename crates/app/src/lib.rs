@@ -1,9 +1,13 @@
 use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
+use crate::command::SurfaceId;
+use crate::components::button::Button;
+
 pub mod app;
 pub mod auth;
 pub mod command;
+mod components;
 pub mod config;
 pub mod domain;
 pub mod input;
@@ -51,7 +55,7 @@ pub enum AppAction {
 #[component]
 pub fn App() -> Element {
     let mut state = use_signal(ApplicationState::empty);
-    let dispatcher = Dispatcher::new();
+    let dispatcher = use_hook(Dispatcher::new);
     use_context_provider(|| AppContext {
         state,
         dispatcher: dispatcher.clone(),
@@ -84,18 +88,23 @@ pub fn App() -> Element {
                 class: "relative min-h-screen",
                 WorkspaceShell {
                     view: state.read().auth.workspace.clone().unwrap_or_else(WorkspaceView::empty),
-                    focus: FocusTarget::Editor,
+                    focus: if state.read().workspace.focus.active_surface == SurfaceId::FILE_TREE {
+                        FocusTarget::Sidebar
+                    } else {
+                        FocusTarget::Editor
+                    },
                     sidebar_mode: SidebarMode::Tree,
                     browser_dir: String::new(),
                     on_action: None,
                     on_select_note: None,
                 }
-                button {
-                    "aria-label": "Log out",
-                    class: "absolute right-4 top-3 z-10 rounded border border-[var(--lirox-border)] px-3 py-1 text-sm",
-                    onclick: move |_| dispatcher.dispatch_auth_command(&mut state.write(), app::AuthCommand::Logout),
-                    "Log out"
-                }
+                 Button {
+                     variant: crate::components::button::ButtonVariant::Outline,
+                     "aria-label": "Log out",
+                     class: "absolute right-4 top-3 z-10",
+                     onclick: move |_| dispatcher.dispatch_auth_command(&mut state.write(), app::AuthCommand::Logout),
+                     "Log out"
+                 }
             }
         } else {
             auth::AuthShell {}
@@ -107,6 +116,7 @@ async fn execute_effect(state: Signal<ApplicationState>, dispatcher: Dispatcher,
     #[cfg(target_arch = "wasm32")]
     {
         let mut state = state;
+        let auto_login = matches!(&effect, Effect::AutoLogin);
         let result = platform_effect(effect).await;
         let event = match result {
             Ok(Some(event)) => event,
@@ -114,6 +124,7 @@ async fn execute_effect(state: Signal<ApplicationState>, dispatcher: Dispatcher,
             Err(message) if message.starts_with("gateway returned 401") => {
                 ApplicationEvent::Auth(app::AuthEvent::SessionExpired)
             }
+            Err(_message) if auto_login => ApplicationEvent::Auth(app::AuthEvent::AutoLoginFailed),
             Err(message) => ApplicationEvent::Auth(app::AuthEvent::OperationFailed(message)),
         };
         dispatcher.dispatch_event(&mut state.write(), event);
@@ -139,6 +150,14 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                 app::AuthEvent::WorkspaceLoaded(view),
             )))
         }
+        Effect::LoadWorkspaceNote(path) => {
+            let view: WorkspaceView =
+                response_json(web_json(&format!("/api/workspace/{path}"), "GET", None).await?)
+                    .await?;
+            Ok(Some(ApplicationEvent::Auth(
+                app::AuthEvent::WorkspaceLoaded(view),
+            )))
+        }
         Effect::RegisterPasskey => {
             let options: Value = response_json(
                 web_json(
@@ -155,7 +174,8 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                 .to_string();
             let credential = webauthn::credentials(
                 "create",
-                webauthn::prepare_options(options_without_challenge(&options))?,
+                webauthn::prepare_options(public_key_options(&options)?)?,
+                None,
             )
             .await?;
             let body = serde_json::json!({"challenge_id": challenge, "credential": webauthn::credential_json(credential)?}).to_string();
@@ -164,7 +184,8 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                 app::AuthEvent::RegistrationSucceeded,
             )))
         }
-        Effect::Login => {
+        effect @ (Effect::Login | Effect::AutoLogin) => {
+            let auto = matches!(&effect, Effect::AutoLogin);
             let options: Value = response_json(
                 web_json(
                     "/api/auth/passkeys/login/options",
@@ -180,15 +201,16 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                 .to_string();
             let credential = webauthn::credentials(
                 "get",
-                webauthn::prepare_options(options_without_challenge(&options))?,
+                webauthn::prepare_options(discoverable_public_key_options(&options)?)?,
+                auto.then_some("conditional"),
             )
             .await?;
             let body = serde_json::json!({"challenge_id": challenge, "credential": webauthn::credential_json(credential)?}).to_string();
             web_json("/api/auth/passkeys/login/verify", "POST", Some(body)).await?;
             Ok(Some(ApplicationEvent::Auth(
-                app::AuthEvent::LoginSucceeded {
-                    user: Some("local".into()),
-                },
+                app::AuthEvent::BootstrapLoaded(
+                    response_json(web_json("/api/bootstrap", "GET", None).await?).await?,
+                ),
             )))
         }
         Effect::Logout => {
@@ -201,11 +223,13 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
         }
         Effect::CreateWorkspace(fields) => {
             let body = serde_json::json!({
-                "repo_mode": if fields.remote { "remote" } else { "new" },
+                "repo_mode": if fields.remote { "existing" } else { "new" },
                 "workspace_slug": fields.slug,
                 "workspace_name": fields.name,
                 "repo_url": fields.repo_url,
+                "repository_path": fields.repository_path,
                 "branch": fields.branch,
+                "workspace_path": fields.path,
             })
             .to_string();
             web_json("/api/workspaces", "POST", Some(body)).await?;
@@ -215,17 +239,47 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                 ),
             )))
         }
+        Effect::InspectRepository { repo_url, branch } => {
+            let body = serde_json::json!({"repo_url": repo_url, "branch": branch}).to_string();
+            let metadata: auth::RepositoryMetadata =
+                response_json(web_json("/api/workspaces/inspect", "POST", Some(body)).await?)
+                    .await?;
+            Ok(Some(ApplicationEvent::Auth(
+                app::AuthEvent::RepositoryInspected {
+                    name: metadata.name,
+                    slug: metadata.slug,
+                },
+            )))
+        }
+        Effect::LoadExistingWorkspaces => {
+            let workspaces: Vec<auth::ExistingWorkspace> =
+                response_json(web_json("/api/workspaces", "GET", None).await?).await?;
+            Ok(Some(ApplicationEvent::Auth(
+                app::AuthEvent::ExistingWorkspacesLoaded(workspaces),
+            )))
+        }
         _ => Ok(None),
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-fn options_without_challenge(options: &serde_json::Value) -> serde_json::Value {
-    let mut options = options.clone();
-    if let serde_json::Value::Object(fields) = &mut options {
-        fields.remove("challenge_id");
-    }
+#[cfg(any(target_arch = "wasm32", test))]
+fn public_key_options(options: &serde_json::Value) -> Result<serde_json::Value, String> {
     options
+        .get("publicKey")
+        .cloned()
+        .ok_or_else(|| "missing publicKey options".into())
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn discoverable_public_key_options(
+    options: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut options = public_key_options(options)?;
+    options
+        .as_object_mut()
+        .ok_or_else(|| "invalid publicKey options".to_string())?
+        .remove("allowCredentials");
+    Ok(options)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -323,6 +377,32 @@ mod tests {
         assert_eq!(
             super::gateway_url("/api/bootstrap"),
             "http://localhost:3010/api/bootstrap"
+        );
+    }
+
+    #[test]
+    fn extracts_public_key_options_from_passkey_envelope() {
+        let options = serde_json::json!({
+            "challenge_id": "server-id",
+            "publicKey": {"challenge": "encoded"}
+        });
+        assert_eq!(
+            super::public_key_options(&options).unwrap(),
+            serde_json::json!({"challenge": "encoded"})
+        );
+    }
+
+    #[test]
+    fn discoverable_options_omit_allow_credentials() {
+        let options = serde_json::json!({
+            "publicKey": {
+                "challenge": "encoded",
+                "allowCredentials": [{"id": "bad-for-browser", "type": "public-key"}]
+            }
+        });
+        assert_eq!(
+            super::discoverable_public_key_options(&options).unwrap(),
+            serde_json::json!({"challenge": "encoded"})
         );
     }
 }

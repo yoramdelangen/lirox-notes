@@ -517,7 +517,7 @@ Do not create all of them immediately unless needed.
 
 At minimum implement:
 
-- Editor placeholder/surface.
+- Editor surface backed by the `packages/editor` CodeMirror bundle.
 - File tree surface.
 
 ---
@@ -762,6 +762,46 @@ dispatch commands
 ```
 
 They should not own core application behavior.
+
+---
+
+## 4.9 Editor Package Boundary
+
+The Markdown editing surface is implemented by the existing `packages/editor`
+bundle. It owns CodeMirror configuration, Markdown syntax support, selection,
+cursor behavior, and editor-local DOM state. The Rust/Dioxus application owns
+the active note, document value, changed state, input mode, commands, and
+save/load effects.
+
+The web app includes the built `crates/app/assets/editor.js` bundle. The
+`EditorSurface` renders a stable editor root with the active document and
+mounts the package through its browser API:
+
+```text
+Dioxus EditorSurface
+        │ data-lirox-editor-root + initial document
+        ▼
+packages/editor / CodeMirror
+        │ lirox-editor-change { doc, selection, ... }
+        ▼
+platform/web editor bridge
+        │
+        ▼
+ApplicationState and command dispatcher
+```
+
+The bridge must:
+
+- mount the editor once per surface root;
+- update the editor when the selected note or loaded document changes;
+- forward document changes into application state without making CodeMirror
+  the source of truth;
+- dispatch save intent through the existing application command path;
+- avoid putting backend URLs, transport DTOs, or persistence logic in the
+  editor package.
+
+The editor package is a browser implementation detail. A future native editor
+may replace it without changing domain models, commands, or workspace layout.
 
 ---
 
@@ -1950,7 +1990,10 @@ Minimum editor:
 
 - active/inactive visual state,
 - insert/normal status,
-- backend-loaded document display or placeholder.
+- backend-loaded document display through the CodeMirror editor bundle,
+- document changes update application state and changed status,
+- selected-note changes replace the editor document,
+- save intent remains a Rust/application command.
 
 Minimum file tree:
 

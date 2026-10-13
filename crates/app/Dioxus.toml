@@ -12,7 +12,7 @@ title = "LiroxNotes"
 style = ["assets/main.css", "assets/tailwind.css"]
 
 # Additional JavaScript files
-script = []
+script = ["assets/editor.js"]
 
 [web.resource.dev]
 
