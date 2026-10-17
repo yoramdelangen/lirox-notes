@@ -11,9 +11,11 @@ context by an AI system.
 - Note body endpoints accept the request body as raw text. `text/markdown` is
   recommended.
 - The server binds to `127.0.0.1` only. The port defaults to `3010`.
+- `LIROX_RP_ORIGIN` is a comma-separated list of allowed WebAuthn origins. It
+  defaults to `http://localhost:8989,http://localhost:3010`; the first origin
+  is used for development CORS headers, with credentials allowed.
 - API responses receive development CORS headers in debug builds, or when
-  `LIROX_DEV_CORS` is set. The allowed origin is `LIROX_RP_ORIGIN` when set,
-  otherwise `http://localhost:8989`; credentials are allowed.
+  `LIROX_DEV_CORS` is set.
 
 ## Authentication
 

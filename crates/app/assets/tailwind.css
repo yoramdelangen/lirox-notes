@@ -664,6 +664,9 @@
   .text-left {
     text-align: left;
   }
+  .font-mono {
+    font-family: var(--font-mono);
+  }
   .text-base {
     font-size: var(--text-base);
     line-height: var(--tw-leading, var(--text-base--line-height));
@@ -711,6 +714,9 @@
   }
   .text-\[var\(--lirox-accent\)\] {
     color: var(--lirox-accent);
+  }
+  .text-\[var\(--lirox-error\)\] {
+    color: var(--lirox-error);
   }
   .text-\[var\(--lirox-fg\)\] {
     color: var(--lirox-fg);

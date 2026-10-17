@@ -84,6 +84,7 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
             }
         }
         SetupStep::ConnectRepository => {
+            let inspect_dispatcher = dispatcher.clone();
             let back_dispatcher = dispatcher.clone();
             rsx! {
             h1 { "Setup workspace" }
@@ -91,8 +92,19 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
             form {
                 onsubmit: move |event| {
                     event.prevent_default();
-                    state.write().auth.setup.step = SetupStep::Finish;
+                    let setup = state.read().auth.setup.clone();
+                    dispatch_auth(
+                        state,
+                        inspect_dispatcher.clone(),
+                        crate::app::AuthCommand::InspectRepository {
+                            repo_url: setup.repo_url,
+                            branch: setup.branch,
+                        },
+                    );
                 },
+                if let Some(error) = auth.failure.as_deref() {
+                    p { role: "alert", class: "text-[var(--lirox-error)]", "Repository check failed: {error}" }
+                }
                 label { r#for: "repo-url", "Repository URL" }
                 Input {
                     id: "repo-url",
@@ -109,7 +121,11 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
                     value: "{setup.branch}",
                     oninput: move |event: FormEvent| state.write().auth.setup.branch = event.value()
                 }
-                Button { button_type: "submit", "Connect" }
+                Button {
+                    button_type: "submit",
+                    disabled: operation != AuthOperation::None,
+                    if operation == AuthOperation::InspectingRepository { "Checking repository..." } else { "Connect" }
+                }
             }
             Button {
                 button_type: "button",
@@ -163,6 +179,9 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
                         state.auth.setup.name = name.clone();
                         state.auth.setup.slug = slug_from_name(&name);
                     }
+                }
+                p { class: "auth-help", "Workspace slug: "
+                    code { class: "font-mono text-[var(--lirox-fg)]", if setup.slug.is_empty() { "—" } else { "{setup.slug}" } }
                 }
                 label { r#for: "workspace-path", "Path (optional)" }
                 Input {

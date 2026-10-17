@@ -297,6 +297,81 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_restores_saved_name_for_workspace_greeting() {
+        let mut state = crate::app::ApplicationState::empty();
+        let dispatcher = crate::app::Dispatcher::new();
+        let mut bootstrap = BootstrapState::workspace_required();
+        bootstrap.display_name = Some("Example User".into());
+
+        dispatcher.dispatch_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(bootstrap)),
+        );
+
+        assert_eq!(state.auth.setup.name, "Example User");
+    }
+
+    #[test]
+    fn inspecting_repository_schedules_clone_check() {
+        let mut state = crate::app::ApplicationState::empty();
+        let dispatcher = crate::app::Dispatcher::new();
+        dispatcher.dispatch_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::InspectRepository {
+                repo_url: "https://example.com/notes.git".into(),
+                branch: "main".into(),
+            }),
+        );
+
+        assert_eq!(state.auth.operation, AuthOperation::InspectingRepository);
+        assert_eq!(
+            dispatcher.take_effects(),
+            vec![crate::app::Effect::InspectRepository {
+                repo_url: "https://example.com/notes.git".into(),
+                branch: "main".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn successful_repository_inspection_advances_to_workspace_details() {
+        let mut state = crate::app::ApplicationState::empty();
+        state.auth.screen = Screen::WorkspaceSetup;
+        state.auth.setup.step = SetupStep::ConnectRepository;
+        state.auth.operation = AuthOperation::InspectingRepository;
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::RepositoryInspected {
+                name: Some("Notes".into()),
+                slug: Some("notes".into()),
+            }),
+        );
+
+        assert_eq!(state.auth.setup.step, SetupStep::Finish);
+        assert_eq!(state.auth.setup.name, "Notes");
+        assert_eq!(state.auth.setup.slug, "notes");
+    }
+
+    #[test]
+    fn failed_repository_inspection_keeps_connection_form_open() {
+        let mut state = crate::app::ApplicationState::empty();
+        state.auth.screen = Screen::WorkspaceSetup;
+        state.auth.setup.step = SetupStep::ConnectRepository;
+        state.auth.operation = AuthOperation::InspectingRepository;
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::OperationFailed("clone failed".into())),
+        );
+
+        assert_eq!(state.auth.screen, Screen::WorkspaceSetup);
+        assert_eq!(state.auth.setup.step, SetupStep::ConnectRepository);
+        assert_eq!(state.auth.failure.as_deref(), Some("clone failed"));
+        assert_eq!(state.auth.operation, AuthOperation::None);
+    }
+
+    #[test]
     fn submitting_name_schedules_display_name_persistence() {
         let mut state = crate::app::ApplicationState::empty();
         state.auth.setup.name = "Example User".into();

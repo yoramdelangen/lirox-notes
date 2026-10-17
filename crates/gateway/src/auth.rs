@@ -322,18 +322,13 @@ impl AuthService {
 
     pub fn from_env(paths: RuntimePaths) -> Result<Self, AuthError> {
         let rp_id = std::env::var("LIROX_RP_ID").unwrap_or_else(|_| "localhost".into());
-        let origin =
-            std::env::var("LIROX_RP_ORIGIN").unwrap_or_else(|_| "http://localhost:3010".into());
-        let origin =
-            Url::parse(&origin).map_err(|error| AuthError::Configuration(error.to_string()))?;
-        let webauthn = WebauthnBuilder::new(&rp_id, &origin)
-            .map_err(|error| AuthError::Configuration(error.to_string()))?
-            .rp_name("LiroxNotes")
-            .build()
-            .map_err(|error| AuthError::Configuration(error.to_string()))?;
+        let origins = std::env::var("LIROX_RP_ORIGIN")
+            .unwrap_or_else(|_| "http://localhost:8989,http://localhost:3010".into());
+        let origins = parse_rp_origins(&origins)?;
+        let webauthn = webauthn_for_origins(&rp_id, &origins)?;
         let session_ttl = parse_session_ttl(std::env::var("LIROX_SESSION_TTL_SECONDS").ok())?;
         let mut service = Self::new(AuthStore::new(paths), webauthn, session_ttl);
-        service.secure_cookies = origin.scheme() == "https";
+        service.secure_cookies = origins[0].scheme() == "https";
         Ok(service)
     }
 
@@ -831,6 +826,30 @@ pub fn bootstrap_response(
     })
 }
 
+fn parse_rp_origins(value: &str) -> Result<Vec<Url>, AuthError> {
+    value
+        .split(',')
+        .map(|origin| {
+            Url::parse(origin.trim()).map_err(|error| AuthError::Configuration(error.to_string()))
+        })
+        .collect()
+}
+
+fn webauthn_for_origins(rp_id: &str, origins: &[Url]) -> Result<Webauthn, AuthError> {
+    let (first, additional) = origins
+        .split_first()
+        .ok_or_else(|| AuthError::Configuration("no RP origins configured".into()))?;
+    let mut builder = WebauthnBuilder::new(rp_id, first)
+        .map_err(|error| AuthError::Configuration(error.to_string()))?;
+    for origin in additional {
+        builder = builder.append_allowed_origin(origin);
+    }
+    builder
+        .rp_name("LiroxNotes")
+        .build()
+        .map_err(|error| AuthError::Configuration(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,6 +875,14 @@ mod tests {
             OnboardingStatus::WorkspaceRequired
         );
         assert_eq!(onboarding_status(true, true), OnboardingStatus::Complete);
+    }
+
+    #[test]
+    fn webauthn_accepts_multiple_comma_separated_origins() {
+        let origins = parse_rp_origins("http://localhost:8989,http://localhost:3010").unwrap();
+        let webauthn = webauthn_for_origins("localhost", &origins).unwrap();
+
+        assert_eq!(webauthn.get_allowed_origins(), origins);
     }
 
     #[test]

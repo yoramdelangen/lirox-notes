@@ -44,6 +44,9 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
         AuthEvent::BootstrapRequested => vec![Effect::Bootstrap],
         AuthEvent::BootstrapLoaded(bootstrap) => {
             auth.workspace = None;
+            if let Some(display_name) = bootstrap.display_name.as_ref() {
+                auth.setup.name = display_name.clone();
+            }
             auth.screen = if bootstrap.authenticated
                 && bootstrap.onboarding == OnboardingStatus::Complete
                 && auth.workspace.is_none()
@@ -128,6 +131,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
         }
         AuthEvent::InspectRepository { repo_url, branch } => {
             auth.operation = AuthOperation::InspectingRepository;
+            auth.failure = None;
             vec![Effect::InspectRepository { repo_url, branch }]
         }
         AuthEvent::Retry => {
@@ -141,9 +145,12 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             vec![Effect::Bootstrap]
         }
         AuthEvent::OperationFailed(message) => {
+            let keep_setup_open = auth.operation == AuthOperation::InspectingRepository;
             auth.failure = Some(message);
             auth.operation = AuthOperation::None;
-            auth.screen = Screen::Failure;
+            if !keep_setup_open {
+                auth.screen = Screen::Failure;
+            }
             vec![]
         }
         AuthEvent::AutoLoginFailed => {
@@ -216,6 +223,8 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
                 auth.setup.slug = slug;
             }
             auth.operation = AuthOperation::None;
+            auth.failure = None;
+            auth.setup.step = crate::auth::SetupStep::Finish;
             vec![]
         }
         AuthEvent::SessionExpired => {

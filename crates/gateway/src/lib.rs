@@ -894,7 +894,9 @@ fn cors(response: &mut HttpResponse) {
         return;
     }
 
-    let origin = env::var("LIROX_RP_ORIGIN").unwrap_or_else(|_| "http://localhost:8989".into());
+    let origins = env::var("LIROX_RP_ORIGIN")
+        .unwrap_or_else(|_| "http://localhost:8989,http://localhost:3010".into());
+    let origin = cors_origin(&origins);
     if let Ok(origin) = HeaderValue::try_from(origin) {
         response
             .headers_mut()
@@ -912,6 +914,10 @@ fn cors(response: &mut HttpResponse) {
         ACCESS_CONTROL_ALLOW_HEADERS,
         HeaderValue::from_static("content-type"),
     );
+}
+
+fn cors_origin(origins: &str) -> &str {
+    origins.split(',').next().unwrap_or_default().trim()
 }
 
 fn api_error(status: actix_web::http::StatusCode, message: &str) -> HttpResponse {
@@ -1271,6 +1277,14 @@ mod ssr_tests {
         assert!(!body.contains("action=\"/install\""));
         assert!(body.contains("/api/auth/passkeys/register/options"));
         assert!(body.contains("/api/workspaces"));
+    }
+
+    #[test]
+    fn cors_selects_the_first_origin_from_the_rp_origin_list() {
+        assert_eq!(
+            cors_origin("http://localhost:8989,http://localhost:3010"),
+            "http://localhost:8989"
+        );
     }
 
     #[test]

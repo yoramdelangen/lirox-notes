@@ -98,6 +98,12 @@ request host.
 
 ## Frontend Flow
 
+The visual reference for onboarding screens is maintained in
+[`../wireframes/onboarding-workspace-flow.md`](../wireframes/onboarding-workspace-flow.md).
+It captures the initial passkey setup, new/existing repository choice, repository
+connection and inspection, existing-workspace selection, and the final
+workspace confirmation screen. Follow that flow when changing onboarding UI.
+
 The frontend uses the gateway bootstrap response to select one of four simple
 screens: registration welcome, workspace setup, passkey login, or the main
 workbench. Buttons dispatch semantic commands and effects perform network and
