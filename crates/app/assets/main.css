@@ -15,13 +15,37 @@
     --lirox-error: #d38b8b;
     --lirox-info: #8bb9cc;
     --lirox-overlay: rgb(15 17 22 / 0.72);
+    --background: var(--lirox-bg);
+    --foreground: var(--lirox-fg);
+    --card: var(--lirox-surface);
+    --card-foreground: var(--lirox-fg);
+    --primary: var(--lirox-accent);
+    --primary-foreground: var(--lirox-bg);
+    --secondary: var(--lirox-surface);
+    --secondary-foreground: var(--lirox-fg);
+    --accent: var(--lirox-surface-alt);
+    --accent-foreground: var(--lirox-fg);
+    --border: var(--lirox-border);
+    --input: var(--lirox-border);
+    --ring: var(--lirox-accent);
 }
 
 body {
     background: var(--lirox-bg);
     color: var(--lirox-fg);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: ui-sans-serif, system-ui, sans-serif;
     margin: 0;
+    text-rendering: optimizeLegibility;
+}
+
+::selection {
+    background: var(--lirox-selection);
+    color: var(--lirox-fg);
+}
+
+* {
+    scrollbar-color: var(--lirox-border) transparent;
+    scrollbar-width: thin;
 }
 
 button,
@@ -104,11 +128,11 @@ button {
     gap: .75rem;
 }
 
-.auth-actions .dx-button:first-child {
+.auth-actions button:first-child {
     min-width: 9.5rem;
 }
 
-.auth-actions .dx-button {
+.auth-actions button {
     min-height: 2.75rem;
 }
 
@@ -215,7 +239,7 @@ button {
     }
 
     .auth-actions,
-    .auth-actions .dx-button {
+    .auth-actions button {
         width: 100%;
     }
 }
@@ -240,5 +264,268 @@ button {
     #auth-shell > section,
     .auth-loading-dot {
         animation: none;
+    }
+}
+
+.workspace-mobile-menu,
+.workspace-action-compact {
+    display: none;
+}
+
+#workspace-shell .editor-menubar {
+    position: absolute;
+    top: .5rem;
+    right: .5rem;
+    z-index: 40;
+    width: max-content;
+    max-width: calc(100% - 1rem);
+    height: auto;
+    box-sizing: border-box;
+    justify-content: flex-end;
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: .25rem;
+    border: 1px solid var(--lirox-border, rgb(var(--shell-border)));
+    border-radius: .5rem;
+    background: var(--lirox-surface, rgb(var(--shell-panel)));
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+}
+
+.editor-menubar [data-name="MenubarMenu"]:first-child {
+    margin-right: auto;
+}
+
+#workspace-shell .menubar-content {
+    min-width: min(160px, calc(100vw - 1rem));
+    max-width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
+    border: 1px solid var(--lirox-border, rgb(var(--shell-border)));
+    border-radius: .5rem;
+    background: var(--lirox-surface, rgb(var(--shell-panel)));
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+    color: var(--lirox-muted, rgb(var(--theme-muted)));
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1;
+}
+
+#workspace-shell .menubar-content [data-menubar-close] {
+    padding: 0;
+}
+
+#workspace-shell .menubar-content [data-menubar-close] > button {
+    width: 100%;
+    height: auto;
+    min-height: 2rem;
+    justify-content: flex-start;
+    padding: .4rem .65rem;
+    border-radius: .375rem;
+    color: var(--lirox-muted, rgb(var(--theme-muted)));
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+#workspace-shell .menubar-content [data-menubar-close] > button:hover:not(:disabled) {
+    background: var(--lirox-surface-alt, rgb(var(--theme-surface-alt)));
+    color: var(--lirox-fg, rgb(var(--theme-text)));
+}
+
+#workspace-shell .menubar-content [data-menubar-close] > button:focus-visible {
+    outline: 2px solid var(--lirox-accent, rgb(var(--theme-accent)));
+    outline-offset: -2px;
+    box-shadow: none;
+}
+
+#workspace-shell .menubar-content [data-menubar-close] > button:disabled {
+    opacity: .45;
+    cursor: default;
+}
+
+#workspace-shell main {
+    min-height: 0;
+}
+
+#workspace-shell > main,
+#workspace-shell > main > section,
+#workspace-shell .workspace-split,
+#workspace-shell .workspace-split-first,
+#workspace-shell .workspace-split-second {
+    min-height: 0;
+}
+
+#workspace-shell {
+    --workspace-header-height: 3.5rem;
+    --workspace-footer-height: 3.125rem;
+}
+
+.workspace-topbar {
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+#workspace-shell .workspace-sidebar-modebar,
+#workspace-shell .editor-status-bar {
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+@media (max-width: 47.99rem) {
+    .workspace-topbar {
+        padding: .5rem .75rem;
+    }
+
+    .workspace-mobile-menu {
+        display: inline-flex;
+    }
+
+    #workspace-shell .editor-status-bar {
+        padding: .5rem .75rem;
+    }
+
+    #workspace-shell .editor-status-bar > span {
+        white-space: nowrap;
+    }
+}
+
+.workspace-sidebar-header {
+    flex-shrink: 0;
+}
+
+.workspace-topbar-context {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+		justify-content: space-between;
+    gap: 1rem;
+}
+
+.workspace-topbar-meta {
+    min-width: 0;
+}
+
+.workspace-topbar-path {
+    max-width: 30rem;
+}
+
+.workspace-switcher-wrap {
+    position: relative;
+}
+
+.workspace-switcher {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workspace-switcher-menu,
+.workspace-profile-menu {
+    position: absolute;
+    z-index: 20;
+    display: grid;
+    min-width: 12rem;
+		font-size: var(--text-xs);
+    gap: .25rem;
+    border: 1px solid var(--lirox-border);
+    border-radius: .35rem;
+    background: var(--lirox-surface);
+    padding: .35rem;
+    box-shadow: 0 .75rem 2rem rgb(0 0 0 / .28);
+}
+
+.workspace-switcher-menu {
+    top: calc(100% + .35rem);
+    left: 0;
+}
+
+.workspace-option,
+.workspace-profile-action {
+    width: 100%;
+    justify-content: flex-start;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.workspace-switcher-empty {
+    padding: .5rem;
+    color: var(--lirox-muted);
+    font-size: .75rem;
+}
+
+.git-status {
+    display: flex;
+    flex-shrink: 0;
+    gap: .5rem;
+    color: var(--lirox-muted);
+    font-size: .7rem;
+}
+
+.workspace-sidebar-footer {
+    flex-shrink: 0;
+    min-height: 3.75rem;
+}
+
+.workspace-sidebar-modebar {
+    background: rgb(15 17 22 / .28);
+}
+
+.workspace-sidebar-mode {
+    display: inline-flex;
+    width: 1.5rem;
+    height: 1.5rem;
+    min-width: 1.5rem;
+    min-height: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--lirox-subtle);
+}
+
+.workspace-sidebar-mode svg {
+    width: 1.05rem;
+    height: 1.05rem;
+}
+
+.workspace-sidebar-mode:hover,
+.workspace-sidebar-mode.is-active {
+    color: var(--lirox-accent);
+    background: var(--lirox-accent-soft);
+}
+
+.workspace-more {
+    min-width: 2.5rem;
+    padding-inline: .5rem;
+    letter-spacing: .15em;
+}
+
+.workspace-profile-wrap {
+    position: relative;
+}
+
+.workspace-profile-menu {
+    right: 0;
+    bottom: calc(100% + .35rem);
+}
+
+#workspace-shell .editor-status-bar {
+    position: absolute;
+		padding-bottom: .5rem;
+}
+
+@media (max-width: 47.99rem) {
+    .workspace-sidebar-header {
+        min-height: 0;
+    }
+
+    .workspace-topbar {
+        padding-block: .25rem;
+    }
+
+    .workspace-topbar-context {
+        flex-basis: 100%;
     }
 }

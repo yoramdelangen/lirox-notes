@@ -7,7 +7,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "develop": "vite"
+    "develop": "vite",
+		"dev-live": "bun run dev --outDir ../../crates/app/assets/"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

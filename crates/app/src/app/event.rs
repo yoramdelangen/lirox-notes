@@ -2,6 +2,7 @@ use crate::auth::{BootstrapState, ExistingWorkspace, SetupFields, SetupStep};
 use liroxnotes_shared::WorkspaceView;
 
 #[derive(Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum ApplicationEvent {
     Workspace(WorkspaceEvent),
     Status(StatusEvent),

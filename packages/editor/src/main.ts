@@ -13,14 +13,12 @@ type EditorRoot = HTMLElement & {
     editorMounted?: string;
     lineNumbers?: string;
     writingWidth?: string;
-    titleTarget?: string;
   };
 };
 
 type EditorEventDetail = {
   doc: string;
   mode: string;
-  title: string;
   hasHeading: boolean;
   headingLevel: number;
   selectionText: string;
@@ -178,7 +176,14 @@ const showToolbarDropdown = (anchor: HTMLElement, items: ToolbarMenuItem[]) => {
   };
 
   requestAnimationFrame(() => document.addEventListener("click", close));
-  document.body.append(dropdown);
+  const editor = anchor.closest<HTMLElement>(".cm-editor");
+  (editor ?? document.body).append(dropdown);
+
+  const dropdownRect = dropdown.getBoundingClientRect();
+  if (dropdownRect.bottom > window.innerHeight && rect.top > dropdownRect.height) {
+    dropdown.classList.add("cm-editor-toolbar-dropdown-up");
+    dropdown.style.top = `${rect.top - dropdownRect.height - 2}px`;
+  }
 };
 
 const headingMarkerDecorations = StateField.define<DecorationSet>({
@@ -554,15 +559,6 @@ const showMoreDropdown = (view: EditorView, anchor: HTMLElement) => {
   ]);
 };
 
-const getTitleText = (doc: string) => {
-  const heading = splitHeading(doc);
-  if (!heading.exists || !heading.title.trim()) {
-    return "New file";
-  }
-
-  return heading.title;
-};
-
 const readEditorMode = (view: EditorView) => {
   const vimState = (getCM(view)?.state as unknown as { vim?: { mode?: string } }).vim;
   return vimState?.mode ?? "normal";
@@ -576,7 +572,6 @@ const readEditorDetail = (view: EditorView): EditorEventDetail => {
   return {
     doc,
     mode: readEditorMode(view),
-    title: getTitleText(doc),
     hasHeading: heading.exists,
     headingLevel: heading.level,
     selectionText: selection.empty ? "" : view.state.sliceDoc(selection.from, selection.to),
@@ -587,12 +582,6 @@ const readEditorDetail = (view: EditorView): EditorEventDetail => {
 const emitEditorState = (root: EditorRoot, view: EditorView) => {
   const detail = readEditorDetail(view);
 
-  if (root.dataset.titleTarget) {
-    document.querySelectorAll<HTMLElement>(root.dataset.titleTarget).forEach((node) => {
-      node.textContent = detail.title;
-    });
-  }
-
   root.dispatchEvent(new CustomEvent<EditorEventDetail>("lirox-editor-change", { detail }));
 };
 
@@ -601,11 +590,11 @@ const theme = EditorView.theme({
     height: "100%",
     backgroundColor: "transparent",
     color: "rgb(var(--theme-text))",
-    fontFamily: "Victor Mono, monospace"
+    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
   },
   ".cm-scroller": {
     overflow: "auto",
-    fontFamily: "Victor Mono, monospace",
+    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
     padding: "0 1.5rem 1.5rem"
   },
   ".cm-content, .cm-gutter": {
@@ -614,31 +603,46 @@ const theme = EditorView.theme({
     paddingBottom: "1.25rem"
   },
   ".cm-content": {
-    caretColor: "rgb(var(--theme-accent))"
+    caretColor: "rgb(var(--theme-accent))",
+    fontFamily: "inherit",
+    fontSize: "1rem",
+    lineHeight: "1.65"
   },
   ".cm-panels": {
     backgroundColor: "transparent",
-    color: "rgb(var(--theme-text))",
+    color: "var(--lirox-fg, rgb(var(--theme-text)))",
     border: "0"
   },
   ".cm-panels-bottom": {
+    display: "flex",
+    alignItems: "center",
+    backgroundColor: "transparent",
     border: "0"
+  },
+  ".cm-panels-bottom > .cm-panel": {
+    alignItems: "center",
+    width: "100%",
+    backgroundColor: "var(--lirox-bg-alt, rgb(var(--theme-surface)))",
   },
   ".cm-editor-heading-line": {
     position: "relative",
-    fontFamily: "Victor Mono, monospace",
+    fontFamily: "inherit",
     fontWeight: "600",
     lineHeight: "1.15",
+    marginTop: "0.3em",
+    marginBottom: "0.15em",
+    textDecoration: "none !important",
     color: "rgb(var(--theme-text))"
   },
-  ".cm-editor-heading-line .tok-heading": {
-    color: "rgb(var(--theme-subtle))"
+  ".cm-editor-heading-line .tok-heading, .cm-editor-heading-line .tok-heading *": {
+    color: "rgb(var(--theme-subtle))",
+    textDecoration: "none !important"
   },
   ".cm-editor-heading-label": {
     position: "absolute",
     left: "0",
-    bottom: "0",
-    transform: "translate(-100%, -0.3em)",
+    top: "0",
+    transform: "translate(-100%, 0.4em)",
     display: "inline-flex",
     alignItems: "center",
     fontSize: "0.5em",
@@ -661,10 +665,10 @@ const theme = EditorView.theme({
     display: "flex",
     flexDirection: "column",
     alignItems: "stretch",
-    backgroundColor: "rgb(var(--theme-surface))",
-    border: "1px solid rgb(var(--shell-border))",
-    borderRadius: "8px",
-    padding: "4px",
+    backgroundColor: "var(--lirox-bg-alt, rgb(var(--theme-surface)))",
+    border: "1px solid var(--lirox-border, rgb(var(--shell-border)))",
+    borderRadius: "0.5rem",
+    padding: "0.25rem",
     boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
     minWidth: "140px"
   },
@@ -672,24 +676,25 @@ const theme = EditorView.theme({
     display: "block",
     width: "100%",
     textAlign: "left",
-    padding: "6px 12px",
+    padding: "0.4rem 0.65rem",
     border: "0",
     backgroundColor: "transparent",
-    color: "rgb(var(--theme-text))",
+    color: "var(--lirox-fg, rgb(var(--theme-text)))",
     fontSize: "13px",
-    borderRadius: "6px",
+    borderRadius: "0.375rem",
     cursor: "pointer"
   },
   ".cm-editor-heading-dropdown-item:hover": {
-    backgroundColor: "rgb(var(--theme-surface-alt))"
+    backgroundColor: "var(--lirox-surface-alt, rgb(var(--theme-surface-alt)))"
   },
   ".cm-editor-heading-dropdown-item-active": {
     fontWeight: "600",
-    color: "rgb(var(--theme-accent))"
+    color: "var(--lirox-accent, rgb(var(--theme-accent)))"
   },
   ".cm-editor-code-block": {
     backgroundColor: "#0f1419",
     color: "#e6e1cf",
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     borderLeft: "1px solid #272d38",
     borderRight: "1px solid #272d38",
     paddingLeft: "0.85rem",
@@ -708,90 +713,119 @@ const theme = EditorView.theme({
     borderBottomRightRadius: "0.9rem",
     paddingBottom: "0.65rem"
   },
-  ".cm-editor-heading-level-1": { fontSize: "2.25rem" },
-  ".cm-editor-heading-level-2": { fontSize: "1.875rem" },
-  ".cm-editor-heading-level-3": { fontSize: "1.5rem" },
-  ".cm-editor-heading-level-4": { fontSize: "1.25rem" },
-  ".cm-editor-heading-level-5": { fontSize: "1.125rem" },
+  ".cm-editor-heading-level-1": { fontSize: "2rem" },
+  ".cm-editor-heading-level-2": { fontSize: "1.625rem" },
+  ".cm-editor-heading-level-3": { fontSize: "1.375rem" },
+  ".cm-editor-heading-level-4": { fontSize: "1.125rem" },
+  ".cm-editor-heading-level-5": { fontSize: "1.0625rem" },
   ".cm-editor-heading-level-6": { fontSize: "1rem" },
   ".cm-editor-toolbar": {
     display: "flex",
     justifyContent: "center",
-    padding: "0.5rem 1.5rem 1rem"
-  },
-  ".cm-editor-toolbar[hidden]": {
-    display: "none"
+    // width: "fit-content",
+    maxWidth: "100%",
+    // margin: "0.25rem auto 0.75rem",
+    boxSizing: "border-box",
+    overflowX: "auto",
+    overflowY: "hidden",
+    // padding: "0.25rem",
+    border: "1px solid var(--lirox-border, rgb(var(--shell-border)))",
+    borderRadius: "0.5rem",
+    backgroundColor: "var(--lirox-surface, rgb(var(--shell-panel)))",
+    boxShadow: "0 1px 3px rgb(0 0 0 / 0.18)",
+    fontFamily: "inherit"
   },
   ".cm-editor-toolbar-inner": {
     display: "flex",
     alignItems: "center",
-    gap: "0.15rem",
-    borderRadius: "0.5rem",
-    backgroundColor: "rgba(var(--shell-panel), 0.9)",
-    border: "1px solid rgb(var(--shell-border) / 0.65)",
-    padding: "0.35rem"
+    gap: "0.25rem",
+    // width: "max-content",
+    // flexShrink: "0"
+  },
+  ".cm-editor-toolbar-group": {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.125rem"
+  },
+  ".cm-editor-toolbar-separator": {
+    width: "1px",
+    height: "1.25rem",
+    flexShrink: "0",
+    margin: "0 0.25rem",
+    backgroundColor: "var(--lirox-border, rgb(var(--shell-border)))"
   },
   ".cm-editor-toolbar-button": {
     border: "0",
     backgroundColor: "transparent",
-    color: "rgb(var(--theme-muted))",
+    color: "var(--lirox-muted, rgb(var(--theme-muted)))",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "0.15rem",
-    minWidth: "2rem",
-    padding: "0.4rem 0.55rem",
+    gap: "0.35rem",
+    flexShrink: "0",
+    minHeight: "2rem",
+    padding: "0.4rem 0.65rem",
     borderRadius: "0.375rem",
-    fontSize: "14px",
+    fontSize: "13px",
     lineHeight: "1",
-    fontWeight: "600",
-    fontFamily: "inherit"
+    fontWeight: "500",
+    fontFamily: "inherit",
+    cursor: "pointer",
+    transition: "background-color 120ms ease, color 120ms ease"
   },
   ".cm-editor-toolbar-button:hover": {
-    backgroundColor: "rgb(var(--theme-surface-alt) / 0.85)",
-    color: "rgb(var(--theme-text))"
+    backgroundColor: "var(--lirox-surface-alt, rgb(var(--theme-surface-alt)))",
+    color: "var(--lirox-fg, rgb(var(--theme-text)))"
+  },
+  ".cm-editor-toolbar-button:focus-visible": {
+    outline: "2px solid var(--lirox-accent, rgb(var(--theme-accent)))",
+    outlineOffset: "-2px"
   },
   ".cm-editor-toolbar-button:disabled": {
-    opacity: "0.45"
+    opacity: "0.45",
+    cursor: "default"
   },
   ".cm-editor-toolbar-button-active": {
-    backgroundColor: "rgb(var(--theme-surface-alt) / 0.95)",
-    color: "rgb(var(--theme-text))"
+    backgroundColor: "var(--lirox-selection, rgb(var(--theme-surface-alt)))",
+    color: "var(--lirox-accent, rgb(var(--theme-accent)))"
   },
   ".cm-editor-toolbar-button-arrow": {
-    fontSize: "0.72em",
-    transform: "translateY(-1px)"
+    width: "0.35rem",
+    height: "0.35rem",
+    borderRight: "1.5px solid currentColor",
+    borderBottom: "1.5px solid currentColor",
+    transform: "rotate(45deg) translateY(-1px)"
   },
   ".cm-editor-toolbar-dropdown": {
     position: "fixed",
-    zIndex: "100",
+    zIndex: "10000",
     display: "flex",
     flexDirection: "column",
     minWidth: "160px",
-    backgroundColor: "rgb(var(--theme-surface))",
-    border: "1px solid rgb(var(--shell-border))",
-    borderRadius: "8px",
-    padding: "4px",
+    backgroundColor: "var(--lirox-bg-alt, rgb(var(--theme-surface)))",
+    border: "1px solid var(--lirox-border, rgb(var(--shell-border)))",
+    borderRadius: "0.5rem",
+    padding: "0.25rem",
     boxShadow: "0 8px 24px rgba(0,0,0,0.3)"
   },
   ".cm-editor-toolbar-dropdown-item": {
     display: "block",
     width: "100%",
     textAlign: "left",
-    padding: "6px 12px",
+    padding: "0.4rem 0.65rem",
     border: "0",
     backgroundColor: "transparent",
-    color: "rgb(var(--theme-text))",
+    color: "var(--lirox-fg, rgb(var(--theme-text)))",
     fontSize: "13px",
-    borderRadius: "6px",
+    borderRadius: "0.375rem",
     cursor: "pointer"
   },
   ".cm-editor-toolbar-dropdown-item:hover": {
-    backgroundColor: "rgb(var(--theme-surface-alt))"
+    backgroundColor: "var(--lirox-surface-alt, rgb(var(--theme-surface-alt)))"
   },
   ".cm-editor-toolbar-dropdown-item-active": {
     fontWeight: "600",
-    color: "rgb(var(--theme-accent))"
+    color: "var(--lirox-accent, rgb(var(--theme-accent)))"
   },
   ".cm-editor-link-icon": {
     display: "inline-block",
@@ -829,33 +863,61 @@ const theme = EditorView.theme({
   ".cm-cursor": {
     borderLeftColor: "rgb(var(--theme-accent-soft))"
   },
+  ".cm-vimCursorLayer .cm-fat-cursor": {
+    minWidth: "0.75em",
+    boxSizing: "border-box",
+    backgroundColor: "var(--lirox-accent, rgb(var(--theme-accent)))",
+    color: "var(--lirox-bg, rgb(var(--theme-bg)))"
+  },
 });
 
 const toolbarPanel = (view: EditorView): Panel => {
   const dom = document.createElement("div");
   dom.className = "cm-editor-toolbar";
+  dom.dataset.name = "Toolbar";
+  dom.setAttribute("role", "toolbar");
+  dom.setAttribute("aria-label", "Editor formatting");
+  dom.setAttribute("aria-orientation", "horizontal");
 
   const inner = document.createElement("div");
   inner.className = "cm-editor-toolbar-inner";
 
-  const addButton = (label: string, title: string, run: () => void, active = false) => {
+  const addGroup = (label: string) => {
+    const group = document.createElement("div");
+    group.className = "cm-editor-toolbar-group";
+    group.dataset.name = "ToolbarToggleGroup";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", label);
+    inner.append(group);
+    return group;
+  };
+
+  const addSeparator = () => {
+    const separator = document.createElement("div");
+    separator.className = "cm-editor-toolbar-separator";
+    separator.dataset.name = "ToolbarSeparator";
+    separator.setAttribute("role", "separator");
+    separator.setAttribute("aria-orientation", "vertical");
+    inner.append(separator);
+  };
+
+  const addButton = (group: HTMLElement, label: string, title: string, run: () => void) => {
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.name = "ToolbarButton";
     button.className = "cm-editor-toolbar-button";
-    if (active) {
-      button.classList.add("cm-editor-toolbar-button-active");
-    }
     button.title = title;
     button.setAttribute("aria-label", title);
     button.textContent = label;
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", () => run());
-    inner.append(button);
+    group.append(button);
   };
 
-  const addMenuButton = (label: string, title: string, run: (button: HTMLButtonElement) => void) => {
+  const addMenuButton = (group: HTMLElement, label: string, title: string, run: (button: HTMLButtonElement) => void) => {
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.name = "ToolbarButton";
     button.className = "cm-editor-toolbar-button";
     button.title = title;
     button.setAttribute("aria-label", title);
@@ -863,45 +925,44 @@ const toolbarPanel = (view: EditorView): Panel => {
     text.textContent = label;
     const arrow = document.createElement("span");
     arrow.className = "cm-editor-toolbar-button-arrow";
-    arrow.textContent = "▾";
+    arrow.setAttribute("aria-hidden", "true");
     button.append(text, arrow);
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", () => run(button));
-    inner.append(button);
+    group.append(button);
   };
 
-  addMenuButton("H", "Headings", (button) => {
+  const structure = addGroup("Structure");
+  addMenuButton(structure, "Heading", "Headings", (button) => {
     const range = view.state.selection.main;
     const line = view.state.doc.lineAt(range.from);
     const match = line.text.match(/^(#{1,6})\s+/);
     showHeadingDropdown(view, button, line.from, line.to, match ? match[1].length : 0);
   });
 
-  addButton("☑", "Task list", () => insertAtLineStart(view, "- [ ] "));
-  addMenuButton("•", "Lists", (button) => showListDropdown(view, button));
-  addButton("B", "Bold", () => wrapMainSelection(view, "**"));
-  addButton("I", "Italic", () => wrapMainSelection(view, "*"));
-  addMenuButton("✎", "Formatting", (button) => showFormatDropdown(view, button));
-  addButton("↗", "Link", () => wrapMainSelection(view, "[", "](https://)"));
-  addButton("▦", "Table", () => insertAtLineStart(view, "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |\n", "| Column 1 | Column 2 |\n| --- | --- |\n| ".length));
-  addButton("🖼", "Image", () => insertAtLineStart(view, "![](https://)", 4));
-  addMenuButton("⋮", "More", (button) => showMoreDropdown(view, button));
+  addButton(structure, "Task list", "Task list", () => insertAtLineStart(view, "- [ ] "));
+  addMenuButton(structure, "Lists", "Lists", (button) => showListDropdown(view, button));
 
-  const sync = () => {
-    dom.hidden = !view.hasFocus;
-  };
+  addSeparator();
+
+  const inline = addGroup("Inline formatting");
+  addButton(inline, "Bold", "Bold", () => wrapMainSelection(view, "**"));
+  addButton(inline, "Italic", "Italic", () => wrapMainSelection(view, "*"));
+  addMenuButton(inline, "Format", "Formatting", (button) => showFormatDropdown(view, button));
+  addButton(inline, "Link", "Link", () => wrapMainSelection(view, "[", "](https://)"));
+
+  addSeparator();
+
+  const insert = addGroup("Insert");
+  addButton(insert, "Table", "Table", () => insertAtLineStart(view, "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |\n", "| --- | --- |\n| ".length));
+  addButton(insert, "Image", "Image", () => insertAtLineStart(view, "![](https://)", 4));
+  addMenuButton(insert, "More", "More", (button) => showMoreDropdown(view, button));
 
   dom.append(inner);
-  sync();
 
   return {
     top: false,
-    dom,
-    update(update) {
-      if (update.selectionSet || update.focusChanged) {
-        sync();
-      }
-    }
+    dom
   };
 };
 

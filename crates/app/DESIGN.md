@@ -107,6 +107,16 @@ AppShell
 `- BottomStatusBar
 ```
 
+The post-login shell follows the approved wireframe:
+
+- Wide screens keep the File Tree docked on the left and the Editor dominant on
+  the right, with project and branch context in the top bar.
+- Narrow screens show the Editor by default. The File Tree opens as a full-width
+  left drawer from the menu button and can be closed from the drawer or menu
+  button.
+- The bottom bar remains visible at both sizes, wrapping its status content on
+  narrow screens instead of introducing horizontal scrolling.
+
 Top Bar contents:
 
 - application/workspace name;

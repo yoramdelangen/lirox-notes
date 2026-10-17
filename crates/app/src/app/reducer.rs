@@ -241,10 +241,25 @@ pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation
             } else {
                 state.workspace.toggle_file_tree();
             }
+            let sidebar_visible = state
+                .workspace
+                .layout
+                .contains(crate::command::SurfaceId::FILE_TREE)
+                || state
+                    .workspace
+                    .overlays
+                    .top()
+                    .is_some_and(|entry| entry.surface == crate::command::SurfaceId::FILE_TREE);
+            state.workspace.focus.active_surface = if sidebar_visible {
+                crate::command::SurfaceId::FILE_TREE
+            } else {
+                crate::command::SurfaceId::EDITOR
+            };
             Vec::new()
         }
         "workspace.toggle_focus_mode" => {
             state.workspace.toggle_focus_mode();
+            state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
             Vec::new()
         }
         "workspace.focus_next_surface" => {
@@ -280,6 +295,7 @@ pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation
             move_selection(state, direction(&invocation.args, id))
         }
         "file_tree.open_selected" => open_selected(state),
+        "editor.create_note" => create_note(state),
         "editor.save" => save_document(state),
         _ => {
             state.status.message = Some(format!("Unknown command: {id}"));
@@ -314,10 +330,12 @@ fn move_selection(state: &mut ApplicationState, direction: Direction) -> Vec<Eff
         _ => index,
     };
     let path = state.domain.notes[next].path.clone();
-    state
+    if let Some(surface) = state
         .workspace
         .surface_mut(crate::command::SurfaceId::FILE_TREE)
-        .map(|surface| surface.select(path.clone()));
+    {
+        surface.select(path.clone());
+    }
     state.domain.selected_note = Some(path);
     Vec::new()
 }
@@ -343,4 +361,20 @@ fn save_document(state: &mut ApplicationState) -> Vec<Effect> {
         })
         .into_iter()
         .collect()
+}
+
+fn create_note(state: &mut ApplicationState) -> Vec<Effect> {
+    let path = "new-note.md".to_string();
+    state.domain.notes.push(crate::domain::Note {
+        path: path.clone(),
+        title: "New Note".into(),
+        body: String::new(),
+    });
+    state.domain.selected_note = Some(path.clone());
+    state.domain.document.clear();
+    state.status.message = Some("New note created".into());
+    vec![Effect::SaveDocument {
+        path,
+        content: String::new(),
+    }]
 }

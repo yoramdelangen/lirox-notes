@@ -773,9 +773,10 @@ cursor behavior, and editor-local DOM state. The Rust/Dioxus application owns
 the active note, document value, changed state, input mode, commands, and
 save/load effects.
 
-The web app includes the built `crates/app/assets/editor.js` bundle. The
-`EditorSurface` renders a stable editor root with the active document and
-mounts the package through its browser API:
+The web app includes the built `crates/app/assets/editor.js` bundle, loaded as
+an ES module. It installs `LiroxNotesEditor` on `globalThis`. `EditorSurface`
+renders a stable editor root with the active document and mounts the package
+through this browser API:
 
 ```text
 Dioxus EditorSurface
@@ -789,6 +790,11 @@ platform/web editor bridge
         ▼
 ApplicationState and command dispatcher
 ```
+
+The editor formatting toolbar remains visible and scrolls horizontally when it
+exceeds the pane width. The status bar shares the editor surface without a
+separator line. Clicking or focusing either pane, or using the pane-focus
+commands, updates the accent outline to track the active surface.
 
 The bridge must:
 

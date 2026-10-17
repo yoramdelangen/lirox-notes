@@ -56,7 +56,15 @@ impl WorkspaceState {
     }
     pub fn toggle_file_tree(&mut self) {
         if self.viewport == ViewportMode::Narrow || self.ui_mode == UiMode::Focus {
-            self.open_file_tree_overlay();
+            if self
+                .overlays
+                .top()
+                .is_some_and(|entry| entry.surface == SurfaceId::FILE_TREE)
+            {
+                self.overlays.pop();
+            } else {
+                self.open_file_tree_overlay();
+            }
         } else if self.layout.contains(SurfaceId::FILE_TREE) {
             self.layout = LayoutNode::focus();
         } else {

@@ -1,15 +1,28 @@
 use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
-use crate::{input::InputMode, AppContext};
+use crate::{
+    command::{CommandArgs, CommandId, CommandInvocation, CommandSource, SurfaceId},
+    components::{
+        button::{Button, ButtonVariant},
+        empty::{
+            Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant,
+            EmptyTitle,
+        },
+    },
+    ui::{bottom_bar::BottomBar, top_bar::EditorActions},
+    AppContext,
+};
+
+#[cfg(target_arch = "wasm32")]
+use crate::input::InputMode;
 
 #[component]
 pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
-    let _ = view;
+    let _ = &view;
     let context = use_context::<AppContext>();
-    let state = context.state;
+    let mut state = context.state;
     let state_read = state.read();
-    let mode = state_read.input.mode;
     let selected = state_read.domain.selected_note.as_deref().and_then(|path| {
         state_read
             .domain
@@ -17,56 +30,88 @@ pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
             .iter()
             .find(|note| note.path == path)
     });
-    let title = selected.map(|note| note.title.clone()).unwrap_or_default();
     let path = selected.map(|note| note.path.clone()).unwrap_or_default();
     let document = state_read.domain.document.clone();
     let has_notes = !state_read.domain.notes.is_empty();
     drop(state_read);
-    let mode_label = match mode {
-        InputMode::Normal => "NORMAL",
-        InputMode::Insert => "INSERT",
-        InputMode::Visual => "VISUAL",
-        InputMode::VisualLine => "VISUAL LINE",
-        InputMode::VisualBlock => "VISUAL BLOCK",
-        InputMode::Replace => "REPLACE",
-    };
+
     let active_class = if active {
-        "ring-1 ring-inset ring-[var(--lirox-accent)]"
+        "border-[var(--lirox-accent)]"
     } else {
-        ""
+        "border-[var(--lirox-surface)]"
     };
-    let mode_class = if mode == InputMode::Normal {
-        "text-[var(--lirox-accent)]"
-    } else {
-        "text-[var(--lirox-muted)]"
-    };
+
     rsx! {
         article {
             key: "{path}",
-            class: "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[var(--lirox-surface)] {active_class}",
-            aria_label: "Editor",
-            header { class: "flex items-center justify-between border-b border-[var(--lirox-border)] px-4 py-3",
-                div {
-                     h1 { class: "text-sm font-semibold", "{title}" }
-                     p { class: "text-xs text-[var(--lirox-muted)]", "{path}" }
-                }
-                span { class: "text-xs {mode_class}", "{mode_label}" }
+            class: "editor-surface relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[var(--lirox-surface)] transition-shadow duration-150",
+            onpointerdown: move |_| state.write().workspace.focus.active_surface = SurfaceId::EDITOR,
+            onfocusin: move |_| state.write().workspace.focus.active_surface = SurfaceId::EDITOR,
+            EditorActions {}
+            div { class: "min-h-0 flex-1 overflow-auto p-4 border {active_class}",
+                if !has_notes {
+                    EditorEmptyState {}
+                } else {
+                    div {
+                        id: "lirox-editor-root",
+                        class: "h-full min-h-0 w-full",
+                        "data-lirox-editor-root": "true",
+                        "data-initial-doc": "{document}",
+                        "data-writing-width": "650px",
+                        "data-line-numbers": "false",
+                        aria_label: "Edit note",
+                        onmounted: move |event| mount_editor(event, state),
+                    }
+                },
+                BottomBar { view, active }
             }
-            div { class: "h-full min-h-0 flex-1 overflow-auto p-4",
-                 if !has_notes {
-                     p { class: "text-sm text-[var(--lirox-muted)]", "No note selected" }
-                 } else {
-                     div {
-                         id: "lirox-editor-root",
-                         class: "h-full min-h-0 w-full",
-                         "data-lirox-editor-root": "true",
-                         "data-initial-doc": "{document}",
-                         "data-writing-width": "100%",
-                         "data-line-numbers": "false",
-                         aria_label: "Edit note",
-                         onmounted: move |event| mount_editor(event, state),
-                     }
-                 }
+        }
+    }
+}
+
+#[component]
+fn EditorEmptyState() -> Element {
+    let context = use_context::<AppContext>();
+    let mut state = context.state;
+    let dispatcher = context.dispatcher;
+    rsx! {
+        div { class: "editor-empty-state flex h-full min-h-0 items-center justify-center p-4",
+            Empty {
+                class: "w-full max-w-md border-[var(--lirox-border)] bg-[var(--lirox-bg-alt)]",
+                EmptyHeader {
+                    EmptyMedia {
+                        variant: EmptyMediaVariant::Icon,
+                        class: "bg-[var(--lirox-surface-alt)] text-[var(--lirox-accent)]",
+                        svg {
+                            xmlns: "http://www.w3.org/2000/svg",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.5",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            "aria-hidden": "true",
+                            path { d: "M13 3.75H7A2.25 2.25 0 0 0 4.75 6v12A2.25 2.25 0 0 0 7 20.25h10A2.25 2.25 0 0 0 19.25 18V9.5L13 3.75Z" }
+                            path { d: "M13 3.75V9.5h6.25M8.5 13h7M8.5 16.5h7" }
+                        }
+                    }
+                    EmptyTitle { class: "text-[var(--lirox-fg)]", "No notes yet" }
+                    EmptyDescription { class: "max-w-sm leading-6 text-[var(--lirox-muted)]", "Create your first note to start writing in this workspace." }
+                }
+                EmptyContent {
+                    Button {
+                        variant: ButtonVariant::Default,
+                        onclick: move |_| dispatcher.dispatch(
+                            &mut state.write(),
+                            CommandInvocation {
+                                id: CommandId::new("editor.create_note"),
+                                args: CommandArgs::None,
+                                source: CommandSource::Pointer,
+                            },
+                        ),
+                        "Create new note"
+                    }
+                }
             }
         }
     }
@@ -77,10 +122,16 @@ fn mount_editor(event: dioxus::prelude::MountedEvent, state: Signal<crate::app::
     use dioxus::web::WebEventExt;
     use js_sys::{Function, Reflect};
     use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+    const LISTENER_PROPERTY: &str = "__liroxEditorChangeListener";
 
     let Some(root) = event.data().try_as_web_event() else {
         return;
     };
+    if let Ok(previous) = Reflect::get(&root, &JsValue::from_str(LISTENER_PROPERTY)) {
+        if let Ok(previous) = previous.dyn_into::<Function>() {
+            let _ = root.remove_event_listener_with_callback("lirox-editor-change", &previous);
+        }
+    }
     let listener = Closure::wrap(Box::new(move |event: web_sys::Event| {
         let Some(event) = event.dyn_ref::<web_sys::CustomEvent>() else {
             return;
@@ -108,8 +159,9 @@ fn mount_editor(event: dioxus::prelude::MountedEvent, state: Signal<crate::app::
             state.domain.document = document;
         }
     }) as Box<dyn FnMut(_)>);
-    let _ = root
-        .add_event_listener_with_callback("lirox-editor-change", listener.as_ref().unchecked_ref());
+    let callback: &Function = listener.as_ref().unchecked_ref();
+    let _ = root.add_event_listener_with_callback("lirox-editor-change", callback);
+    let _ = Reflect::set(&root, &JsValue::from_str(LISTENER_PROPERTY), callback);
     listener.forget();
 
     let Some(window) = web_sys::window() else {

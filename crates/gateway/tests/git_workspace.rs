@@ -412,6 +412,83 @@ fn configured_profile_clones_remote_workspace() {
 }
 
 #[test]
+fn configured_profile_clones_into_folder_inside_unrelated_project_repository() {
+    let project = temp_root("nested-project");
+    let source = temp_root("nested-source");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(&source).unwrap();
+    for (directory, args) in [
+        (source.as_path(), vec!["init", "-b", "main"]),
+        (source.as_path(), vec!["config", "user.name", "Test User"]),
+        (
+            source.as_path(),
+            vec!["config", "user.email", "test@example.com"],
+        ),
+        (project.as_path(), vec!["init", "-b", "main"]),
+        (
+            project.as_path(),
+            vec![
+                "remote",
+                "add",
+                "origin",
+                "https://example.invalid/project.git",
+            ],
+        ),
+    ] {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(directory)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::write(source.join("welcome.md"), "# Cloned\n").unwrap();
+    for args in [vec!["add", "."], vec!["commit", "-m", "Initial"]] {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&source)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let paths = RuntimePaths {
+        config_file: project.join("config"),
+        default_workspace: project.join(".lirox-runtime/workspace"),
+    };
+    fs::create_dir_all(&paths.default_workspace).unwrap();
+    save_config(
+        &paths.config_file,
+        &GatewayConfig {
+            workspace_slug: "notes".to_string(),
+            workspace_name: "Notes".to_string(),
+            workspace_path: paths.default_workspace.clone(),
+            repo_url: source.to_string_lossy().into_owned(),
+            branch: "main".to_string(),
+        },
+    )
+    .unwrap();
+
+    assert!(configured_profile(&paths).unwrap().is_some());
+    assert!(paths.default_workspace.join(".git").exists());
+    assert_eq!(
+        fs::read_to_string(paths.default_workspace.join("welcome.md")).unwrap(),
+        "# Cloned\n"
+    );
+
+    let _ = fs::remove_dir_all(project);
+    let _ = fs::remove_dir_all(source);
+}
+
+#[test]
 fn configured_profile_keeps_empty_cloned_repository_empty() {
     let root = temp_root("clone-empty");
     fs::create_dir_all(&root).unwrap();
@@ -488,7 +565,19 @@ fn onboarding_form_clears_remote_for_new_repository() {
 
 #[test]
 fn runtime_paths_use_env_overrides() {
-    // ponytail: process env is global; use unlikely names and restore immediately.
+    let old_config = std::env::var_os("LIROX_CONFIG_FILE");
+    let old_workspace = std::env::var_os("LIROX_WORKSPACE_DIR");
+    std::env::remove_var("LIROX_CONFIG_FILE");
+    std::env::remove_var("LIROX_WORKSPACE_DIR");
+
+    let defaults = liroxnotes_gateway::runtime_paths();
+    if cfg!(debug_assertions) {
+        assert_eq!(
+            defaults.default_workspace,
+            PathBuf::from(".lirox-runtime/workspace")
+        );
+    }
+
     std::env::set_var("LIROX_CONFIG_FILE", "/tmp/lirox-config-test");
     std::env::set_var("LIROX_WORKSPACE_DIR", "/tmp/lirox-workspace-test");
 
@@ -500,8 +589,12 @@ fn runtime_paths_use_env_overrides() {
         PathBuf::from("/tmp/lirox-workspace-test")
     );
 
-    std::env::remove_var("LIROX_CONFIG_FILE");
-    std::env::remove_var("LIROX_WORKSPACE_DIR");
+    if let Some(value) = old_config {
+        std::env::set_var("LIROX_CONFIG_FILE", value);
+    }
+    if let Some(value) = old_workspace {
+        std::env::set_var("LIROX_WORKSPACE_DIR", value);
+    }
 }
 
 #[test]

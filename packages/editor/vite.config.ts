@@ -6,7 +6,8 @@ export default defineConfig({
     emptyOutDir: false,
     lib: {
       entry: resolve(__dirname, 'src/main.ts'),
-      formats: ['es'],
+    formats: ['iife'],
+    name: 'LiroxNotesEditorBundle',
       fileName: () => 'editor.js',
     },
     outDir: resolve(__dirname, '../../crates/app/assets'),

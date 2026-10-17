@@ -80,6 +80,7 @@ pub struct WorkspaceNote {
     pub body: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn workspace_view_from_notes(
     slug: &str,
     name: &str,

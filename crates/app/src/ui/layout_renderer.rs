@@ -4,7 +4,7 @@ use liroxnotes_shared::WorkspaceView;
 use crate::{
     ui::surfaces::{EditorSurface, FileTreeSurface},
     workspace::{Axis, LayoutNode, SurfaceState, WorkspaceState},
-    AppAction, FocusTarget, SidebarMode,
+    FocusTarget, SidebarMode,
 };
 
 #[component]
@@ -14,8 +14,6 @@ pub fn LayoutRenderer(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
-    browser_dir: String,
-    on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let active = workspace.focus.active_surface.clone();
@@ -35,13 +33,11 @@ pub fn LayoutRenderer(
                         active: is_active,
                         focus,
                         sidebar_mode,
-                        browser_dir,
-                        on_action,
                         on_select_note,
                     }
                 },
                 None => rsx! {
-                    div { class: "p-4 text-[var(--lirox-muted)]", "Unknown surface" }
+                    div { class: "px-4 text-[var(--lirox-muted)]", "Unknown surface" }
                 },
             }
         }
@@ -59,14 +55,11 @@ pub fn LayoutRenderer(
                 Axis::Horizontal => "workspace-split-horizontal",
                 Axis::Vertical => "workspace-split-vertical",
             };
-            let divider_class = match axis {
-                Axis::Horizontal => "border-l border-[var(--lirox-border)]",
-                Axis::Vertical => "border-t border-[var(--lirox-border)]",
-            };
             let first_style = match axis {
                 Axis::Horizontal => format!("width: {}%;", ratio * 100.0),
                 Axis::Vertical => format!("height: {}%;", ratio * 100.0),
             };
+
             rsx! {
                 div { class: "workspace-split {axis_class} flex min-h-0 min-w-0 flex-1 {direction}",
                     div { class: "workspace-split-first min-h-0 min-w-0 shrink-0", style: first_style,
@@ -76,20 +69,16 @@ pub fn LayoutRenderer(
                             view: view.clone(),
                             focus,
                             sidebar_mode,
-                            browser_dir: browser_dir.clone(),
-                            on_action,
                             on_select_note,
                         }
                     }
-                    div { class: "workspace-split-second min-h-0 min-w-0 flex-1 {divider_class}",
+                    div { class: "workspace-split-second min-h-0 min-w-0 flex-1",
                         LayoutRenderer {
                             node: *second,
                             workspace,
                             view,
                             focus,
                             sidebar_mode,
-                            browser_dir,
-                            on_action,
                             on_select_note,
                         }
                     }

@@ -29,6 +29,7 @@ pub(crate) fn onboarding_page_body(paths: &RuntimePaths, error: Option<&str>) ->
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -78,14 +79,14 @@ pub(crate) fn install_page_body(_paths: &RuntimePaths) -> String {
   const button = document.getElementById("register-passkey");
   const status = document.getElementById("auth-status");
   const section = document.querySelector("section");
-  const bytes = value => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/") + "==="), c => c.charCodeAt(0));
-  const options = value => {
-    if (!value || typeof value !== "object") return value;
-    if (Array.isArray(value)) return value.map(options);
-    const result = {};
-    for (const [key, child] of Object.entries(value)) result[key] = ["challenge", "id"].includes(key) && typeof child === "string" ? bytes(child) : options(child);
-    return result;
-  };
+   const bytes = value => { const normalized = value.replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)), c => c.charCodeAt(0)); };
+   const options = (value, parent = "") => {
+     if (!value || typeof value !== "object") return value;
+     if (Array.isArray(value)) return value.map(child => options(child, parent));
+     const result = {};
+     for (const [key, child] of Object.entries(value)) result[key] = (key === "challenge" || (key === "id" && parent === "user")) && typeof child === "string" ? bytes(child) : options(child, key);
+     return result;
+   };
    const json = async response => {
      const body = await response.json().catch(() => ({}));
      if (!response.ok) throw new Error(body.error || "Request failed");

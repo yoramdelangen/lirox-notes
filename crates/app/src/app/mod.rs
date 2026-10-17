@@ -1,9 +1,15 @@
 mod dispatcher;
+mod effects;
 mod event;
 mod reducer;
 mod state;
 
 pub use dispatcher::{dispatch, Dispatcher};
+pub(crate) use effects::execute_effect;
+#[cfg(test)]
+pub(crate) use effects::{
+    auth_error_event, discoverable_public_key_options, gateway_url, public_key_options,
+};
 pub use event::{ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, WorkspaceEvent};
 pub use reducer::{apply_event, Effect};
 pub use state::{ApplicationState, StatusState};
@@ -58,6 +64,17 @@ mod tests {
 
         dispatch(&mut state, command("workspace.focus_previous_surface"));
 
+        assert_eq!(state.workspace.focus.active_surface, SurfaceId::FILE_TREE);
+    }
+
+    #[test]
+    fn sidebar_toggle_tracks_the_active_pane() {
+        let mut state = ApplicationState::empty();
+
+        dispatch(&mut state, command("workspace.toggle_file_tree"));
+        assert_eq!(state.workspace.focus.active_surface, SurfaceId::EDITOR);
+
+        dispatch(&mut state, command("workspace.toggle_file_tree"));
         assert_eq!(state.workspace.focus.active_surface, SurfaceId::FILE_TREE);
     }
 

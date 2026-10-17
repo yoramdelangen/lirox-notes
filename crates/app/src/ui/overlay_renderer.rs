@@ -6,13 +6,12 @@ use crate::{
     components::button::{Button, ButtonSize, ButtonVariant},
     ui::surfaces::FileTreeSurface,
     workspace::{OverlayInputPolicy, OverlayPlacement},
-    AppAction, AppContext,
+    AppContext,
 };
 
 #[component]
 pub fn OverlayRenderer(
     view: WorkspaceView,
-    on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let context = use_context::<AppContext>();
@@ -30,7 +29,7 @@ pub fn OverlayRenderer(
         div {
             class: "absolute inset-0 z-10 bg-[var(--lirox-overlay)]",
             div {
-                class: "h-full w-full max-w-sm border-r border-[var(--lirox-border)] bg-[var(--lirox-bg-alt)] shadow-xl",
+                class: "h-full w-full border-r border-[var(--lirox-border)] bg-[var(--lirox-bg-alt)] shadow-xl",
                 role: "dialog",
                 aria_label: "File tree overlay",
                 aria_modal: "true",
@@ -56,8 +55,6 @@ pub fn OverlayRenderer(
                     active: true,
                     focus: crate::FocusTarget::Sidebar,
                     sidebar_mode: crate::SidebarMode::Tree,
-                    browser_dir: String::new(),
-                    on_action,
                     on_select_note,
                 }
             }

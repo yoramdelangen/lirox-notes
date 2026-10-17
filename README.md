@@ -8,14 +8,12 @@ Architectural UI slice:
 - `packages/editor`: Bun/Vite CodeMirror editor bundle.
 - `crates/app/assets/`: Tailwind source and built stylesheet bundled by `dx`.
 
-Run the Dioxus app with the Actix gateway:
+Run the Dioxus app with the Actix gateway and editor watcher (inside tmux):
 
 ```bash
 bun install
 bun install --cwd packages/editor
-bun run build:css
-(cd packages/editor && bun run build)
-cargo run -p liroxnotes-gateway
+just dev
 ```
 
 The app starts with passkey onboarding when no workspace is configured. The
@@ -26,16 +24,10 @@ commits, and synchronization remain separate gateway capabilities.
 
 In development, config and the default workspace live under `.lirox-runtime/`. In release builds, config uses `$XDG_CONFIG_HOME/liroxnotes/config` and the default workspace uses `$XDG_DATA_HOME/liroxnotes/workspace`.
 
-Shortcut:
+To use a custom Dioxus port:
 
 ```bash
-./scripts/dx-serve
-```
-
-Custom port:
-
-```bash
-./scripts/dx-serve --port 4100
+just dev 4100
 ```
 
 The Dioxus dev server uses the requested port. The Actix gateway runs beside it on `LIROX_GATEWAY_PORT` or `3010`.

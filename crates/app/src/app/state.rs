@@ -62,10 +62,9 @@ impl ApplicationState {
                 .map(|note| note.path.clone());
             if let Some(path) = selected {
                 state.domain.open_note(&path);
-                state
-                    .workspace
-                    .surface_mut(SurfaceId::FILE_TREE)
-                    .map(|surface| surface.select(path));
+                if let Some(surface) = state.workspace.surface_mut(SurfaceId::FILE_TREE) {
+                    surface.select(path);
+                }
             }
         }
         state

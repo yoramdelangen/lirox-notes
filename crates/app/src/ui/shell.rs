@@ -5,9 +5,9 @@ use crate::{
     app::{ApplicationState, Dispatcher},
     input::InputEvent,
     platform::web::keyboard,
-    ui::{bottom_bar::BottomBar, top_bar::TopBar, workspace_renderer::WorkspaceRenderer},
+    ui::workspace_renderer::WorkspaceRenderer,
     workspace::ViewportMode,
-    AppAction, AppContext, FocusTarget, SidebarMode,
+    AppContext, FocusTarget, SidebarMode,
 };
 
 #[component]
@@ -15,8 +15,6 @@ pub fn WorkspaceShell(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
-    browser_dir: String,
-    on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     if try_use_context::<AppContext>().is_some() {
@@ -25,8 +23,6 @@ pub fn WorkspaceShell(
                 view,
                 focus,
                 sidebar_mode,
-                browser_dir,
-                on_action,
                 on_select_note,
             }
         };
@@ -37,8 +33,6 @@ pub fn WorkspaceShell(
             view,
             focus,
             sidebar_mode,
-            browser_dir,
-            on_action,
             on_select_note,
         }
     }
@@ -49,8 +43,6 @@ fn WorkspaceShellSsr(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
-    browser_dir: String,
-    on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let state = use_signal(|| ApplicationState::from_workspace_view(&view));
@@ -63,8 +55,6 @@ fn WorkspaceShellSsr(
             view,
             focus,
             sidebar_mode,
-            browser_dir,
-            on_action,
             on_select_note,
         }
     }
@@ -75,8 +65,6 @@ fn WorkspaceShellContent(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
-    browser_dir: String,
-    on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let context = use_context::<AppContext>();
@@ -112,26 +100,16 @@ fn WorkspaceShellContent(
     rsx! {
         div {
             id: "workspace-shell",
-            class: "flex min-h-screen flex-col bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
+            class: "flex h-screen min-h-0 flex-col bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
             onkeydown: onkeydown,
-            TopBar {
-                view: view.clone(),
-                on_action,
-            }
             main {
                 class: "relative flex min-h-0 flex-1 overflow-hidden",
                 WorkspaceRenderer {
                     view: view.clone(),
                     focus,
                     sidebar_mode,
-                    browser_dir: browser_dir.clone(),
-                    on_action,
                     on_select_note,
                 }
-            }
-            BottomBar {
-                view,
-                browser_dir,
             }
         }
     }

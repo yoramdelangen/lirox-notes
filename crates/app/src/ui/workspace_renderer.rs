@@ -3,7 +3,7 @@ use liroxnotes_shared::WorkspaceView;
 
 use crate::{
     ui::{layout_renderer::LayoutRenderer, overlay_renderer::OverlayRenderer},
-    AppAction, AppContext, FocusTarget, SidebarMode,
+    AppContext, FocusTarget, SidebarMode,
 };
 
 #[component]
@@ -11,8 +11,6 @@ pub fn WorkspaceRenderer(
     view: WorkspaceView,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
-    browser_dir: String,
-    on_action: Option<EventHandler<AppAction>>,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let context = use_context::<AppContext>();
@@ -27,13 +25,10 @@ pub fn WorkspaceRenderer(
                 view: view.clone(),
                 focus,
                 sidebar_mode,
-                browser_dir: browser_dir.clone(),
-                on_action,
                 on_select_note,
             }
             OverlayRenderer {
                 view,
-                on_action,
                 on_select_note,
             }
         }

@@ -8,6 +8,15 @@
 - MVP should include built-in Markdown highlighting.
 - The editor should be lightweight and fast.
 - The editor should feel clean and minimalist.
+- Keep heading Markdown syntax visible while the cursor is on its line; when
+  the cursor leaves, render it with a compact clickable `H1`–`H6` marker.
+  Align the marker to the first line's text baseline, including when headings
+  wrap.
+- Keep the active note title and editor actions visible in a compact top bar
+  while the document scrolls; derive the title from a leading Markdown heading
+  and fall back to the note title when no heading is present.
+- Use a readable proportional sans-serif face for Markdown prose and a stepped,
+  Bear-inspired heading scale; reserve monospace for code content.
 - The editor should be hackable.
 - The highlighter should be adjustable.
 - A preview pane is not necessary for MVP.

@@ -481,8 +481,7 @@ fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(std::io::Error::other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ))
     }
@@ -500,14 +499,12 @@ fn clone_git(repo_url: &str, branch: &str, destination: &Path) -> std::io::Resul
         if fallback.status.success() {
             Ok(())
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            Err(std::io::Error::other(
                 String::from_utf8_lossy(&fallback.stderr).trim().to_string(),
             ))
         }
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(std::io::Error::other(
             String::from_utf8_lossy(&output.stderr).trim().to_string(),
         ))
     }
@@ -547,15 +544,15 @@ fn git_clone_command<const N: usize>(
 
 fn inspect_repository(repo_url: &str, branch: &str) -> std::io::Result<RepositoryMetadata> {
     let destination = env::temp_dir().join(format!("lirox-inspect-{}", Uuid::new_v4()));
-    let result = clone_git(repo_url, branch, &destination).and_then(|_| {
+    let result = clone_git(repo_url, branch, &destination).map(|_| {
         let config = [".lirox.toml", ".liroxnotes.toml"]
             .iter()
             .map(|name| destination.join(name))
             .find(|path| path.is_file());
-        Ok(config
+        config
             .and_then(|path| fs::read_to_string(path).ok())
             .and_then(|contents| parse_lirox_toml(&contents))
-            .unwrap_or_default())
+            .unwrap_or_default()
     });
     let _ = fs::remove_dir_all(&destination);
     result
@@ -636,13 +633,15 @@ fn ensure_workspace_for_config(config: &GatewayConfig) -> std::io::Result<()> {
         return ensure_workspace(&config.workspace_path);
     }
 
-    if run_git(
-        &config.workspace_path,
-        &["rev-parse", "--is-inside-work-tree"],
-    )
-    .is_ok()
-    {
-        return Ok(());
+    if let Ok(root) = run_git(&config.workspace_path, &["rev-parse", "--show-toplevel"]) {
+        let root = fs::canonicalize(root)?;
+        let workspace = fs::canonicalize(&config.workspace_path)?;
+        if root == workspace
+            || run_git(&config.workspace_path, &["remote", "get-url", "origin"])
+                .is_ok_and(|origin| origin == config.repo_url.trim())
+        {
+            return Ok(());
+        }
     }
 
     if config.workspace_path.exists() {
@@ -1028,7 +1027,7 @@ fn valid_repository_path(value: &str) -> bool {
 fn existing_workspaces(root: &Path) -> std::io::Result<Vec<ExistingWorkspaceResponse>> {
     fs::create_dir_all(root)?;
     let mut repositories = Vec::new();
-    discover_repositories(root, root, &mut repositories)?;
+    discover_repositories(root, &mut repositories)?;
     let mut workspaces = Vec::new();
     for repository in repositories {
         let branch = run_git(&repository, &["branch", "--show-current"])
@@ -1058,11 +1057,7 @@ fn existing_workspaces(root: &Path) -> std::io::Result<Vec<ExistingWorkspaceResp
     Ok(workspaces)
 }
 
-fn discover_repositories(
-    root: &Path,
-    dir: &Path,
-    repositories: &mut Vec<PathBuf>,
-) -> std::io::Result<()> {
+fn discover_repositories(dir: &Path, repositories: &mut Vec<PathBuf>) -> std::io::Result<()> {
     if dir.join(".git").exists() {
         repositories.push(dir.to_path_buf());
         return Ok(());
@@ -1070,7 +1065,7 @@ fn discover_repositories(
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
         if path.is_dir() && path.file_name().and_then(|name| name.to_str()) != Some(".git") {
-            discover_repositories(root, &path, repositories)?;
+            discover_repositories(&path, repositories)?;
         }
     }
     Ok(())
@@ -1237,16 +1232,10 @@ fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpRes
         Ok(view) => view,
         Err(error) => return HttpResponse::InternalServerError().body(error.to_string()),
     };
-    let browser_dir = selected_note_path
-        .rsplit_once('/')
-        .map(|(dir, _)| dir)
-        .unwrap_or("");
     let body = dioxus_ssr::render_element(rsx!(WorkspaceShell {
         view,
         focus: liroxnotes_app::FocusTarget::Sidebar,
         sidebar_mode: liroxnotes_app::SidebarMode::Tree,
-        browser_dir: browser_dir.to_string(),
-        on_action: None,
         on_select_note: None
     }));
 
@@ -1264,13 +1253,11 @@ mod ssr_tests {
             view: liroxnotes_shared::WorkspaceView::empty(),
             focus: liroxnotes_app::FocusTarget::Editor,
             sidebar_mode: liroxnotes_app::SidebarMode::Tree,
-            browser_dir: String::new(),
-            on_action: None,
             on_select_note: None,
         }));
 
         assert!(body.contains("No notes available"));
-        assert!(body.contains("No note selected"));
+        assert!(body.contains("No notes yet"));
     }
 
     #[test]
@@ -1744,11 +1731,7 @@ async fn passkey_register_verify(
             });
             response.headers_mut().insert(
                 actix_web::http::header::SET_COOKIE,
-                HeaderValue::from_str(&format!(
-                    "{}",
-                    session_cookie(&state.auth, &session.token, false)
-                ))
-                .unwrap(),
+                HeaderValue::from_str(&session_cookie(&state.auth, &session.token, false)).unwrap(),
             );
             cors(&mut response);
             Ok(response)
@@ -1790,11 +1773,7 @@ async fn passkey_login_verify(
             });
             response.headers_mut().insert(
                 actix_web::http::header::SET_COOKIE,
-                HeaderValue::from_str(&format!(
-                    "{}",
-                    session_cookie(&state.auth, &session.token, false)
-                ))
-                .unwrap(),
+                HeaderValue::from_str(&session_cookie(&state.auth, &session.token, false)).unwrap(),
             );
             cors(&mut response);
             Ok(response)
@@ -2445,6 +2424,7 @@ async fn api_preflight() -> HttpResponse {
 }
 
 pub async fn serve(paths: RuntimePaths, port: u16) -> std::io::Result<()> {
+    fs::create_dir_all(&paths.default_workspace)?;
     configured_profile(&paths)?;
     let auth = auth::AuthService::from_env(paths.clone()).map_err(|error| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, error.to_string())

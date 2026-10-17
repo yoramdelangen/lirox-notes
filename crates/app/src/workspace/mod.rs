@@ -79,4 +79,15 @@ mod tests {
         );
         assert!(workspace.surface(SurfaceId::FILE_TREE).is_some());
     }
+
+    #[test]
+    fn narrow_file_tree_toggle_closes_an_open_drawer() {
+        let mut workspace = WorkspaceState::empty();
+        workspace.set_viewport(ViewportMode::Narrow);
+
+        workspace.toggle_file_tree();
+        workspace.toggle_file_tree();
+
+        assert!(workspace.overlays.top().is_none());
+    }
 }

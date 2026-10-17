@@ -822,7 +822,7 @@ pub fn bootstrap_response(
         display_name,
         workspace_root: app_workspace_root(paths)?.to_string_lossy().into_owned(),
         workspace: (onboarding == OnboardingStatus::Complete)
-            .then(|| config)
+            .then_some(config)
             .flatten()
             .map(|config| GatewayConfigResponse {
                 slug: config.workspace_slug,
@@ -1135,10 +1135,7 @@ mod tests {
     }
 
     fn test_service_at(_now: u64) -> AuthService {
-        let root = std::env::temp_dir().join(format!(
-            "lirox-auth-service-{}",
-            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        let root = std::env::temp_dir().join(format!("lirox-auth-service-{}", Uuid::new_v4()));
         let store = AuthStore::new(RuntimePaths {
             config_file: root.join("config"),
             default_workspace: root.join("workspace"),

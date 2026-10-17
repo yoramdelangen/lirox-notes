@@ -4,10 +4,8 @@ use actix_web::{
     test, App,
 };
 use liroxnotes_gateway::{auth::*, configure_app, save_config, GatewayConfig, RuntimePaths};
-use std::{
-    fs,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::fs;
+use uuid::Uuid;
 use webauthn_rs::prelude::{Url, WebauthnBuilder};
 
 struct Fixture {
@@ -101,13 +99,7 @@ impl Fixture {
     }
 
     fn new(name: &str) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "lirox-auth-api-{name}-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = std::env::temp_dir().join(format!("lirox-auth-api-{name}-{}", Uuid::new_v4()));
         let paths = RuntimePaths {
             config_file: root.join("config"),
             default_workspace: root.join("workspace"),
