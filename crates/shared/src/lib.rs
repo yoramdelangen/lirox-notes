@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod theme;
+pub use theme::{ThemeColors, ThemeSource, WorkspaceTheme};
+
 pub const APP_NAME: &str = "LiroxNotes";
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +50,8 @@ pub struct WorkspaceView {
     pub tree: Vec<TreeEntry>,
     pub labels: Vec<LabelSummary>,
     pub notes: Vec<NoteSummary>,
+    #[serde(default)]
+    pub theme: WorkspaceTheme,
 }
 
 impl WorkspaceView {
@@ -70,6 +75,7 @@ impl WorkspaceView {
             tree: Vec::new(),
             labels: Vec::new(),
             notes: Vec::new(),
+            theme: WorkspaceTheme::default(),
         }
     }
 }
@@ -132,6 +138,7 @@ pub fn workspace_view_from_notes(
             tree: Vec::new(),
             labels: Vec::new(),
             notes: Vec::new(),
+            theme: WorkspaceTheme::default(),
         };
     }
     let selected_note = notes
@@ -158,6 +165,7 @@ pub fn workspace_view_from_notes(
         selected_note,
         selected_note_body,
         notes,
+        theme: WorkspaceTheme::default(),
     }
 }
 
