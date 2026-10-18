@@ -12,6 +12,7 @@ pub mod config;
 pub mod domain;
 pub mod input;
 pub mod platform;
+pub mod theme;
 pub mod ui;
 pub mod workspace;
 
