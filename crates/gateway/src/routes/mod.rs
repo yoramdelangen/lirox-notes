@@ -21,6 +21,7 @@ pub(crate) fn configure(cfg: &mut web::ServiceConfig) {
         .service(crate::inspect_workspace_api)
         .service(crate::create_workspace_api)
         .service(crate::workspace_resource_api)
+        .service(crate::workspace_theme_api)
         .service(crate::sync_workspace_api)
         .service(crate::pull_workspace_api)
         .service(crate::push_workspace_api)

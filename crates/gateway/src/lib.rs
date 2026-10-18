@@ -8,6 +8,7 @@ use actix_web::{
     options, post, put, web, App, HttpRequest, HttpResponse, HttpServer, Responder, Result,
 };
 use dioxus::prelude::*;
+use liroxnotes_app::theme::validate_contrast;
 use liroxnotes_app::WorkspaceShell;
 use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote};
 use serde::{Deserialize, Serialize};
@@ -1480,7 +1481,75 @@ pub fn workspace_view_for_config(
         &notes,
     );
     view.unpushed_commits = unpushed_commit_count(config);
+    let repository_root = repository_root(config);
+    if let Some(theme) = load_repository_config(&repository_root)?
+        .workspaces
+        .get(&config.workspace_slug)
+        .map(|workspace| workspace.theme.clone())
+    {
+        view.theme = theme;
+    }
     Ok(view)
+}
+
+fn repository_root(config: &GatewayConfig) -> PathBuf {
+    run_git(&config.workspace_path, &["rev-parse", "--show-toplevel"])
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| config.workspace_path.clone())
+}
+
+fn register_configured_workspace(config: &GatewayConfig) -> std::io::Result<()> {
+    let root = repository_root(config);
+    let workspace_path =
+        fs::canonicalize(&config.workspace_path).unwrap_or_else(|_| config.workspace_path.clone());
+    let relative_path = workspace_path
+        .strip_prefix(&root)
+        .unwrap_or(Path::new(""))
+        .to_string_lossy();
+    register_workspace(
+        &root,
+        &config.workspace_slug,
+        &config.workspace_name,
+        &relative_path,
+        &liroxnotes_shared::WorkspaceTheme::default(),
+    )
+}
+
+fn validate_workspace_theme(theme: &liroxnotes_shared::WorkspaceTheme) -> std::io::Result<()> {
+    let colors = [
+        ("bg", &theme.colors.bg),
+        ("bg_alt", &theme.colors.bg_alt),
+        ("surface", &theme.colors.surface),
+        ("surface_alt", &theme.colors.surface_alt),
+        ("fg", &theme.colors.fg),
+        ("muted", &theme.colors.muted),
+        ("subtle", &theme.colors.subtle),
+        ("border", &theme.colors.border),
+        ("accent", &theme.colors.accent),
+        ("selection", &theme.colors.selection),
+        ("success", &theme.colors.success),
+        ("warning", &theme.colors.warning),
+        ("error", &theme.colors.error),
+        ("info", &theme.colors.info),
+    ];
+    for (role, value) in colors {
+        if value.len() != 7
+            || !value.starts_with('#')
+            || !value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("invalid color for theme role {role}; expected #RRGGBB"),
+            ));
+        }
+    }
+    if let Some(issue) = validate_contrast(&theme.colors).first() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("theme contrast is too low for {}", issue.role),
+        ));
+    }
+    Ok(())
 }
 
 fn render_workspace(config: &GatewayConfig, selected_note_path: &str) -> HttpResponse {
@@ -1769,6 +1838,7 @@ async fn save_onboarding(
     let config = parse_onboarding_form(&body, &app_workspace_root(&state.paths)?);
     if let Err(error) = ensure_workspace_for_config(&config)
         .and_then(|_| configure_git_remote(&config))
+        .and_then(|_| register_configured_workspace(&config))
         .and_then(|_| save_config(&state.paths.config_file, &config))
     {
         log_error("onboarding failed", &error);
@@ -2217,6 +2287,7 @@ async fn create_workspace_api(
     };
     if let Err(error) = ensure_workspace_for_config(&config)
         .and_then(|_| configure_git_remote(&config))
+        .and_then(|_| register_configured_workspace(&config))
         .and_then(|_| save_config(&state.paths.config_file, &config))
         .and_then(|_| mark_workspace_ready(&state.paths, &workspace_root))
     {
@@ -2250,6 +2321,45 @@ async fn workspace_resource_api(
         return Ok(response);
     }
     let mut response = HttpResponse::Ok().json(workspace_summary(&config)?);
+    cors(&mut response);
+    Ok(response)
+}
+
+#[put("/api/workspaces/{workspace}/theme")]
+async fn workspace_theme_api(
+    state: web::Data<AppState>,
+    req: HttpRequest,
+    workspace: web::Path<String>,
+    theme: web::Json<liroxnotes_shared::WorkspaceTheme>,
+) -> Result<HttpResponse> {
+    if let Some(response) = require_auth_api(&req, &state.paths)? {
+        return Ok(response);
+    }
+    let Some(config) = configured(&state)? else {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "workspace is not configured",
+        ));
+    };
+    if let Some(response) = require_configured_workspace(&config, &workspace) {
+        return Ok(response);
+    }
+    if let Err(error) = validate_workspace_theme(&theme) {
+        return Ok(api_error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            &error.to_string(),
+        ));
+    }
+    let root = repository_root(&config);
+    if let Err(error) = save_workspace_theme(&root, &workspace, &theme) {
+        let status = if error.kind() == std::io::ErrorKind::NotFound {
+            actix_web::http::StatusCode::NOT_FOUND
+        } else {
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        };
+        return Ok(api_error(status, &error.to_string()));
+    }
+    let mut response = HttpResponse::Ok().json(theme.into_inner());
     cors(&mut response);
     Ok(response)
 }

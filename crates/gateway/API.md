@@ -80,6 +80,7 @@ JSON API failures use the JSON envelope.
 | `POST` | `/api/workspaces/inspect` | Yes | `200` `RepositoryMetadata` |
 | `POST` | `/api/workspaces` | Yes | `201` `WorkspaceResponse` |
 | `GET` | `/api/workspaces/{workspace}` | Yes | `200` `WorkspaceResponse` |
+| `PUT` | `/api/workspaces/{workspace}/theme` | Yes | `200` `WorkspaceTheme` |
 | `POST` | `/api/workspaces/{workspace}/sync` | Yes | `200` `SyncResponse` |
 | `POST` | `/api/workspaces/{workspace}/pull` | Yes | `200` `SyncResponse` |
 | `POST` | `/api/workspaces/{workspace}/push` | Yes | `200` `SyncResponse` |
@@ -249,11 +250,48 @@ retryable. A pre-existing config without the explicit
 completion marker is treated the same way; legacy password records are ignored
 and require fresh passkey registration rather than being authenticated.
 
+When created, the workspace is registered at the repository root in
+`.lirox.toml`. Existing repository workspaces share the same file and are keyed
+by their stable workspace slug; the selected subpath is stored as
+`relative_path`. New local repositories start with Catppuccin Mocha. This file
+is separate from the gateway's runtime configuration.
+
+### `PUT /api/workspaces/{workspace}/theme`
+
+Saves the current workspace's resolved theme. `{workspace}` must match the
+configured workspace slug and an entry registered in the repository's
+`.lirox.toml`.
+
+Authentication: a valid `lirox_session` cookie is required.
+
+Request body: JSON `WorkspaceTheme`, for example:
+
+```json
+{
+  "colors": {
+    "bg": "#1e1e2e", "bg_alt": "#181825", "surface": "#313244",
+    "surface_alt": "#45475a", "fg": "#cdd6f4", "muted": "#a6adc8",
+    "subtle": "#a6adc8", "border": "#6c7086", "accent": "#89b4fa",
+    "selection": "#45475a", "success": "#a6e3a1", "warning": "#f9e2af",
+    "error": "#f38ba8", "info": "#89dceb"
+  },
+  "source": { "Preset": "catppuccin-mocha" }
+}
+```
+
+All color roles are required opaque `#RRGGBB` strings. The gateway rejects
+invalid colors and combinations below the configured text/control contrast
+threshold with `400`; an unregistered or non-active workspace returns `404`.
+The saved theme is returned as `WorkspaceTheme` with status `200`. Filesystem or
+TOML failures return `500`. The update preserves sibling workspace themes and
+unrelated repository TOML values/comments.
+
 ### `POST /api/workspaces/inspect`
 
 Clones a remote repository into a temporary directory and reads optional
-workspace metadata from `.lirox.toml` under `[workspace]`. The temporary clone
-is removed before the response is returned.
+workspace metadata from `.lirox.toml` under legacy `[workspace]` or the
+versioned `[workspaces.<slug>]` table. The temporary clone is removed before
+the response is returned.
 
 Authentication: a valid `lirox_session` cookie is required.
 
@@ -538,7 +576,17 @@ and `workspace_root` are strings; `auth_mode` is always `passkey`; and
   "selected_note_body": "# Welcome",
   "tree": [],
   "labels": [],
-  "notes": []
+  "notes": [],
+  "theme": {
+    "colors": {
+      "bg": "#1e1e2e", "bg_alt": "#181825", "surface": "#313244",
+      "surface_alt": "#45475a", "fg": "#cdd6f4", "muted": "#a6adc8",
+      "subtle": "#6c7086", "border": "#45475a", "accent": "#89b4fa",
+      "selection": "#45475a", "success": "#a6e3a1", "warning": "#f9e2af",
+      "error": "#f38ba8", "info": "#89dceb"
+    },
+    "source": { "Preset": "catppuccin-mocha" }
+  }
 }
 ```
 
