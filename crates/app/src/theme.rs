@@ -221,6 +221,52 @@ pub fn validate_contrast(colors: &ThemeColors) -> Vec<ContrastIssue> {
     issues
 }
 
+pub fn theme_css_vars(theme: &WorkspaceTheme) -> String {
+    let colors = &theme.colors;
+    let roles = [
+        &colors.bg,
+        &colors.bg_alt,
+        &colors.surface,
+        &colors.surface_alt,
+        &colors.fg,
+        &colors.muted,
+        &colors.subtle,
+        &colors.border,
+        &colors.accent,
+        &colors.selection,
+        &colors.success,
+        &colors.warning,
+        &colors.error,
+        &colors.info,
+    ];
+    if roles.iter().any(|color| !valid_hex_color(color)) {
+        return theme_css_vars(&WorkspaceTheme::default());
+    }
+    format!(
+        "--lirox-bg: {bg}; --lirox-bg-alt: {bg_alt}; --lirox-surface: {surface}; --lirox-surface-alt: {surface_alt}; --lirox-fg: {fg}; --lirox-muted: {muted}; --lirox-subtle: {subtle}; --lirox-border: {border}; --lirox-accent: {accent}; --lirox-accent-soft: color-mix(in srgb, {accent} 22%, {bg}); --lirox-selection: {selection}; --lirox-success: {success}; --lirox-warning: {warning}; --lirox-error: {error}; --lirox-info: {info}; --lirox-overlay: color-mix(in srgb, {bg} 72%, transparent)",
+        bg = colors.bg,
+        bg_alt = colors.bg_alt,
+        surface = colors.surface,
+        surface_alt = colors.surface_alt,
+        fg = colors.fg,
+        muted = colors.muted,
+        subtle = colors.subtle,
+        border = colors.border,
+        accent = colors.accent,
+        selection = colors.selection,
+        success = colors.success,
+        warning = colors.warning,
+        error = colors.error,
+        info = colors.info,
+    )
+}
+
+fn valid_hex_color(color: &str) -> bool {
+    color.len() == 7
+        && color.starts_with('#')
+        && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn contrast_ratio(foreground: &str, background: &str) -> f64 {
     let luminance = |color: &str| {
         let channel = |start: usize| {
@@ -330,5 +376,23 @@ mod tests {
             }
         );
         let _: ThemeColors = imported.theme.colors;
+    }
+
+    #[test]
+    fn css_variables_map_semantic_colors_and_reject_invalid_css_values() {
+        let mut theme = liroxnotes_shared::WorkspaceTheme::default();
+        theme.colors.accent = "#123456".into();
+        let css = theme_css_vars(&theme);
+        assert!(css.contains("--lirox-accent: #123456;"));
+        assert!(css.contains("--lirox-accent-soft:"));
+        assert!(css.contains("--lirox-overlay:"));
+
+        theme.colors.bg = "#000000; background-image: url(https://invalid)".into();
+        let safe_css = theme_css_vars(&theme);
+        assert!(!safe_css.contains("url("));
+        assert_eq!(
+            safe_css,
+            theme_css_vars(&liroxnotes_shared::WorkspaceTheme::default())
+        );
     }
 }

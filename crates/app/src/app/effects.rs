@@ -1,5 +1,5 @@
 #[cfg(any(target_arch = "wasm32", test))]
-use super::{ApplicationEvent, AuthEvent};
+use super::{ApplicationEvent, AuthEvent, ThemeEvent};
 use super::{ApplicationState, Dispatcher, Effect};
 #[cfg(target_arch = "wasm32")]
 use crate::auth;
@@ -31,7 +31,9 @@ pub(crate) async fn execute_effect(
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn auth_error_event(effect: &Effect, message: String) -> ApplicationEvent {
-    if matches!(effect, Effect::AutoLogin) {
+    if matches!(effect, Effect::SaveWorkspaceTheme { .. }) {
+        ApplicationEvent::Theme(ThemeEvent::SaveFailed(message))
+    } else if matches!(effect, Effect::AutoLogin) {
         ApplicationEvent::Auth(AuthEvent::AutoLoginFailed)
     } else if matches!(effect, Effect::Login) {
         ApplicationEvent::Auth(AuthEvent::OperationFailed(message))
@@ -72,6 +74,14 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                     .await?;
             Ok(Some(ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(
                 view,
+            ))))
+        }
+        Effect::SaveWorkspaceTheme { slug, theme } => {
+            let (path, body) = workspace_theme_request(&slug, &theme);
+            let response = web_json(&path, "PUT", Some(body)).await?;
+            let theme = response_json(response).await?;
+            Ok(Some(ApplicationEvent::Theme(ThemeEvent::SaveSucceeded(
+                theme,
             ))))
         }
         Effect::RegisterPasskey => {
@@ -178,6 +188,50 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
             )))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn workspace_theme_request(
+    slug: &str,
+    theme: &liroxnotes_shared::WorkspaceTheme,
+) -> (String, String) {
+    (
+        format!("/api/workspaces/{slug}/theme"),
+        serde_json::to_string(theme).expect("theme values always serialize to JSON"),
+    )
+}
+
+#[cfg(test)]
+mod theme_effect_tests {
+    use super::*;
+
+    #[test]
+    fn theme_save_effect_targets_workspace_and_serializes_theme() {
+        let theme = liroxnotes_shared::WorkspaceTheme::default();
+
+        let (path, body) = workspace_theme_request("notes", &theme);
+
+        assert_eq!(path, "/api/workspaces/notes/theme");
+        assert_eq!(
+            serde_json::from_str::<liroxnotes_shared::WorkspaceTheme>(&body).unwrap(),
+            theme
+        );
+    }
+
+    #[test]
+    fn theme_save_errors_return_a_retryable_theme_event() {
+        let event = auth_error_event(
+            &Effect::SaveWorkspaceTheme {
+                slug: "notes".into(),
+                theme: liroxnotes_shared::WorkspaceTheme::default(),
+            },
+            "offline".into(),
+        );
+
+        assert!(
+            matches!(event, ApplicationEvent::Theme(ThemeEvent::SaveFailed(message)) if message == "offline")
+        );
     }
 }
 

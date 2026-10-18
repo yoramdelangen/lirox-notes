@@ -17,12 +17,38 @@ pub fn WorkspaceTopBar(view: WorkspaceView) -> Element {
     let context = use_context::<AppContext>();
     let mut state = context.state;
     let dispatcher = context.dispatcher.clone();
+    let tree_dispatcher = dispatcher.clone();
     let workspace_dispatcher = dispatcher.clone();
     let mut workspace_menu = use_signal(|| false);
     let workspace_options = state.read().auth.existing_workspaces.clone();
 
     rsx! {
         header { class: "workspace-topbar flex shrink-0 items-center gap-4 border-b border-[var(--lirox-border)] bg-[var(--lirox-bg)] px-3 py-2",
+            Button {
+                class: "workspace-file-tree-toggle",
+                size: ButtonSize::IconSm,
+                variant: ButtonVariant::Outline,
+                aria_label: "Toggle file tree",
+                title: "Toggle file tree",
+                onclick: move |_| {
+                    let mut state = state;
+                    tree_dispatcher.dispatch(&mut state.write(), CommandInvocation {
+                        id: CommandId::new("workspace.toggle_file_tree"),
+                        args: CommandArgs::None,
+                        source: CommandSource::Pointer,
+                    });
+                },
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    "aria-hidden": "true",
+                    path { d: "M4 6h16M4 12h16M4 18h16" }
+                }
+            }
             div { class: "workspace-topbar-context min-w-0 flex-1",
                 div { class: "workspace-switcher-wrap",
                     Button {
@@ -116,57 +142,8 @@ pub fn WorkspaceTopBar(view: WorkspaceView) -> Element {
 
 #[component]
 pub fn EditorActions() -> Element {
-    let context = use_context::<AppContext>();
-    let state = context.state;
-    let tree_dispatcher = context.dispatcher.clone();
-    let focus_dispatcher = context.dispatcher.clone();
-
     rsx! {
         Menubar { class: "editor-menubar border-0 bg-transparent p-2",
-            MenubarMenu {
-                MenubarTrigger { class: "workspace-mobile-menu", "File" }
-                MenubarContent {
-                    MenubarGroup {
-                        MenubarItem {
-                            Button {
-                                variant: ButtonVariant::Ghost,
-                                aria_label: "Toggle file tree",
-                                onclick: move |_| {
-                                    let mut state = state;
-                                    tree_dispatcher.dispatch(&mut state.write(), CommandInvocation {
-                                        id: CommandId::new("workspace.toggle_file_tree"),
-                                        args: CommandArgs::None,
-                                        source: CommandSource::Pointer,
-                                    });
-                                },
-                                "Toggle file tree"
-                            }
-                        }
-                    }
-                }
-            }
-            MenubarMenu {
-                MenubarTrigger { "View" }
-                MenubarContent {
-                    MenubarGroup {
-                        MenubarItem {
-                            Button {
-                                variant: ButtonVariant::Ghost,
-                                aria_label: "Toggle focus mode",
-                                onclick: move |_| {
-                                    let mut state = state;
-                                    focus_dispatcher.dispatch(&mut state.write(), CommandInvocation {
-                                        id: CommandId::new("workspace.toggle_focus_mode"),
-                                        args: CommandArgs::None,
-                                        source: CommandSource::Pointer,
-                                    });
-                                },
-                                "Focus"
-                            }
-                        }
-                    }
-                }
-            }
             MenubarMenu {
                 MenubarTrigger { "Settings" }
                 MenubarContent {

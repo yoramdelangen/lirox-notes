@@ -6,6 +6,7 @@ import { getCM, vim } from "@replit/codemirror-vim";
 import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { Decoration, DecorationSet, EditorView, WidgetType, lineNumbers, showPanel, type Panel } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
+import { headingDecorationClass } from "./heading";
 
 type EditorRoot = HTMLElement & {
   dataset: {
@@ -70,15 +71,15 @@ const splitHeading = (doc: string): HeadingSplit => {
 const hiddenMarkdownMarker = Decoration.replace({});
 
 const codeEditorHighlightStyle = HighlightStyle.define([
-  { tag: t.comment, color: "#3e4b59", fontStyle: "italic" },
-  { tag: [t.keyword, t.operatorKeyword, t.controlKeyword], color: "#d2a6ff" },
-  { tag: [t.string, t.special(t.string)], color: "#b8cc52" },
-  { tag: [t.number, t.bool, t.null], color: "#ff8f40" },
-  { tag: [t.variableName, t.propertyName, t.name], color: "#e6e1cf" },
-  { tag: [t.typeName, t.className, t.definition(t.variableName)], color: "#59c2ff" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "#95e6cb" },
-  { tag: [t.atom, t.meta, t.url], color: "#ffb454" },
-  { tag: t.heading, color: "#f3f4f5", fontWeight: "bold", textDecoration: "none" }
+  { tag: t.comment, color: "var(--lirox-subtle)", fontStyle: "italic" },
+  { tag: [t.keyword, t.operatorKeyword, t.controlKeyword], color: "var(--lirox-accent)" },
+  { tag: [t.string, t.special(t.string)], color: "var(--lirox-success)" },
+  { tag: [t.number, t.bool, t.null], color: "var(--lirox-warning)" },
+  { tag: [t.variableName, t.propertyName, t.name], color: "var(--lirox-fg)" },
+  { tag: [t.typeName, t.className, t.definition(t.variableName)], color: "var(--lirox-info)" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--lirox-accent)" },
+  { tag: [t.atom, t.meta, t.url], color: "var(--lirox-warning)" },
+  { tag: t.heading, color: "var(--lirox-fg)", fontWeight: "bold", textDecoration: "none" }
 ]);
 
 const isPosInCode = (state: EditorState, pos: number) => {
@@ -272,6 +273,7 @@ const headingDecorations = StateField.define<DecorationSet>({
 
 const buildHeadingDecorations = (state: EditorState) => {
   const doc = state.doc.toString();
+  const main = state.selection.main;
   const decorations = [];
   const headingRegex = /^(#{1,6})\s+.+$/gm;
 
@@ -286,10 +288,13 @@ const buildHeadingDecorations = (state: EditorState) => {
       continue;
     }
 
+    const markerEnd = from + (match[1]?.length ?? 0) + 1;
+    const markersVisible = main.from <= markerEnd && main.to >= from;
+
     decorations.push(
       Decoration.line({
         attributes: {
-          class: `cm-editor-heading-line cm-editor-heading-level-${level}`
+          class: headingDecorationClass(level, markersVisible)
         }
       }).range(from)
     );
@@ -589,7 +594,7 @@ const theme = EditorView.theme({
   "&": {
     height: "100%",
     backgroundColor: "transparent",
-    color: "rgb(var(--theme-text))",
+    color: "var(--lirox-fg)",
     fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
   },
   ".cm-scroller": {
@@ -603,9 +608,9 @@ const theme = EditorView.theme({
     paddingBottom: "1.25rem"
   },
   ".cm-content": {
-    caretColor: "rgb(var(--theme-accent))",
+    caretColor: "var(--lirox-accent)",
     fontFamily: "inherit",
-    fontSize: "1rem",
+    fontSize: "var(--text-base)",
     lineHeight: "1.65"
   },
   ".cm-panels": {

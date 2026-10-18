@@ -5,8 +5,16 @@ use liroxnotes_shared::WorkspaceView;
 #[allow(clippy::large_enum_variant)]
 pub enum ApplicationEvent {
     Workspace(WorkspaceEvent),
+    Theme(ThemeEvent),
     Status(StatusEvent),
     Auth(AuthEvent),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ThemeEvent {
+    PreviewChanged(Option<liroxnotes_shared::WorkspaceTheme>),
+    SaveSucceeded(liroxnotes_shared::WorkspaceTheme),
+    SaveFailed(String),
 }
 
 #[derive(Clone, PartialEq, Eq)]

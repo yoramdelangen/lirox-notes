@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
+use crate::theme::theme_css_vars;
 use crate::{
     app::{ApplicationState, Dispatcher},
     input::InputEvent,
@@ -69,6 +70,14 @@ fn WorkspaceShellContent(
 ) -> Element {
     let context = use_context::<AppContext>();
     let mut state = context.state;
+    let theme = {
+        let state = state.read();
+        state
+            .theme_preview
+            .clone()
+            .unwrap_or_else(|| state.theme.clone())
+    };
+    let theme_style = theme_css_vars(&theme);
     let _viewport_listener = use_hook(move || {
         let mut update_viewport = move || {
             let viewport = if crate::platform::web::viewport::is_narrow() {
@@ -112,6 +121,7 @@ fn WorkspaceShellContent(
     rsx! {
         div {
             id: "workspace-shell",
+            style: "{theme_style}",
             class: "flex h-screen min-h-0 flex-col bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
             onkeydown: onkeydown,
             main {

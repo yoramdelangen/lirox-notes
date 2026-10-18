@@ -6,6 +6,7 @@ use crate::{
     input::{InputScope, InputState, SurfaceKind},
     workspace::WorkspaceState,
 };
+use liroxnotes_shared::WorkspaceTheme;
 use liroxnotes_shared::WorkspaceView;
 
 #[derive(Clone, PartialEq)]
@@ -16,6 +17,8 @@ pub struct ApplicationState {
     pub config: AppConfig,
     pub status: StatusState,
     pub auth: AuthState,
+    pub theme: WorkspaceTheme,
+    pub theme_preview: Option<WorkspaceTheme>,
     pub effect_version: u64,
 }
 
@@ -33,12 +36,15 @@ impl ApplicationState {
             config: AppConfig::defaults(),
             status: StatusState::default(),
             auth: AuthState::default(),
+            theme: WorkspaceTheme::default(),
+            theme_preview: None,
             effect_version: 0,
         }
     }
 
     pub fn from_workspace_view(view: &WorkspaceView) -> Self {
         let mut state = Self::empty();
+        state.theme = view.theme.clone();
         state.domain.workspace_name = view.name.clone();
         state.domain.notes = view
             .notes

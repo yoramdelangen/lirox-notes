@@ -25,7 +25,7 @@ pub fn BottomBar(view: WorkspaceView, active: bool) -> Element {
 
     rsx! {
         footer {
-            class: "editor-status-bar pointer-events-none absolute z-10 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-xs",
+            class: "editor-status-bar pointer-events-none absolute z-10 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-sm",
             span { class: "font-bold text-[var(--lirox-accent)]", "{mode}" }
             span { class: "ml-auto text-[var(--lirox-info)]", "{message}" }
         }

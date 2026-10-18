@@ -53,7 +53,7 @@ impl ButtonSize {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Default => "h-9 px-4 py-2 has-[>svg]:px-3",
-            Self::Xs => "h-6 rounded-md gap-1.5 px-3 text-xs has-[>svg]:px-2.5",
+            Self::Xs => "h-6 rounded-md gap-1.5 px-3 text-sm has-[>svg]:px-2.5",
             Self::Sm => "h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",
             Self::Lg => "h-10 rounded-md px-6 has-[>svg]:px-4",
             Self::Icon => "size-9",

@@ -32,5 +32,8 @@ fn theme_serialization_round_trips() {
 
 #[test]
 fn empty_workspace_defaults_to_catppuccin_mocha() {
-    assert_eq!(WorkspaceView::empty().theme, WorkspaceTheme::catppuccin_mocha());
+    assert_eq!(
+        WorkspaceView::empty().theme,
+        WorkspaceTheme::catppuccin_mocha()
+    );
 }

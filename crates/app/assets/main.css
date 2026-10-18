@@ -1,20 +1,20 @@
 :root {
-    --lirox-bg: #0f1116;
-    --lirox-bg-alt: #151922;
-    --lirox-surface: #191e28;
-    --lirox-surface-alt: #222936;
-    --lirox-fg: #d8dee9;
-    --lirox-muted: #9aa6b8;
-    --lirox-subtle: #687386;
-    --lirox-border: #303847;
-    --lirox-accent: #8fb4ff;
-    --lirox-accent-soft: #26364f;
-    --lirox-selection: #29364b;
-    --lirox-success: #8fc7a3;
-    --lirox-warning: #d6b879;
-    --lirox-error: #d38b8b;
-    --lirox-info: #8bb9cc;
-    --lirox-overlay: rgb(15 17 22 / 0.72);
+    --lirox-bg: #1e1e2e;
+    --lirox-bg-alt: #181825;
+    --lirox-surface: #313244;
+    --lirox-surface-alt: #45475a;
+    --lirox-fg: #cdd6f4;
+    --lirox-muted: #a6adc8;
+    --lirox-subtle: #6c7086;
+    --lirox-border: #45475a;
+    --lirox-accent: #89b4fa;
+    --lirox-accent-soft: color-mix(in srgb, var(--lirox-accent) 22%, var(--lirox-bg));
+    --lirox-selection: #45475a;
+    --lirox-success: #a6e3a1;
+    --lirox-warning: #f9e2af;
+    --lirox-error: #f38ba8;
+    --lirox-info: #89dceb;
+    --lirox-overlay: color-mix(in srgb, var(--lirox-bg) 72%, transparent);
     --background: var(--lirox-bg);
     --foreground: var(--lirox-fg);
     --card: var(--lirox-surface);
@@ -86,13 +86,13 @@ button {
     justify-content: space-between;
     border-bottom: 1px solid var(--lirox-border);
     color: var(--lirox-subtle);
-    font-size: .7rem;
+    font-size: var(--text-sm);
     letter-spacing: .12em;
 }
 
 .auth-topline strong {
     color: var(--lirox-accent);
-    font-size: .8rem;
+    font-size: var(--text-sm);
     letter-spacing: .08em;
 }
 
@@ -104,7 +104,7 @@ button {
 .auth-heading h1 {
     margin: 0;
     color: var(--lirox-fg);
-    font-size: clamp(1.5rem, 4vw, 2rem);
+    font-size: clamp(var(--text-3xl), 4vw, var(--text-4xl));
     letter-spacing: -.04em;
     line-height: 1.1;
 }
@@ -113,14 +113,14 @@ button {
 .auth-help {
     margin: 0;
     color: var(--lirox-muted);
-    font-size: .9rem;
+    font-size: var(--text-lg);
     line-height: 1.6;
 }
 
 .auth-step {
     border-bottom: 1px solid var(--lirox-border);
     color: var(--lirox-accent);
-    font-size: .75rem;
+    font-size: var(--text-base);
     font-weight: 600;
     letter-spacing: .08em;
     text-transform: uppercase;
@@ -147,7 +147,7 @@ button {
 
 .auth-help {
     color: var(--lirox-subtle);
-    font-size: .78rem;
+    font-size: var(--text-sm);
 }
 
 .auth-loading {
@@ -155,7 +155,7 @@ button {
     align-items: center;
     gap: .6rem;
     color: var(--lirox-info);
-    font-size: .8rem;
+    font-size: var(--text-sm);
 }
 
 .auth-loading-dot {
@@ -178,7 +178,7 @@ button {
     display: grid;
     gap: .35rem;
     color: var(--lirox-muted);
-    font-size: .85rem;
+    font-size: var(--text-sm);
 }
 
 #auth-shell input {
@@ -226,7 +226,7 @@ button {
 
 .onboarding-workspace-card span {
     color: var(--lirox-muted);
-    font-size: .8rem;
+    font-size: var(--text-sm);
 }
 
 @media (min-width: 40rem) {
@@ -280,7 +280,6 @@ button {
     }
 }
 
-.workspace-mobile-menu,
 .workspace-action-compact {
     display: none;
 }
@@ -322,7 +321,7 @@ button {
     box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
     color: var(--lirox-muted, rgb(var(--theme-muted)));
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--text-sm);
     line-height: 1;
 }
 
@@ -339,7 +338,7 @@ button {
     border-radius: .375rem;
     color: var(--lirox-muted, rgb(var(--theme-muted)));
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 500;
     line-height: 1;
     transition: background-color 120ms ease, color 120ms ease;
@@ -397,10 +396,6 @@ button {
     .workspace-topbar {
         padding-block: .5rem;
         padding-inline: max(.75rem, env(safe-area-inset-left)) max(.75rem, env(safe-area-inset-right));
-    }
-
-    .workspace-mobile-menu {
-        display: inline-flex;
     }
 
     #workspace-shell .editor-status-bar {
@@ -472,7 +467,7 @@ button {
 .workspace-switcher-empty {
     padding: .5rem;
     color: var(--lirox-muted);
-    font-size: .75rem;
+    font-size: var(--text-base);
 }
 
 .git-status {
@@ -480,7 +475,7 @@ button {
     flex-shrink: 0;
     gap: .5rem;
     color: var(--lirox-muted);
-    font-size: .7rem;
+    font-size: var(--text-sm);
 }
 
 .workspace-sidebar-footer {
@@ -538,8 +533,7 @@ button {
 
 @media (pointer: coarse) {
     #auth-shell button,
-    #workspace-shell button,
-    .workspace-mobile-menu {
+    #workspace-shell button {
         min-height: 2.75rem;
     }
 }

@@ -1,10 +1,13 @@
-use super::{ApplicationEvent, ApplicationState, AuthEvent, StatusEvent, WorkspaceEvent};
+use super::{
+    ApplicationEvent, ApplicationState, AuthEvent, StatusEvent, ThemeEvent, WorkspaceEvent,
+};
 use crate::auth::{screen_for, AuthOperation, OnboardingStatus, Screen};
 use crate::{
     command::{CommandArgs, CommandInvocation, Direction},
     input::InputMode,
     workspace::UiMode,
 };
+use liroxnotes_shared::WorkspaceTheme;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
@@ -21,6 +24,7 @@ pub enum Effect {
     CreateWorkspace(crate::auth::SetupFields),
     LoadExistingWorkspaces,
     InspectRepository { repo_url: String, branch: String },
+    SaveWorkspaceTheme { slug: String, theme: WorkspaceTheme },
 }
 
 pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec<Effect> {
@@ -33,9 +37,22 @@ pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec
             state.workspace.overlays.pop();
             state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
         }
+        ApplicationEvent::Theme(event) => apply_theme_event(state, event),
         ApplicationEvent::Auth(event) => return apply_auth_event(state, event),
     }
     Vec::new()
+}
+
+fn apply_theme_event(state: &mut ApplicationState, event: ThemeEvent) {
+    match event {
+        ThemeEvent::PreviewChanged(theme) => state.theme_preview = theme,
+        ThemeEvent::SaveSucceeded(theme) => {
+            state.theme = theme;
+            state.theme_preview = None;
+            state.status.message = None;
+        }
+        ThemeEvent::SaveFailed(message) => state.status.message = Some(message),
+    }
 }
 
 fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effect> {
@@ -206,6 +223,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             let hydrated = ApplicationState::from_workspace_view(&view);
             state.domain = hydrated.domain;
             state.workspace = hydrated.workspace;
+            state.theme = hydrated.theme;
             auth.operation = AuthOperation::None;
             auth.workspace = Some(view);
             if auth.bootstrap.as_ref().is_some_and(|bootstrap| {

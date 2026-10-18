@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
 use crate::command::SurfaceId;
+use crate::theme::theme_css_vars;
 
 pub mod app;
 pub(crate) use app::execute_effect;
@@ -44,7 +45,7 @@ pub enum SidebarMode {
 
 #[component]
 pub fn App() -> Element {
-    let mut state = use_signal(ApplicationState::empty);
+    let mut state = use_signal(initial_application_state);
     let dispatcher = use_hook(Dispatcher::new);
     use_context_provider(|| AppContext {
         state,
@@ -59,6 +60,19 @@ pub fn App() -> Element {
     });
     let authenticated = state.read().auth.screen == auth::Screen::Workbench
         && state.read().auth.workspace.is_some();
+    let theme = {
+        let state = state.read();
+        state
+            .theme_preview
+            .clone()
+            .unwrap_or_else(|| state.theme.clone())
+    };
+    let theme_style = theme_css_vars(&theme);
+    #[cfg(target_arch = "wasm32")]
+    use_effect(move || {
+        let theme = state.read().theme.clone();
+        crate::platform::web::storage::save_theme(&theme);
+    });
     let effect_dispatcher = dispatcher.clone();
     use_effect(move || {
         let _ = state.read().effect_version;
@@ -74,24 +88,37 @@ pub fn App() -> Element {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Script { src: EDITOR_JS }
-        if authenticated {
-            div {
-                class: "relative min-h-screen",
-                WorkspaceShell {
-                    view: state.read().auth.workspace.clone().unwrap_or_else(WorkspaceView::empty),
-                    focus: if state.read().workspace.focus.active_surface == SurfaceId::FILE_TREE {
-                        FocusTarget::Sidebar
-                    } else {
-                        FocusTarget::Editor
-                    },
-                    sidebar_mode: SidebarMode::Tree,
-                    on_select_note: None,
+        div {
+            style: "{theme_style}",
+            if authenticated {
+                div {
+                    class: "relative min-h-screen",
+                    WorkspaceShell {
+                        view: state.read().auth.workspace.clone().unwrap_or_else(WorkspaceView::empty),
+                        focus: if state.read().workspace.focus.active_surface == SurfaceId::FILE_TREE {
+                            FocusTarget::Sidebar
+                        } else {
+                            FocusTarget::Editor
+                        },
+                        sidebar_mode: SidebarMode::Tree,
+                        on_select_note: None,
+                    }
                 }
+            } else {
+                auth::AuthShell {}
             }
-        } else {
-            auth::AuthShell {}
         }
     }
+}
+
+#[allow(unused_mut)]
+fn initial_application_state() -> ApplicationState {
+    let mut state = ApplicationState::empty();
+    #[cfg(target_arch = "wasm32")]
+    if let Some(theme) = crate::platform::web::storage::load_theme() {
+        state.theme = theme;
+    }
+    state
 }
 
 pub fn workspace_note_path_from_location(path: &str) -> Option<String> {

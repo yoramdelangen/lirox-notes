@@ -144,7 +144,7 @@ fn ProfileFooter(focus: FocusTarget, profile_name: String, note_count: usize) ->
         footer { class: "workspace-sidebar-footer border-t border-[var(--lirox-border)] px-3 py-2",
             div { class: "flex items-center justify-between gap-2",
                 div { class: "min-w-0",
-                    strong { class: "block truncate text-xs text-[var(--lirox-fg)]", "{profile_name}" }
+                    strong { class: "block truncate text-sm text-[var(--lirox-fg)]", "{profile_name}" }
                     span { class: "block truncate text-[.7rem] text-[var(--lirox-subtle)]", "{focus:?} · {note_count} notes" }
                 }
                 div { class: "workspace-profile-wrap",

@@ -10,7 +10,9 @@ pub(crate) use effects::execute_effect;
 pub(crate) use effects::{
     auth_error_event, discoverable_public_key_options, gateway_url, public_key_options,
 };
-pub use event::{ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, WorkspaceEvent};
+pub use event::{
+    ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, ThemeEvent, WorkspaceEvent,
+};
 pub use reducer::{apply_event, Effect};
 pub use state::{ApplicationState, StatusState};
 
@@ -236,6 +238,65 @@ mod tests {
         assert_eq!(state.domain.selected_note.as_deref(), Some("notes/one.md"));
         dispatch(&mut state, command("file_tree.open_selected"));
         assert_eq!(state.domain.document, "# One");
+    }
+
+    #[test]
+    fn workspace_loaded_applies_the_active_theme() {
+        let mut view = liroxnotes_shared::WorkspaceView::empty();
+        view.theme.colors.accent = "#123456".into();
+        let expected = view.theme.clone();
+        let mut state = ApplicationState::empty();
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(view)),
+        );
+
+        assert_eq!(state.theme, expected);
+    }
+
+    #[test]
+    fn theme_preview_can_be_changed_and_cleared() {
+        let mut state = ApplicationState::empty();
+        let mut preview = liroxnotes_shared::WorkspaceTheme::default();
+        preview.colors.accent = "#123456".into();
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::Theme(ThemeEvent::PreviewChanged(Some(preview.clone()))),
+        );
+        assert_eq!(state.theme_preview, Some(preview));
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::Theme(ThemeEvent::PreviewChanged(None)),
+        );
+        assert_eq!(state.theme_preview, None);
+    }
+
+    #[test]
+    fn successful_theme_save_commits_preview_and_failed_save_keeps_it() {
+        let mut state = ApplicationState::empty();
+        let mut preview = liroxnotes_shared::WorkspaceTheme::default();
+        preview.colors.accent = "#123456".into();
+        apply_event(
+            &mut state,
+            ApplicationEvent::Theme(ThemeEvent::PreviewChanged(Some(preview.clone()))),
+        );
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::Theme(ThemeEvent::SaveFailed("offline".into())),
+        );
+        assert_eq!(state.theme_preview, Some(preview.clone()));
+        assert_eq!(state.theme, liroxnotes_shared::WorkspaceTheme::default());
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::Theme(ThemeEvent::SaveSucceeded(preview.clone())),
+        );
+        assert_eq!(state.theme, preview);
+        assert_eq!(state.theme_preview, None);
     }
 
     #[test]
