@@ -13,7 +13,7 @@ use liroxnotes_shared::{workspace_view_from_notes, WorkspaceNote};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     env, fs,
     io::Write,
     path::{Component, Path, PathBuf},
@@ -587,6 +587,24 @@ pub fn slugify(value: &str) -> Option<String> {
     (!slug.is_empty()).then_some(slug)
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RepositoryConfig {
+    #[serde(default)]
+    pub format_version: u32,
+    #[serde(default)]
+    pub workspaces: BTreeMap<String, RepositoryWorkspace>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RepositoryWorkspace {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub relative_path: String,
+    #[serde(default)]
+    pub theme: liroxnotes_shared::WorkspaceTheme,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct RepositoryMetadata {
     name: Option<String>,
@@ -594,28 +612,260 @@ struct RepositoryMetadata {
 }
 
 fn parse_lirox_toml(input: &str) -> Option<RepositoryMetadata> {
-    let mut metadata = RepositoryMetadata::default();
-    let mut in_workspace = false;
-    for line in input.lines() {
-        let line = line.split_once('#').map_or(line, |(line, _)| line).trim();
-        if line.starts_with('[') {
-            in_workspace = line == "[workspace]";
-            continue;
-        }
-        if !in_workspace {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let value = value.trim().trim_matches(['"', '\'']);
-        match key.trim() {
-            "name" if !value.is_empty() => metadata.name = Some(value.to_string()),
-            "slug" if !value.is_empty() => metadata.slug = slugify(value),
-            _ => {}
+    let document = input.parse::<toml_edit::DocumentMut>().ok()?;
+    if let Some(workspaces) = document
+        .get("workspaces")
+        .and_then(toml_edit::Item::as_table)
+    {
+        if let Some((slug, workspace)) = workspaces.iter().next() {
+            let name = workspace
+                .get("name")
+                .and_then(toml_edit::Item::as_str)
+                .map(str::to_owned);
+            return Some(RepositoryMetadata {
+                name,
+                slug: slugify(slug),
+            });
         }
     }
-    (metadata.name.is_some() || metadata.slug.is_some()).then_some(metadata)
+    let workspace = document.get("workspace")?.as_table()?;
+    let name = workspace.get("name")?.as_str().map(str::to_owned);
+    let slug = workspace
+        .get("slug")
+        .and_then(toml_edit::Item::as_str)
+        .and_then(slugify);
+    (name.is_some() || slug.is_some()).then_some(RepositoryMetadata { name, slug })
+}
+
+const REPOSITORY_CONFIG_FILE: &str = ".lirox.toml";
+const REPOSITORY_CONFIG_VERSION: u32 = 1;
+
+pub fn load_repository_config(root: &Path) -> std::io::Result<RepositoryConfig> {
+    let path = root.join(REPOSITORY_CONFIG_FILE);
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(RepositoryConfig {
+                format_version: REPOSITORY_CONFIG_VERSION,
+                ..RepositoryConfig::default()
+            })
+        }
+        Err(error) => return Err(error),
+    };
+    let document = parse_repository_document(&contents)?;
+    let mut config: RepositoryConfig = toml_edit::de::from_str(&contents).map_err(invalid_toml)?;
+    let version = document
+        .get("format_version")
+        .and_then(toml_edit::Item::as_integer)
+        .unwrap_or(0);
+    if version > i64::from(REPOSITORY_CONFIG_VERSION) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unsupported .lirox.toml format version {version}"),
+        ));
+    }
+    config.format_version = REPOSITORY_CONFIG_VERSION;
+    if let Some(legacy) = legacy_workspace(&document) {
+        if let Some(slug) = legacy.slug.clone() {
+            config
+                .workspaces
+                .entry(slug)
+                .or_insert(RepositoryWorkspace {
+                    name: legacy.name.unwrap_or_default(),
+                    relative_path: String::new(),
+                    theme: liroxnotes_shared::WorkspaceTheme::default(),
+                });
+        }
+    }
+    Ok(config)
+}
+
+pub fn register_workspace(
+    root: &Path,
+    slug: &str,
+    name: &str,
+    relative_path: &str,
+    theme: &liroxnotes_shared::WorkspaceTheme,
+) -> std::io::Result<()> {
+    validate_workspace_slug(slug)?;
+    validate_relative_workspace_path(relative_path)?;
+    let mut document = load_repository_document(root)?;
+    migrate_legacy_workspace(&mut document);
+    let mut workspace = toml_edit::Table::new();
+    workspace["name"] = toml_edit::value(name);
+    workspace["relative_path"] = toml_edit::value(relative_path);
+    workspace["theme"] = theme_item(theme)?;
+    let workspaces = ensure_table(document.as_table_mut(), "workspaces")?;
+    workspaces.insert(slug, toml_edit::Item::Table(workspace));
+    persist_repository_document(root, document)
+}
+
+pub fn save_workspace_theme(
+    root: &Path,
+    slug: &str,
+    theme: &liroxnotes_shared::WorkspaceTheme,
+) -> std::io::Result<()> {
+    validate_workspace_slug(slug)?;
+    let mut document = load_repository_document(root)?;
+    migrate_legacy_workspace(&mut document);
+    let workspaces = document
+        .get_mut("workspaces")
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "workspace is not registered")
+        })?;
+    let workspace = workspaces
+        .get_mut(slug)
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "workspace is not registered")
+        })?;
+    workspace.insert("theme", theme_item(theme)?);
+    persist_repository_document(root, document)
+}
+
+fn parse_repository_document(input: &str) -> std::io::Result<toml_edit::DocumentMut> {
+    input.parse().map_err(invalid_toml)
+}
+
+fn invalid_toml(error: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+}
+
+fn load_repository_document(root: &Path) -> std::io::Result<toml_edit::DocumentMut> {
+    let contents = match fs::read_to_string(root.join(REPOSITORY_CONFIG_FILE)) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    let mut document = parse_repository_document(&contents)?;
+    let version = document
+        .get("format_version")
+        .and_then(toml_edit::Item::as_integer)
+        .unwrap_or(0);
+    if version > i64::from(REPOSITORY_CONFIG_VERSION) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unsupported .lirox.toml format version {version}"),
+        ));
+    }
+    document["format_version"] = toml_edit::value(i64::from(REPOSITORY_CONFIG_VERSION));
+    Ok(document)
+}
+
+fn legacy_workspace(document: &toml_edit::DocumentMut) -> Option<RepositoryMetadata> {
+    let workspace = document.get("workspace")?.as_table()?;
+    let name = workspace
+        .get("name")
+        .and_then(toml_edit::Item::as_str)
+        .map(str::to_owned);
+    let slug = workspace
+        .get("slug")
+        .and_then(toml_edit::Item::as_str)
+        .and_then(slugify);
+    (name.is_some() || slug.is_some()).then_some(RepositoryMetadata { name, slug })
+}
+
+fn migrate_legacy_workspace(document: &mut toml_edit::DocumentMut) {
+    let Some(metadata) = legacy_workspace(document) else {
+        return;
+    };
+    let Some(slug) = metadata.slug else {
+        return;
+    };
+    let Ok(workspaces) = ensure_table(document.as_table_mut(), "workspaces") else {
+        return;
+    };
+    if !workspaces.contains_key(&slug) {
+        let mut workspace = toml_edit::Table::new();
+        workspace["name"] = toml_edit::value(metadata.name.unwrap_or_default());
+        workspace["relative_path"] = toml_edit::value("");
+        workspace["theme"] = theme_item(&liroxnotes_shared::WorkspaceTheme::default())
+            .expect("serializing the built-in theme cannot fail");
+        workspaces.insert(&slug, toml_edit::Item::Table(workspace));
+    }
+}
+
+fn ensure_table<'a>(
+    table: &'a mut toml_edit::Table,
+    key: &str,
+) -> std::io::Result<&'a mut toml_edit::Table> {
+    if !table.contains_key(key) {
+        table.insert(key, toml_edit::Item::Table(toml_edit::Table::new()));
+    }
+    table
+        .get_mut(key)
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{key} must be a table"),
+            )
+        })
+}
+
+fn theme_item(theme: &liroxnotes_shared::WorkspaceTheme) -> std::io::Result<toml_edit::Item> {
+    let document = toml_edit::ser::to_document(theme).map_err(invalid_toml)?;
+    Ok(toml_edit::Item::Table(document.into_table()))
+}
+
+fn validate_workspace_slug(slug: &str) -> std::io::Result<()> {
+    if slug.is_empty()
+        || !slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid workspace slug",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_relative_workspace_path(path: &str) -> std::io::Result<()> {
+    if path.starts_with(['/', '\\'])
+        || path
+            .split(['/', '\\'])
+            .any(|part| matches!(part, ".." | "."))
+        || Path::new(path).components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+                    | Component::CurDir
+            )
+        })
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "workspace path must be relative",
+        ));
+    }
+    Ok(())
+}
+
+fn persist_repository_document(
+    root: &Path,
+    document: toml_edit::DocumentMut,
+) -> std::io::Result<()> {
+    fs::create_dir_all(root)?;
+    let path = root.join(REPOSITORY_CONFIG_FILE);
+    let temporary = root.join(format!(".{REPOSITORY_CONFIG_FILE}.{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(document.to_string().as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temporary, &path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
 }
 
 pub fn ensure_workspace(workspace: &Path) -> std::io::Result<()> {

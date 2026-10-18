@@ -1,9 +1,11 @@
 use liroxnotes_gateway::{
     changed_count, commit_note, configure_git_remote, configured_profile, delete_note_file,
-    ensure_workspace, format_config, is_installed, parse_config, parse_onboarding_form,
-    port_from_args, push_workspace, safe_note_path, save_config, save_note_body,
-    workspace_view_for_config, GatewayConfig, RuntimePaths,
+    ensure_workspace, format_config, is_installed, load_repository_config, parse_config,
+    parse_onboarding_form, port_from_args, push_workspace, register_workspace, safe_note_path,
+    save_config, save_note_body, save_workspace_theme, workspace_view_for_config, GatewayConfig,
+    RuntimePaths,
 };
+use liroxnotes_shared::WorkspaceTheme;
 use std::{
     fs,
     path::PathBuf,
@@ -19,6 +21,107 @@ fn temp_root(name: &str) -> PathBuf {
             .unwrap()
             .as_nanos()
     ))
+}
+
+#[test]
+fn repository_config_registers_workspaces_and_isolates_theme_updates() {
+    let root = temp_root("repository-config");
+    register_workspace(&root, "notes", "Notes", "notes", &WorkspaceTheme::default()).unwrap();
+    register_workspace(
+        &root,
+        "journal",
+        "Journal",
+        "journal",
+        &WorkspaceTheme::default(),
+    )
+    .unwrap();
+
+    let mut changed = WorkspaceTheme::default();
+    changed.colors.accent = "#112233".into();
+    save_workspace_theme(&root, "notes", &changed).unwrap();
+
+    let config = load_repository_config(&root).unwrap();
+    assert_eq!(config.format_version, 1);
+    assert_eq!(config.workspaces["notes"].name, "Notes");
+    assert_eq!(config.workspaces["notes"].relative_path, "notes");
+    assert_eq!(config.workspaces["notes"].theme, changed);
+    assert_eq!(
+        config.workspaces["journal"].theme,
+        WorkspaceTheme::default()
+    );
+    assert!(fs::read_to_string(root.join(".lirox.toml"))
+        .unwrap()
+        .contains("format_version = 1"));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repository_config_migrates_legacy_metadata_without_dropping_other_toml() {
+    let root = temp_root("repository-legacy");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join(".lirox.toml"),
+        "# keep this comment\n[workspace]\nname = \"Team Notes\"\nslug = \"team-notes\"\ncustom = \"keep\"\n[other]\nvalue = 7\n",
+    )
+    .unwrap();
+
+    register_workspace(&root, "next", "Next", "next", &WorkspaceTheme::default()).unwrap();
+
+    let contents = fs::read_to_string(root.join(".lirox.toml")).unwrap();
+    let config = load_repository_config(&root).unwrap();
+    assert!(contents.contains("# keep this comment"));
+    assert!(contents.contains("custom = \"keep\""));
+    assert!(contents.contains("[other]"));
+    assert_eq!(config.workspaces["team-notes"].name, "Team Notes");
+    assert_eq!(
+        config.workspaces["team-notes"].theme,
+        WorkspaceTheme::default()
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repository_config_rejects_bad_versions_paths_slugs_and_unregistered_themes() {
+    let root = temp_root("repository-invalid");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join(".lirox.toml"), "format_version = 2\n").unwrap();
+    assert!(load_repository_config(&root).is_err());
+    fs::remove_file(root.join(".lirox.toml")).unwrap();
+
+    assert!(register_workspace(&root, "", "Bad", "", &WorkspaceTheme::default()).is_err());
+    assert!(register_workspace(
+        &root,
+        "notes",
+        "Bad",
+        "../outside",
+        &WorkspaceTheme::default()
+    )
+    .is_err());
+    assert!(register_workspace(
+        &root,
+        "notes",
+        "Bad",
+        r"..\outside",
+        &WorkspaceTheme::default()
+    )
+    .is_err());
+    register_workspace(&root, "notes", "Notes", "", &WorkspaceTheme::default()).unwrap();
+    assert!(save_workspace_theme(&root, "missing", &WorkspaceTheme::default()).is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn repository_config_failed_write_keeps_existing_file_unchanged() {
+    let root = temp_root("repository-write-failure");
+    fs::write(&root, "not a directory").unwrap();
+
+    assert!(register_workspace(&root, "notes", "Notes", "", &WorkspaceTheme::default()).is_err());
+    assert_eq!(fs::read_to_string(&root).unwrap(), "not a directory");
+
+    let _ = fs::remove_file(root);
 }
 
 #[test]
