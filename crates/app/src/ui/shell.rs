@@ -69,13 +69,25 @@ fn WorkspaceShellContent(
 ) -> Element {
     let context = use_context::<AppContext>();
     let mut state = context.state;
-    use_effect(move || {
-        let viewport = if crate::platform::web::viewport::is_narrow() {
-            ViewportMode::Narrow
-        } else {
-            ViewportMode::Wide
+    let _viewport_listener = use_hook(move || {
+        let mut update_viewport = move || {
+            let viewport = if crate::platform::web::viewport::is_narrow() {
+                ViewportMode::Narrow
+            } else {
+                ViewportMode::Wide
+            };
+            state.write().workspace.set_viewport(viewport);
         };
-        state.write().workspace.set_viewport(viewport);
+        update_viewport();
+
+        #[cfg(target_arch = "wasm32")]
+        let resize_listener = crate::platform::web::viewport::ResizeListener::new(update_viewport)
+            .map(std::rc::Rc::new);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let resize_listener = ();
+
+        resize_listener
     });
     let onkeydown = move |event: KeyboardEvent| {
         let Some(InputEvent::Key(stroke)) = keyboard::normalize_keyboard_event(&event) else {
