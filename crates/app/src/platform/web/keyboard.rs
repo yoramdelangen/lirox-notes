@@ -1,5 +1,6 @@
 use crate::input::{InputEvent, Key, KeyStroke, Modifiers};
 use dioxus::html::{KeyboardEvent, ModifiersInteraction};
+#[cfg(target_arch = "wasm32")]
 use dioxus::web::WebEventExt;
 
 pub fn normalize_keyboard_event(event: &KeyboardEvent) -> Option<InputEvent> {
@@ -41,6 +42,7 @@ fn normalize_key(
     )))
 }
 
+#[cfg(target_arch = "wasm32")]
 pub fn is_editable_control(event: &KeyboardEvent) -> bool {
     let Some(web_event) = event.data().try_as_web_event() else {
         return false;
@@ -56,6 +58,12 @@ pub fn is_editable_control(event: &KeyboardEvent) -> bool {
         || element
             .dyn_ref::<web_sys::HtmlElement>()
             .is_some_and(web_sys::HtmlElement::is_content_editable)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_editable_control(_event: &KeyboardEvent) -> bool {
+    // shortcut: desktop KeyboardData has no DOM target, keep WebView keyboard input unfiltered until a native target adapter exists.
+    false
 }
 
 pub fn should_intercept(event: &KeyboardEvent) -> bool {

@@ -25,7 +25,7 @@ mod tests {
 
         assert!(body.contains("<title>Test</title>"));
         assert!(body.contains("    body\n"));
-        assert!(body.contains("href=\"/assets/main.css\""));
+        assert!(body.contains("href=\"/assets/main.compiled.css\""));
         assert!(body.contains("href=\"/assets/tailwind.css\""));
     }
 }

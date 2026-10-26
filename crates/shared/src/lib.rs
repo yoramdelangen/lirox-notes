@@ -6,6 +6,53 @@ pub use theme::{ThemeColors, ThemeSource, WorkspaceTheme};
 
 pub const APP_NAME: &str = "LiroxNotes";
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OnboardingStatus {
+    NotStarted,
+    WorkspaceRequired,
+    Complete,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GatewayConfigResponse {
+    pub slug: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BootstrapResponse {
+    pub installed: bool,
+    pub passkey_exists: bool,
+    pub onboarding: OnboardingStatus,
+    pub authenticated: bool,
+    pub user: Option<String>,
+    pub display_name: Option<String>,
+    pub workspace_root: String,
+    pub workspace: Option<GatewayConfigResponse>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceFile {
+    pub path: String,
+    pub body: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositorySummary {
+    pub id: String,
+    pub repo_url: String,
+    pub branch: String,
+    pub connected: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceSync {
+    pub ok: bool,
+    pub pulled: bool,
+    pub pushed: bool,
+    pub message: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeKind {
     Folder,

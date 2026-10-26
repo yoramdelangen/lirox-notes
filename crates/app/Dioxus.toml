@@ -13,8 +13,9 @@ reload_html = true
 # include `assets` in web platform
 [web.resource]
 
-# Additional CSS style files
-style = ["assets/main.css", "assets/tailwind.css"]
+# Stylesheets are linked from `App` via `asset!()` so they are hashed and
+# bundled; listing them here too would load them twice.
+style = []
 
 [web.resource.dev]
 script = []

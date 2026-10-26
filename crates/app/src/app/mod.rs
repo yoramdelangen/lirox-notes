@@ -8,7 +8,7 @@ pub use dispatcher::{dispatch, Dispatcher};
 pub(crate) use effects::execute_effect;
 #[cfg(test)]
 pub(crate) use effects::{
-    auth_error_event, discoverable_public_key_options, gateway_url, public_key_options,
+    auth_error_event, discoverable_public_key_options, login_public_key_options, public_key_options,
 };
 pub use event::{
     ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, ThemeEvent, WorkspaceEvent,
@@ -249,7 +249,7 @@ mod tests {
 
         apply_event(
             &mut state,
-            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(view)),
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(Box::new(view))),
         );
 
         assert_eq!(state.theme, expected);

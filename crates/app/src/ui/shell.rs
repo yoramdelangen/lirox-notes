@@ -78,26 +78,22 @@ fn WorkspaceShellContent(
             .unwrap_or_else(|| state.theme.clone())
     };
     let theme_style = theme_css_vars(&theme);
-    let _viewport_listener = use_hook(move || {
-        let mut update_viewport = move || {
-            let viewport = if crate::platform::web::viewport::is_narrow() {
-                ViewportMode::Narrow
-            } else {
-                ViewportMode::Wide
-            };
-            state.write().workspace.set_viewport(viewport);
+    #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
+    let mut update_viewport = move || {
+        let viewport = if crate::platform::web::viewport::is_narrow() {
+            ViewportMode::Narrow
+        } else {
+            ViewportMode::Wide
         };
+        state.write().workspace.set_viewport(viewport);
+    };
+    #[cfg(target_arch = "wasm32")]
+    let _viewport_listener = use_hook(move || {
         update_viewport();
-
-        #[cfg(target_arch = "wasm32")]
-        let resize_listener = crate::platform::web::viewport::ResizeListener::new(update_viewport)
-            .map(std::rc::Rc::new);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let resize_listener = ();
-
-        resize_listener
+        crate::platform::web::viewport::ResizeListener::new(update_viewport).map(std::rc::Rc::new)
     });
+    #[cfg(not(target_arch = "wasm32"))]
+    use_hook(update_viewport);
     let onkeydown = move |event: KeyboardEvent| {
         let Some(InputEvent::Key(stroke)) = keyboard::normalize_keyboard_event(&event) else {
             return;

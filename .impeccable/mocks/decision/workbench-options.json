@@ -1,0 +1,46 @@
+{
+  "title": "Choose the workbench layout",
+  "question": "Which arrangement best keeps writing focused while making navigation clear on both desktop and mobile?",
+  "options": [
+    {
+      "id": "assigned",
+      "kind": "assigned",
+      "label": "Editor-led split",
+      "kicker": "THE ROLL",
+      "thesis": "Keep the note dominant and the file tree close at hand; on phones, navigation becomes an explicit touch drawer.",
+      "palette": ["#111820", "#1b2730", "#d6e0e5", "#7bb8a5"],
+      "materials": ["quiet ink surfaces", "fine structural rules"],
+      "viewport": "Desktop: slim workspace header, compact file tree at left, wide editor at right, one status line. Mobile: editor-first canvas with labeled browse and note actions; no Vim mode indicator or keyboard-only controls.",
+      "risk": "The split needs a deliberate mobile transition or the file tree will feel cramped.",
+      "html": ".impeccable/mocks/decision/workbench-assigned.html",
+      "comp": ".impeccable/mocks/decision/workbench-assigned.webp"
+    },
+    {
+      "id": "rail-context",
+      "kind": "dealt",
+      "label": "Rail and context pane",
+      "thesis": "A narrow persistent destination rail separates navigation from the selected file list, leaving the editor to own the remaining width.",
+      "palette": ["#111820", "#202d35", "#e1e8eb", "#c2a56a"],
+      "materials": ["matte workspace surfaces", "single-pixel dividers"],
+      "viewport": "Desktop: slim labeled destination rail, contextual file list, editor. Mobile: a single editor canvas with a bottom touch bar for Browse, New note, and Save; Vim controls stay absent.",
+      "risk": "The extra navigation layer could cost space without enough destinations.",
+      "html": ".impeccable/mocks/decision/workbench-rail-context.html",
+      "comp": ".impeccable/mocks/decision/workbench-rail-context.webp"
+    },
+    {
+      "id": "editor-first",
+      "kind": "dealt",
+      "label": "Editor-first canvas",
+      "thesis": "Give writing the whole stage and reveal workspace navigation only when asked, keeping the mobile model consistent with desktop.",
+      "palette": ["#151a1f", "#252d33", "#e0e5e7", "#8ca9c8"],
+      "materials": ["soft charcoal planes", "precise active-state markers"],
+      "viewport": "Desktop: compact header, full-width editor, file browser as a left overlay. Mobile: the same editor-first canvas, with clear labeled touch actions and no Vim mode affordances.",
+      "risk": "Frequent note switching adds an extra navigation step.",
+      "html": ".impeccable/mocks/decision/workbench-editor-first.html",
+      "comp": ".impeccable/mocks/decision/workbench-editor-first.webp"
+    }
+  ],
+  "reroll": {"registers": ["safer", "bolder"]},
+  "buildPath": {"value": "code", "toggle": false},
+  "steer": true
+}

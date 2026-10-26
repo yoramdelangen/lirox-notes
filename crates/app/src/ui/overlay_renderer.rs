@@ -3,7 +3,7 @@ use liroxnotes_shared::WorkspaceView;
 
 use crate::{
     command::{CommandArgs, CommandId, CommandInvocation, CommandSource},
-    components::button::{Button, ButtonSize, ButtonVariant},
+    components::sheet::Sheet,
     ui::surfaces::FileTreeSurface,
     workspace::{OverlayInputPolicy, OverlayPlacement},
     AppContext,
@@ -25,38 +25,27 @@ pub fn OverlayRenderer(
     }
     let mut state = context.state;
     let dispatcher = context.dispatcher.clone();
+
     rsx! {
-        div {
-            class: "absolute inset-0 z-10 bg-[var(--lirox-overlay)]",
-            div {
-                class: "h-full w-full border-r border-[var(--lirox-border)] bg-[var(--lirox-bg-alt)] shadow-xl",
-                role: "dialog",
-                aria_label: "File tree overlay",
-                aria_modal: "true",
-                tabindex: "-1",
-                 Button {
-                     class: "absolute right-3 top-3 z-10",
-                     size: ButtonSize::Sm,
-                     variant: ButtonVariant::Outline,
-                    autofocus: true,
-                    aria_label: "Close file tree overlay",
-                    onclick: move |_| dispatcher.dispatch(
-                        &mut state.write(),
-                        CommandInvocation {
-                            id: CommandId::new("overlay.close_top"),
-                            args: CommandArgs::None,
-                            source: CommandSource::Pointer,
-                        },
-                    ),
-                    "Close"
-                }
-                FileTreeSurface {
-                    view,
-                    active: true,
-                    focus: crate::FocusTarget::Sidebar,
-                    sidebar_mode: crate::SidebarMode::Tree,
-                    on_select_note,
-                }
+        Sheet {
+            label: "File tree",
+            on_close: move |_| {
+                dispatcher.dispatch(
+                    &mut state.write(),
+                    CommandInvocation {
+                        id: CommandId::new("overlay.close_top"),
+                        args: CommandArgs::None,
+                        source: CommandSource::Pointer,
+                    },
+                );
+            },
+            FileTreeSurface {
+                view,
+                active: true,
+                focus: crate::FocusTarget::Sidebar,
+                sidebar_mode: crate::SidebarMode::Tree,
+                in_sheet: true,
+                on_select_note,
             }
         }
     }

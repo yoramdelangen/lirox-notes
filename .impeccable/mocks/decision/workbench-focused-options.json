@@ -1,0 +1,43 @@
+{
+  "title": "Choose the editor-focused arrangement",
+  "question": "Which editor-led layout feels most like a focused Neovim workbench while staying clear and touch-friendly on mobile?",
+  "options": [
+    {
+      "id": "editor-split",
+      "kind": "assigned",
+      "label": "Editor-led split",
+      "kicker": "THE ROLL",
+      "thesis": "Keep the file tree close, but give the note roughly four-fifths of the desktop workspace and the visual emphasis.",
+      "palette": ["#111719", "#192224", "#dce5df", "#b5d787"],
+      "materials": ["deep green-charcoal surfaces", "quiet single-pixel dividers"],
+      "viewport": "Desktop: compact workspace header, restrained file tree at left, wide centered editor, and a slim Vim-style statusline. Mobile: editor-first, labeled browse and note actions, drawer navigation, and no Vim mode indicator or keyboard-only actions.",
+      "risk": "The compact file tree must remain legible without competing with the note.",
+      "html": ".impeccable/mocks/decision/workbench-editor-split.html"
+    },
+    {
+      "id": "focus-drawer",
+      "kind": "dealt",
+      "label": "Focus canvas with browser drawer",
+      "thesis": "Let the editor fill the workbench; bring the file tree in as a reversible side drawer when navigation is needed.",
+      "palette": ["#111719", "#192224", "#dce5df", "#b5d787"],
+      "materials": ["deep green-charcoal surfaces", "quiet single-pixel dividers"],
+      "viewport": "Desktop: a full-width writing canvas with a compact header and a labeled Browse action opening the same file tree in a side drawer. Mobile: the same canvas and drawer, with touch-sized Browse and Create actions; no Vim mode UI.",
+      "risk": "Opening the drawer adds a step when switching notes often.",
+      "html": ".impeccable/mocks/decision/workbench-focus-drawer.html"
+    },
+    {
+      "id": "narrow-tree",
+      "kind": "dealt",
+      "label": "Narrow navigator split",
+      "thesis": "Keep navigation always visible in a narrow tree while setting the editor’s measure and scale as the dominant surface.",
+      "palette": ["#111719", "#192224", "#dce5df", "#b5d787"],
+      "materials": ["deep green-charcoal surfaces", "quiet single-pixel dividers"],
+      "viewport": "Desktop: a narrow file tree, wide writing canvas, full-width workspace header, and compact statusline. Mobile: hide the tree into a labeled drawer and replace keyboard-specific status with touch actions.",
+      "risk": "A permanent tree still takes space from small laptop viewports.",
+      "html": ".impeccable/mocks/decision/workbench-narrow-tree.html"
+    }
+  ],
+  "reroll": {"registers": ["safer", "bolder"]},
+  "buildPath": {"value": "code", "toggle": false},
+  "steer": true
+}

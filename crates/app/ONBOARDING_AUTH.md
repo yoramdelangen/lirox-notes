@@ -1,60 +1,54 @@
 # Onboarding And Passkey Authentication
 
-The gateway is authoritative for installation, onboarding, authentication,
-and workspace creation. The app selects its screen from `GET /api/bootstrap`;
-it does not infer state from local storage or workspace files.
+The Dioxus server is authoritative for installation, onboarding,
+authentication, and workspace creation. The app starts with
+`bootstrap_server_function`; it does not infer auth or workspace state from
+local storage or files.
 
-## Startup Routing
+## Startup routing
 
-| Gateway state | App screen |
+| Server state | App screen |
 |---|---|
 | not installed | installation/setup |
-| `not_started` | passkey registration |
-| `workspace_required` | workspace setup |
-| `complete` and unauthenticated | passkey login |
-| `complete` and authenticated | workbench |
+| `NotStarted` | passkey registration |
+| `WorkspaceRequired` | workspace setup |
+| `Complete` and unauthenticated | passkey login |
+| `Complete` and authenticated | workbench |
 
-Registration creates the authenticated session. A refresh before workspace
-creation returns `workspace_required`. The workbench is not rendered until
-bootstrap reports `complete` and the session is authenticated.
+Registration creates the authenticated session. Refreshing before workspace
+creation returns `WorkspaceRequired`. The workbench is not rendered until
+bootstrap reports `Complete` and the session is authenticated.
 
-## Bootstrap Contract
+## Session and bootstrap
 
-`GET /api/bootstrap` returns `200`:
+`bootstrap_server_function` returns the client `BootstrapState`: installed and
+passkey flags, onboarding state, authentication/user state, optional display
+name, and an optional workspace `{ slug, name }`. It does not expose the
+server's workspace filesystem path.
 
-```json
-{
-  "installed": true,
-  "onboarding": "workspace_required",
-  "authenticated": true,
-  "user": "local",
-  "workspace_root": ".lirox-runtime/workspace",
-  "workspace": null
-}
-```
+The session is stored server-side and represented to the client only by the
+`lirox_session` cookie. It is `HttpOnly`, `SameSite=Lax`, scoped to `/`, and
+`Secure` when the configured relying-party origin uses HTTPS. Passkey
+registration/login challenge records remain short-lived and single-use; a
+successful login rotates the persisted session. Logout removes the stored
+session and clears the cookie.
 
-`onboarding` is `not_started`, `workspace_required`, or `complete`.
-`workspace_root` uses `LIROX_WORKSPACE_DIR` when set. Otherwise it defaults to
-`.lirox-runtime/workspace` in debug builds, and to
-`$XDG_DATA_HOME/liroxnotes/workspace`, or `$HOME/.local/share/liroxnotes/workspace`
-when `XDG_DATA_HOME` is unset, in release builds. `LIROX_CONFIG_FILE` controls
-the config path; its debug default is `.lirox-runtime/config`.
-`workspace` is `null` until configured, then contains `{ "slug", "name" }`.
+Runtime paths use `LIROX_WORKSPACE_DIR` and `LIROX_CONFIG_FILE` when set. In
+debug builds their defaults are `.lirox-runtime/workspace` and
+`.lirox-runtime/config`. In release builds the config uses
+`$XDG_CONFIG_HOME/liroxnotes/config` and workspace data uses
+`$XDG_DATA_HOME/liroxnotes/workspace` (falling back to the corresponding
+`$HOME` locations).
 
-Authentication endpoint schemas, cookie rules, RP configuration, errors, and
-the removal of password routes are maintained authoritatively in
-[`crates/gateway/API.md`](../gateway/API.md). The app only needs the semantic
-flow: registration establishes a session, login retries authentication, and
-logout returns the user to the unauthenticated route.
+## Workspace setup and retry
 
-## Workspace Contract
+After passkey registration, `setup_installation_server_function` persists
+installation and an optional display name. Then
+`create_workspace_server_function` creates or selects the repository workspace.
+The setup UI keeps its form state after an error and advances only after the
+server succeeds and bootstrap confirms completion. A config without
+`onboarding_complete=true` is not migrated automatically; setup remains
+retryable until workspace persistence completes.
 
-Workspace setup initializes installation with `POST /api/setup`, then submits
-the documented workspace form to `POST /api/workspaces`. The app keeps the
-form state for retry and advances to the workbench only after a successful
-response followed by bootstrap confirmation. A pre-existing config
-without `onboarding_complete=true` is not migrated automatically, so it stays
-on `workspace_required` until explicit workspace setup succeeds.
-
-The complete endpoint catalogue and response schemas are maintained in
-[`crates/gateway/API.md`](../gateway/API.md).
+The complete typed function contract, validation, and user-safe errors are
+documented in [`../gateway/API.md`](../gateway/API.md).

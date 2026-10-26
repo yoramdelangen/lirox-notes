@@ -16,6 +16,7 @@ mod tests {
     fn defaults_use_space_leader_and_include_core_bindings() {
         let config = defaults();
 
+        assert!(config.editor.vim_mode_enabled);
         assert_eq!(config.keymaps.leader.key, Key::Space);
         assert!(config.keymaps.bindings.iter().any(|binding| {
             binding.command.as_str() == "workspace.toggle_file_tree"

@@ -1,4 +1,4 @@
-use crate::auth::{BootstrapState, ExistingWorkspace, SetupFields, SetupStep};
+use crate::auth::{BootstrapState, ExistingWorkspace, RegisteredWorkspace, SetupFields, SetupStep};
 use liroxnotes_shared::WorkspaceView;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -29,6 +29,7 @@ pub enum AuthEvent {
     SetSetupStep(SetupStep),
     SelectExistingWorkspace(ExistingWorkspace),
     LoadExistingWorkspaces,
+    SwitchWorkspace(String),
     InspectRepository {
         repo_url: String,
         branch: String,
@@ -44,12 +45,15 @@ pub enum AuthEvent {
         slug: String,
         name: String,
     },
-    WorkspaceLoaded(WorkspaceView),
+    WorkspaceLoaded(Box<WorkspaceView>),
     RepositoryInspected {
         name: Option<String>,
         slug: Option<String>,
     },
-    ExistingWorkspacesLoaded(Vec<ExistingWorkspace>),
+    ExistingWorkspacesLoaded {
+        registered: Vec<RegisteredWorkspace>,
+        available: Vec<ExistingWorkspace>,
+    },
     SessionExpired,
 }
 
@@ -74,6 +78,18 @@ pub enum AuthCommand {
     SetSetupStep(SetupStep),
     SelectExistingWorkspace(ExistingWorkspace),
     LoadExistingWorkspaces,
+    SwitchWorkspace(String),
     InspectRepository { repo_url: String, branch: String },
     Retry,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn auth_events_store_workspace_views_indirectly() {
+        assert!(
+            std::mem::size_of::<super::AuthEvent>()
+                < std::mem::size_of::<liroxnotes_shared::WorkspaceView>()
+        );
+    }
 }

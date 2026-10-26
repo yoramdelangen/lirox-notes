@@ -37,10 +37,11 @@ and resolving conflicts when synchronization cannot apply cleanly.
 
 - Markdown is the document format.
 - Git is the workspace and synchronization model.
-- The current implementation is an architectural UI slice with an empty
-  workspace; gateway integration for login, onboarding, note persistence, and
-  synchronization is planned rather than complete.
-- The web application uses Dioxus and an Actix gateway.
+- The current implementation supports passkey onboarding, local/remote Git
+  workspaces, note persistence, themes, and explicit synchronization through
+  typed Dioxus server functions.
+- The application uses distinct Dioxus web and desktop clients with a Dioxus
+  fullstack server; desktop runs its server locally beside the WebView client.
 - The Markdown editor is provided by the existing CodeMirror bundle in
   `packages/editor`.
 - The application uses keyboard-first, command-based interaction while also

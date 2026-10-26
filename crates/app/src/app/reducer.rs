@@ -12,7 +12,10 @@ use liroxnotes_shared::WorkspaceTheme;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     OpenCommandPalette,
-    SaveDocument { path: String, content: String },
+    SaveDocument {
+        path: String,
+        content: String,
+    },
     Bootstrap,
     LoadWorkspace,
     LoadWorkspaceNote(String),
@@ -23,8 +26,15 @@ pub enum Effect {
     Logout,
     CreateWorkspace(crate::auth::SetupFields),
     LoadExistingWorkspaces,
-    InspectRepository { repo_url: String, branch: String },
-    SaveWorkspaceTheme { slug: String, theme: WorkspaceTheme },
+    SwitchWorkspace(String),
+    InspectRepository {
+        repo_url: String,
+        branch: String,
+    },
+    SaveWorkspaceTheme {
+        slug: String,
+        theme: Box<WorkspaceTheme>,
+    },
 }
 
 pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec<Effect> {
@@ -62,7 +72,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
         AuthEvent::BootstrapLoaded(bootstrap) => {
             auth.workspace = None;
             if let Some(display_name) = bootstrap.display_name.as_ref() {
-                auth.setup.name = display_name.clone();
+                auth.setup.display_name = display_name.clone();
             }
             auth.screen = if bootstrap.authenticated
                 && bootstrap.onboarding == OnboardingStatus::Complete
@@ -122,7 +132,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             auth.failure = None;
             auth.operation = AuthOperation::None;
             if persist_name {
-                vec![Effect::SetupInstallation(auth.setup.name.clone())]
+                vec![Effect::SetupInstallation(auth.setup.display_name.clone())]
             } else {
                 vec![]
             }
@@ -141,8 +151,13 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             vec![]
         }
         AuthEvent::LoadExistingWorkspaces => vec![Effect::LoadExistingWorkspaces],
-        AuthEvent::ExistingWorkspacesLoaded(workspaces) => {
-            auth.existing_workspaces = workspaces;
+        AuthEvent::SwitchWorkspace(slug) => vec![Effect::SwitchWorkspace(slug)],
+        AuthEvent::ExistingWorkspacesLoaded {
+            registered,
+            available,
+        } => {
+            auth.registered_workspaces = registered;
+            auth.existing_workspaces = available;
             auth.operation = AuthOperation::None;
             vec![]
         }
@@ -172,7 +187,13 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
         }
         AuthEvent::AutoLoginFailed => {
             auth.operation = AuthOperation::None;
-            auth.screen = Screen::RegisterPasskey;
+            // Fall back to the screen bootstrap prescribes: a completed
+            // installation must keep offering login, not a new registration.
+            auth.screen = auth
+                .bootstrap
+                .as_ref()
+                .map(screen_for)
+                .unwrap_or(Screen::RegisterPasskey);
             vec![]
         }
         AuthEvent::RegistrationSucceeded => {
@@ -183,7 +204,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
                 bootstrap.onboarding = OnboardingStatus::WorkspaceRequired;
                 bootstrap.authenticated = true;
             }
-            vec![Effect::SetupInstallation(auth.setup.name.clone())]
+            vec![Effect::SetupInstallation(auth.setup.display_name.clone())]
         }
         AuthEvent::LoginSucceeded { user } => {
             auth.operation = AuthOperation::None;
@@ -225,7 +246,7 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             state.workspace = hydrated.workspace;
             state.theme = hydrated.theme;
             auth.operation = AuthOperation::None;
-            auth.workspace = Some(view);
+            auth.workspace = Some(*view);
             if auth.bootstrap.as_ref().is_some_and(|bootstrap| {
                 bootstrap.authenticated && bootstrap.onboarding == OnboardingStatus::Complete
             }) {
@@ -404,4 +425,15 @@ fn create_note(state: &mut ApplicationState) -> Vec<Effect> {
         path,
         content: String::new(),
     }]
+}
+
+#[cfg(test)]
+mod layout_tests {
+    #[test]
+    fn effects_store_workspace_themes_indirectly() {
+        assert!(
+            std::mem::size_of::<super::Effect>()
+                < std::mem::size_of::<liroxnotes_shared::WorkspaceTheme>()
+        );
+    }
 }

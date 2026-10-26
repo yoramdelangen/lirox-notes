@@ -142,6 +142,9 @@ pub fn defaults() -> AppConfig {
             show_top_bar: true,
             show_bottom_bar: true,
         },
-        editor: EditorConfig { tab_width: 4 },
+        editor: EditorConfig {
+            tab_width: 4,
+            vim_mode_enabled: true,
+        },
     }
 }

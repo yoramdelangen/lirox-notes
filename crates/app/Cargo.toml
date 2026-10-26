@@ -8,17 +8,19 @@ edition = "2021"
 
 [dependencies]
 dioxus.workspace = true
+liroxnotes-backend = { path = "../backend", optional = true }
 tw_merge = "0.1"
 liroxnotes-shared = { path = "../shared" }
 serde = "1"
 serde_json = "1"
 serde_yaml_ng = "0.10"
-serde-wasm-bindgen = "0.6"
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["CustomEvent", "Element", "Event", "EventTarget", "HtmlElement", "Window", "Storage", "Request", "RequestCredentials", "RequestInit", "Response"] }
+web-sys = { version = "0.3", features = ["CustomEvent", "Element", "Event", "EventTarget", "HtmlElement", "Window", "Storage"] }
 
 [features]
 default = ["web"]
-web = ["dioxus/web"]
+web = ["dioxus/web", "dioxus/fullstack"]
+desktop = ["dioxus/desktop", "dioxus/fullstack"]
+server = ["dioxus/server", "dioxus/fullstack", "web", "dep:liroxnotes-backend"]

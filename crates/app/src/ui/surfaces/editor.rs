@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
 use crate::{
+    app::Dispatcher,
     command::{CommandArgs, CommandId, CommandInvocation, CommandSource, SurfaceId},
     components::{
         button::{Button, ButtonVariant},
@@ -22,6 +23,7 @@ pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
     let _ = &view;
     let context = use_context::<AppContext>();
     let mut state = context.state;
+    let dispatcher = context.dispatcher.clone();
     let state_read = state.read();
     let selected = state_read.domain.selected_note.as_deref().and_then(|path| {
         state_read
@@ -32,6 +34,7 @@ pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
     });
     let path = selected.map(|note| note.path.clone()).unwrap_or_default();
     let document = state_read.domain.document.clone();
+    let vim_mode_enabled = state_read.config.editor.vim_mode_enabled;
     let has_notes = !state_read.domain.notes.is_empty();
     drop(state_read);
 
@@ -48,7 +51,8 @@ pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
             onpointerdown: move |_| state.write().workspace.focus.active_surface = SurfaceId::EDITOR,
             onfocusin: move |_| state.write().workspace.focus.active_surface = SurfaceId::EDITOR,
             EditorActions {}
-            div { class: "min-h-0 flex-1 overflow-auto p-4 border {active_class}",
+            div { class: "min-h-0 flex-1 overflow-auto md:px-4 pt-12 pb-10 border {active_class}",
+                id: "editor-surface-container",
                 if !has_notes {
                     EditorEmptyState {}
                 } else {
@@ -59,8 +63,9 @@ pub fn EditorSurface(view: WorkspaceView, active: bool) -> Element {
                         "data-initial-doc": "{document}",
                         "data-writing-width": "650px",
                         "data-line-numbers": "false",
+                        "data-vim-mode-enabled": "{vim_mode_enabled}",
                         aria_label: "Edit note",
-                        onmounted: move |event| mount_editor(event, state),
+                        onmounted: move |event| mount_editor(event, state, dispatcher.clone()),
                     }
                 },
                 BottomBar { view, active }
@@ -118,11 +123,16 @@ fn EditorEmptyState() -> Element {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn mount_editor(event: dioxus::prelude::MountedEvent, state: Signal<crate::app::ApplicationState>) {
+fn mount_editor(
+    event: dioxus::prelude::MountedEvent,
+    mut state: Signal<crate::app::ApplicationState>,
+    dispatcher: Dispatcher,
+) {
     use dioxus::web::WebEventExt;
     use js_sys::{Function, Reflect};
     use wasm_bindgen::{closure::Closure, JsCast, JsValue};
     const LISTENER_PROPERTY: &str = "__liroxEditorChangeListener";
+    const SAVE_LISTENER_PROPERTY: &str = "__liroxEditorSaveListener";
 
     let Some(root) = event.data().try_as_web_event() else {
         return;
@@ -164,6 +174,30 @@ fn mount_editor(event: dioxus::prelude::MountedEvent, state: Signal<crate::app::
     let _ = Reflect::set(&root, &JsValue::from_str(LISTENER_PROPERTY), callback);
     listener.forget();
 
+    if let Ok(previous) = Reflect::get(&root, &JsValue::from_str(SAVE_LISTENER_PROPERTY)) {
+        if let Ok(previous) = previous.dyn_into::<Function>() {
+            let _ = root.remove_event_listener_with_callback("lirox-editor-save", &previous);
+        }
+    }
+    let save_listener = Closure::wrap(Box::new(move |_: web_sys::Event| {
+        dispatcher.dispatch(
+            &mut state.write(),
+            CommandInvocation {
+                id: CommandId::new("editor.save"),
+                args: CommandArgs::None,
+                source: CommandSource::Keyboard,
+            },
+        );
+    }) as Box<dyn FnMut(_)>);
+    let save_callback: &Function = save_listener.as_ref().unchecked_ref();
+    let _ = root.add_event_listener_with_callback("lirox-editor-save", save_callback);
+    let _ = Reflect::set(
+        &root,
+        &JsValue::from_str(SAVE_LISTENER_PROPERTY),
+        save_callback,
+    );
+    save_listener.forget();
+
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -183,5 +217,6 @@ fn mount_editor(event: dioxus::prelude::MountedEvent, state: Signal<crate::app::
 fn mount_editor(
     _event: dioxus::prelude::MountedEvent,
     _state: Signal<crate::app::ApplicationState>,
+    _dispatcher: Dispatcher,
 ) {
 }

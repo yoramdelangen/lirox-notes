@@ -22,7 +22,6 @@ pub struct BootstrapState {
     pub authenticated: bool,
     pub user: Option<String>,
     pub display_name: Option<String>,
-    pub workspace_root: String,
     pub workspace: Option<WorkspaceSummary>,
 }
 
@@ -60,7 +59,6 @@ impl BootstrapState {
             authenticated,
             user: None,
             display_name: None,
-            workspace_root: String::new(),
             workspace: None,
         }
     }
@@ -91,6 +89,9 @@ pub enum AuthOperation {
 pub struct SetupFields {
     pub step: SetupStep,
     pub slug: String,
+    /// The person's display name, persisted with the installation.
+    pub display_name: String,
+    /// The workspace name; never prefilled from the display name.
     pub name: String,
     pub repo_url: String,
     pub repository_path: String,
@@ -116,11 +117,24 @@ pub struct ExistingWorkspace {
     pub workspace_name: Option<String>,
 }
 
+/// A workspace registered in the application, as listed in the switcher.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RegisteredWorkspace {
+    pub slug: String,
+    pub name: String,
+    /// The repository folder, relative to the application's workspace root.
+    pub repository: String,
+    /// The workspace folder relative to the git root; empty for the root.
+    pub path: String,
+    pub active: bool,
+}
+
 impl Default for SetupFields {
     fn default() -> Self {
         Self {
             step: SetupStep::ChooseWorkspace,
             slug: String::new(),
+            display_name: String::new(),
             name: String::new(),
             repo_url: String::new(),
             repository_path: String::new(),
@@ -139,6 +153,7 @@ pub struct AuthState {
     pub failure: Option<String>,
     pub setup: SetupFields,
     pub existing_workspaces: Vec<ExistingWorkspace>,
+    pub registered_workspaces: Vec<RegisteredWorkspace>,
     pub workspace: Option<WorkspaceView>,
 }
 
@@ -151,6 +166,7 @@ impl Default for AuthState {
             failure: None,
             setup: SetupFields::default(),
             existing_workspaces: Vec::new(),
+            registered_workspaces: Vec::new(),
             workspace: None,
         }
     }
@@ -263,7 +279,7 @@ mod tests {
     #[test]
     fn new_passkey_registration_persists_the_submitted_name() {
         let mut state = crate::app::ApplicationState::empty();
-        state.auth.setup.name = "Example User".into();
+        state.auth.setup.display_name = "Example User".into();
         let dispatcher = crate::app::Dispatcher::new();
 
         dispatcher.dispatch_event(
@@ -308,7 +324,96 @@ mod tests {
             ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(bootstrap)),
         );
 
-        assert_eq!(state.auth.setup.name, "Example User");
+        assert_eq!(state.auth.setup.display_name, "Example User");
+        assert_eq!(state.auth.setup.name, "");
+    }
+
+    #[test]
+    fn workspace_name_is_not_prefilled_with_display_name() {
+        let mut state = crate::app::ApplicationState::empty();
+        state.auth.setup.display_name = "Example User".into();
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::RegistrationSucceeded),
+        );
+        state.auth.setup.step = SetupStep::ConnectRepository;
+        state.auth.operation = AuthOperation::InspectingRepository;
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::RepositoryInspected {
+                name: None,
+                slug: None,
+            }),
+        );
+
+        assert_eq!(state.auth.setup.step, SetupStep::Finish);
+        assert_eq!(state.auth.setup.name, "");
+        assert_eq!(state.auth.setup.display_name, "Example User");
+    }
+
+    #[test]
+    fn switching_workspace_schedules_activation_of_that_slug() {
+        let mut state = crate::app::ApplicationState::empty();
+        let dispatcher = crate::app::Dispatcher::new();
+
+        dispatcher.dispatch_auth_command(
+            &mut state,
+            crate::app::AuthCommand::SwitchWorkspace("work".into()),
+        );
+
+        assert_eq!(
+            dispatcher.take_effects(),
+            vec![crate::app::Effect::SwitchWorkspace("work".into())]
+        );
+    }
+
+    #[test]
+    fn workspace_lists_keep_registered_and_addable_folders_apart() {
+        let mut state = crate::app::ApplicationState::empty();
+        let registered = vec![RegisteredWorkspace {
+            slug: "my-notes".into(),
+            name: "my-notes".into(),
+            repository: "my-notes".into(),
+            path: String::new(),
+            active: true,
+        }];
+        let available = vec![ExistingWorkspace {
+            repository: "my-notes".into(),
+            branch: "main".into(),
+            path: "work".into(),
+            workspace_name: None,
+        }];
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::ExistingWorkspacesLoaded {
+                registered: registered.clone(),
+                available: available.clone(),
+            }),
+        );
+
+        assert_eq!(state.auth.registered_workspaces, registered);
+        assert_eq!(state.auth.existing_workspaces, available);
+    }
+
+    #[test]
+    fn failed_auto_login_keeps_returning_user_on_login() {
+        let mut state = crate::app::ApplicationState::empty();
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(
+                BootstrapState::unauthenticated_complete(),
+            )),
+        );
+        crate::app::apply_event(&mut state, ApplicationEvent::Auth(AuthEvent::AutoLogin));
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::AutoLoginFailed),
+        );
+
+        assert_eq!(state.auth.screen, Screen::Login);
+        assert_eq!(state.auth.operation, AuthOperation::None);
     }
 
     #[test]
@@ -374,7 +479,7 @@ mod tests {
     #[test]
     fn submitting_name_schedules_display_name_persistence() {
         let mut state = crate::app::ApplicationState::empty();
-        state.auth.setup.name = "Example User".into();
+        state.auth.setup.display_name = "Example User".into();
         state.auth.setup.step = SetupStep::Name;
         let dispatcher = crate::app::Dispatcher::new();
 
@@ -493,7 +598,7 @@ mod tests {
         );
         crate::app::apply_event(
             &mut state,
-            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(WorkspaceView::empty())),
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(Box::new(WorkspaceView::empty()))),
         );
         assert_ne!(state.auth.screen, Screen::Workbench);
     }
@@ -514,7 +619,7 @@ mod tests {
 
         crate::app::apply_event(
             &mut state,
-            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(view)),
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(Box::new(view))),
         );
 
         assert_eq!(

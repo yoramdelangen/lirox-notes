@@ -8,6 +8,9 @@ pub fn BottomBar(view: WorkspaceView, active: bool) -> Element {
     let _ = &view;
     let context = use_context::<AppContext>();
     let state = context.state.read();
+    if !state.config.editor.vim_mode_enabled {
+        return rsx! {};
+    }
     let mode = match state.input.mode {
         InputMode::Normal => "NORMAL",
         InputMode::Insert => "INSERT",
@@ -17,17 +20,17 @@ pub fn BottomBar(view: WorkspaceView, active: bool) -> Element {
         InputMode::Replace => "REPLACE",
     };
 
-    let message = state
-        .status
-        .message
-        .clone()
-        .unwrap_or_else(|| "Ready".into());
+    // let message = state
+    //     .status
+    //     .message
+    //     .clone()
+    //     .unwrap_or_else(|| "Ready".into());
 
     rsx! {
         footer {
-            class: "editor-status-bar pointer-events-none absolute z-10 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-sm",
+            class: "editor-status-bar pointer-events-none absolute left-0 right-0 bottom-0 z-100 flex flex-wrap items-center px-4 py-2 gap-x-2 gap-y-1 text-sm",
             span { class: "font-bold text-[var(--lirox-accent)]", "{mode}" }
-            span { class: "ml-auto text-[var(--lirox-info)]", "{message}" }
+            // span { class: "ml-auto text-[var(--lirox-info)]", "{message}" }
         }
     }
 }

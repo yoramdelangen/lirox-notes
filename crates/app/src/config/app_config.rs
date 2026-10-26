@@ -16,6 +16,7 @@ pub struct UiConfig {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditorConfig {
     pub tab_width: u8,
+    pub vim_mode_enabled: bool,
 }
 
 impl AppConfig {

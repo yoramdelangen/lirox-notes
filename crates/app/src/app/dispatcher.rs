@@ -41,6 +41,7 @@ impl Dispatcher {
                 AuthEvent::SelectExistingWorkspace(workspace)
             }
             AuthCommand::LoadExistingWorkspaces => AuthEvent::LoadExistingWorkspaces,
+            AuthCommand::SwitchWorkspace(slug) => AuthEvent::SwitchWorkspace(slug),
             AuthCommand::InspectRepository { repo_url, branch } => {
                 AuthEvent::InspectRepository { repo_url, branch }
             }

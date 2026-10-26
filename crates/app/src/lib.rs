@@ -13,6 +13,7 @@ pub mod config;
 pub mod domain;
 pub mod input;
 pub mod platform;
+pub mod server;
 pub mod theme;
 pub mod ui;
 pub mod workspace;
@@ -26,7 +27,7 @@ pub struct AppContext {
     pub dispatcher: Dispatcher,
 }
 
-const MAIN_CSS: Asset = asset!("/assets/main.css");
+const MAIN_CSS: Asset = asset!("/assets/main.compiled.css");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 const EDITOR_JS: Asset = asset!("/assets/editor.js");
 
@@ -156,19 +157,24 @@ mod tests {
     }
 
     #[test]
-    fn gateway_requests_use_the_configured_gateway() {
-        assert_eq!(
-            crate::app::gateway_url("/api/bootstrap"),
-            "http://localhost:3010/api/bootstrap"
-        );
-    }
-
-    #[test]
     fn extracts_public_key_options_from_passkey_envelope() {
         let options = serde_json::json!({
             "challenge_id": "server-id",
             "publicKey": {"challenge": "encoded"}
         });
+        assert_eq!(
+            crate::app::public_key_options(&options).unwrap(),
+            serde_json::json!({"challenge": "encoded"})
+        );
+    }
+
+    #[test]
+    fn extracts_nested_webauthn_creation_options() {
+        let options = serde_json::json!({
+            "challenge_id": "server-id",
+            "publicKey": {"publicKey": {"challenge": "encoded"}}
+        });
+
         assert_eq!(
             crate::app::public_key_options(&options).unwrap(),
             serde_json::json!({"challenge": "encoded"})
@@ -190,14 +196,47 @@ mod tests {
     }
 
     #[test]
+    fn explicit_login_options_keep_allowed_credentials() {
+        let options = serde_json::json!({
+            "publicKey": {
+                "publicKey": {
+                    "challenge": "encoded",
+                    "allowCredentials": [{"id": "credential-id", "type": "public-key"}]
+                }
+            }
+        });
+
+        assert_eq!(
+            crate::app::login_public_key_options(&options, false).unwrap(),
+            serde_json::json!({
+                "challenge": "encoded",
+                "allowCredentials": [{"id": "credential-id", "type": "public-key"}]
+            })
+        );
+    }
+
+    #[test]
     fn login_verification_401_is_a_failed_login_not_a_session_expiry() {
         let event =
-            crate::app::auth_error_event(&crate::app::Effect::Login, "gateway returned 401".into());
+            crate::app::auth_error_event(&crate::app::Effect::Login, "server returned 401".into());
 
         assert!(matches!(
             event,
             crate::app::ApplicationEvent::Auth(crate::app::AuthEvent::OperationFailed(message))
-                if message == "gateway returned 401"
+                if message == "server returned 401"
+        ));
+    }
+
+    #[test]
+    fn protected_server_401_expires_the_session() {
+        let event = crate::app::auth_error_event(
+            &crate::app::Effect::LoadWorkspace,
+            "server returned 401".into(),
+        );
+
+        assert!(matches!(
+            event,
+            crate::app::ApplicationEvent::Auth(crate::app::AuthEvent::SessionExpired)
         ));
     }
 }

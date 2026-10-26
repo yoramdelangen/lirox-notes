@@ -1,0 +1,43 @@
+{
+  "title": "Choose the bolder editor-centered layout",
+  "question": "Which fresh arrangement best puts the note first while keeping the workbench practical?",
+  "options": [
+    {
+      "id": "editor-buffer-tabs",
+      "kind": "assigned",
+      "label": "Buffer-led editor",
+      "kicker": "THE ROLL",
+      "thesis": "Treat the active note as the workbench: a compact buffer strip identifies open context, while the editor owns nearly the full screen.",
+      "palette": ["#101716", "#19221f", "#e0e8e1", "#c7ed72"],
+      "materials": ["forest-charcoal planes", "sharp acid-green active state"],
+      "viewport": "Desktop: full-width workspace header, note buffer strip above a centered editor, file tree available from Browse, and a crisp Vim-style statusline. Mobile: editor first with touch-sized Browse and New note actions; Vim mode UI stays hidden.",
+      "risk": "Tabs must represent real notes and remain usable when the workspace contains many files.",
+      "html": ".impeccable/mocks/decision/workbench-buffer-tabs.html"
+    },
+    {
+      "id": "right-tree",
+      "kind": "dealt",
+      "label": "Editor with right-hand navigator",
+      "thesis": "Lead with the writing canvas and place the note tree at the far edge, so the workspace reads editor-first at a glance.",
+      "palette": ["#101716", "#19221f", "#e0e8e1", "#c7ed72"],
+      "materials": ["forest-charcoal planes", "sharp acid-green active state"],
+      "viewport": "Desktop: a wide left-aligned editor with compact file navigation on the right and a full-width statusline. Mobile: editor first with a labeled Browse drawer and touch actions; no Vim mode controls.",
+      "risk": "A right-side tree may feel unfamiliar to people expecting left navigation.",
+      "html": ".impeccable/mocks/decision/workbench-right-tree.html"
+    },
+    {
+      "id": "bottom-shelf",
+      "kind": "dealt",
+      "label": "Editor over a note shelf",
+      "thesis": "Reserve the upper workspace for writing and keep note navigation in a shallow bottom shelf, inspired by an editor’s lower pane.",
+      "palette": ["#101716", "#19221f", "#e0e8e1", "#c7ed72"],
+      "materials": ["forest-charcoal planes", "sharp acid-green active state"],
+      "viewport": "Desktop: editor occupies the upper workbench, a compact note shelf sits below, and status remains at the bottom edge. Mobile: shelf becomes a touch-scrollable browse row; mode labels and keyboard-only controls are absent.",
+      "risk": "A bottom shelf competes with the editor’s vertical reading space.",
+      "html": ".impeccable/mocks/decision/workbench-bottom-shelf.html"
+    }
+  ],
+  "reroll": {"registers": ["safer", "bolder"]},
+  "buildPath": {"value": "code", "toggle": false},
+  "steer": true
+}

@@ -33,6 +33,7 @@ pub fn LayoutRenderer(
                         active: is_active,
                         focus,
                         sidebar_mode,
+                        in_sheet: false,
                         on_select_note,
                     }
                 },

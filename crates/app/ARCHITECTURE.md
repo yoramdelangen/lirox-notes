@@ -11,7 +11,7 @@ Build a keyboard-first Dioxus web application with:
 - Reusable surfaces such as editor, file tree, search, diagnostics, and help.
 - Surfaces that can be docked, split, hidden, fullscreen, or rendered as overlays.
 - Logical focus separate from browser DOM focus.
-- Existing backend API integration through a dedicated effect/service boundary.
+- Existing backend integration through typed Dioxus server functions behind a dedicated effect boundary.
 - An architecture that can later support partial Neovim configuration compatibility without rewriting the input or command systems.
 
 This document is intended to be executable by an AI coding agent.
@@ -1331,7 +1331,9 @@ pub enum Effect {
 }
 ```
 
-The existing backend API must be wrapped in the backend effect executor.
+The existing backend operations are called by typed Dioxus server functions from
+the backend effect executor. The executor translates results and errors into
+application events; it does not construct URLs or parse HTTP responses.
 
 Do not expose backend transport DTOs to unrelated UI code unless they are also appropriate domain types.
 
@@ -1339,7 +1341,11 @@ Do not expose backend transport DTOs to unrelated UI code unless they are also a
 
 # 21. Backend Integration
 
-The backend already exists.
+Server-side authentication, filesystem, and Git operations live in
+`liroxnotes-backend`; the app-facing `#[server]` functions live in
+`crates/app/src/server.rs`. The optional backend dependency is enabled only for
+server builds, so client builds contain generated stubs rather than server
+operations.
 
 Create a frontend boundary:
 
@@ -1361,11 +1367,15 @@ Exact methods must match the real backend API.
 
 Rules:
 
-- backend service implementation owns transport details,
+- server functions and the effect executor own the typed client/server boundary,
 - application logic owns intent and state transitions,
 - UI must never know API endpoint URLs,
 - failures become application events,
 - loading state should live in domain/application state.
+
+Web and desktop are separate app targets. Desktop uses its WebView's browser
+WebAuthn APIs and calls the Dioxus server running locally beside the client;
+server process auto-launch and bundling are intentionally out of scope.
 
 ---
 

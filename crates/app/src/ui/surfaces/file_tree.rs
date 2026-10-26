@@ -15,6 +15,7 @@ pub fn FileTreeSurface(
     active: bool,
     focus: FocusTarget,
     sidebar_mode: SidebarMode,
+    #[props(default = false)] in_sheet: bool,
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let context = use_context::<AppContext>();
@@ -44,16 +45,21 @@ pub fn FileTreeSurface(
         SidebarMode::LabelsNotes => "Labels & Notes",
         SidebarMode::Files => "Files",
     };
+    let modebar_safe_area = if in_sheet {
+        "!pb-[max(.375rem,env(safe-area-inset-bottom))]"
+    } else {
+        ""
+    };
     rsx! {
         aside {
             class: "flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[var(--lirox-bg-alt)] {active_class}",
             onpointerdown: move |_| state.write().workspace.focus.active_surface = SurfaceId::FILE_TREE,
             onfocusin: move |_| state.write().workspace.focus.active_surface = SurfaceId::FILE_TREE,
             aria_label: "{heading}",
-            WorkspaceTopBar { view: view.clone() }
+            WorkspaceTopBar { view: view.clone(), in_sheet }
             FileTreeList { entries: view.tree, selected_path, on_select_note }
             ProfileFooter { focus, profile_name, note_count }
-            footer { class: "workspace-sidebar-modebar flex shrink-0 items-center gap-1 border-t border-[var(--lirox-border)] px-2 py-1.5", aria_label: "Sidebar views",
+            footer { class: "workspace-sidebar-modebar flex shrink-0 items-center gap-1 border-t border-[var(--lirox-border)] p-1 {modebar_safe_area}", aria_label: "Sidebar views",
                 Button {
                      size: ButtonSize::IconXs,
                     variant: ButtonVariant::Ghost,

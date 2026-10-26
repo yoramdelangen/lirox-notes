@@ -45,8 +45,8 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
                     Input {
                         id: "display-name",
                         required: true,
-                        value: "{setup.name}",
-                        oninput: move |event: FormEvent| state.write().auth.setup.name = event.value()
+                        value: "{setup.display_name}",
+                        oninput: move |event: FormEvent| state.write().auth.setup.display_name = event.value()
                     }
                 }
                 form {
@@ -63,7 +63,7 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
             let existing_dispatcher = dispatcher.clone();
             let load_dispatcher = dispatcher.clone();
             rsx! {
-            h1 { "Hi {auth.setup.name}," }
+            h1 { "Hi {auth.setup.display_name}," }
             p { "Set up a workspace to start writing." }
             div { class: "onboarding-choice-grid",
                 Button {
@@ -264,14 +264,14 @@ pub fn AuthShell() -> Element {
                             id: "display-name",
                             required: true,
                             placeholder: "e.g. Alex Morgan",
-                            value: "{auth.setup.name}",
-                            oninput: move |event: FormEvent| state.write().auth.setup.name = event.value()
+                            value: "{auth.setup.display_name}",
+                            oninput: move |event: FormEvent| state.write().auth.setup.display_name = event.value()
                         }
                     }
                 }
                 Input { class: "sr-only", autocomplete: "username webauthn", aria_label: "Use an existing passkey" }
                 div { class: "auth-actions",
-                    Button { autofocus: true, disabled: auth.operation != AuthOperation::None || auth.setup.name.trim().is_empty(), aria_label: if auth.operation == AuthOperation::Registering { "Creating passkey" } else { "Create passkey" }, onclick: move |_| dispatch_auth(state, register.clone(), crate::app::AuthCommand::RegisterPasskey), if auth.operation == AuthOperation::Registering { "Creating passkey..." } else { "Create passkey" } }
+                    Button { autofocus: true, disabled: auth.operation != AuthOperation::None || auth.setup.display_name.trim().is_empty(), aria_label: if auth.operation == AuthOperation::Registering { "Creating passkey" } else { "Create passkey" }, onclick: move |_| dispatch_auth(state, register.clone(), crate::app::AuthCommand::RegisterPasskey), if auth.operation == AuthOperation::Registering { "Creating passkey..." } else { "Create passkey" } }
                     if auth.bootstrap.as_ref().is_some_and(|bootstrap| bootstrap.passkey_exists) {
                     Button { button_type: "button", variant: ButtonVariant::Outline, disabled: auth.operation != AuthOperation::None, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), "Use existing passkey" }
                     }
