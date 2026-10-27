@@ -66,6 +66,8 @@ pub fn is_editable_control(_event: &KeyboardEvent) -> bool {
     false
 }
 
+/// Typing in an editable control is left alone, except for Escape and
+/// ⌘/Ctrl chords, which stay available as application shortcuts.
 pub fn should_intercept(event: &KeyboardEvent) -> bool {
     !is_editable_control(event)
         || normalize_keyboard_event(event).is_some_and(|event| {
@@ -73,6 +75,9 @@ pub fn should_intercept(event: &KeyboardEvent) -> bool {
                 event,
                 InputEvent::Key(KeyStroke {
                     key: Key::Escape,
+                    ..
+                }) | InputEvent::Key(KeyStroke {
+                    modifiers: Modifiers { ctrl: true, .. } | Modifiers { meta: true, .. },
                     ..
                 })
             )

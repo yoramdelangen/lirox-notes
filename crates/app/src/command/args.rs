@@ -7,6 +7,8 @@ pub enum CommandArgs {
     Count(u32),
     Direction(Direction),
     Surface(SurfaceId),
+    /// A named target: a menu, theme id, note path or palette query.
+    Text(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

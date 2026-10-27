@@ -1,29 +1,50 @@
-use super::{
-    dispatch_auth, slug_from_name, AuthOperation, AuthState, ExistingWorkspace, Screen, SetupStep,
-};
-use crate::{
-    components::{
-        button::{Button, ButtonVariant},
-        input::Input,
-    },
-    AppContext,
-};
+use super::{dispatch_auth, slug_from_name, AuthOperation, AuthState, Screen, SetupStep};
+use crate::{app::AuthCommand, AppContext};
 use dioxus::prelude::*;
 
+/// The frame every onboarding screen shares: a top line with back and the
+/// step, a title, and one box whose legend names the step.
 #[component]
-fn ExistingWorkspaceCard(workspace: ExistingWorkspace) -> Element {
-    let context = use_context::<AppContext>();
-    let state = context.state;
-    let dispatcher = context.dispatcher;
+fn OnboardingFrame(
+    title: String,
+    legend: String,
+    #[props(default)] step: String,
+    #[props(default)] on_back: Option<EventHandler<()>>,
+    #[props(default)] greeting: bool,
+    children: Element,
+) -> Element {
     rsx! {
-        button {
-            r#type: "button",
-            class: "onboarding-workspace-card",
-            onclick: move |_| dispatch_auth(state, dispatcher.clone(), crate::app::AuthCommand::SelectExistingWorkspace(workspace.clone())),
-            strong { "{workspace.workspace_name.as_deref().unwrap_or(\"Workspace\")}" }
-            span { "{workspace.repository}" }
-            span { "{workspace.branch} · {workspace.path}" }
+        div { class: "lx-onb",
+            div { class: "lx-onb-top",
+                if let Some(on_back) = on_back {
+                    button { r#type: "button", onclick: move |_| on_back.call(()), "‹ back" }
+                } else {
+                    span { "lirox" }
+                }
+                span { "{step}" }
+            }
+            div { class: "lx-onb-body",
+                if greeting {
+                    h1 { class: "lx-onb-hi", "{title}" }
+                } else {
+                    h1 { class: "lx-onb-title", "{title}" }
+                }
+                div { class: "lx-box lx-onb-card",
+                    div { class: "lx-legend lx-legend-strong", "{legend}" }
+                    {children}
+                }
+            }
         }
+    }
+}
+
+fn step_label(step: SetupStep) -> &'static str {
+    match step {
+        SetupStep::Name => "1/3",
+        SetupStep::ChooseWorkspace
+        | SetupStep::ConnectRepository
+        | SetupStep::ExistingWorkspace => "2/3",
+        SetupStep::Finish => "3/3",
     }
 }
 
@@ -31,178 +52,293 @@ fn ExistingWorkspaceCard(workspace: ExistingWorkspace) -> Element {
 fn WorkspaceSetupForm(auth: AuthState) -> Element {
     let context = use_context::<AppContext>();
     let mut state = context.state;
-    let dispatcher = context.dispatcher;
+    let dispatcher = context.dispatcher.clone();
+    let mut picked = use_signal(|| 0usize);
     let operation = auth.operation.clone();
+    let busy = operation != AuthOperation::None;
     let setup = auth.setup.clone();
     let step = setup.step;
-    let content = match step {
+    let greeting = format!("Hi {},", setup.display_name.trim());
+    let adding = auth.workspace.is_some();
+
+    let go = {
+        let dispatcher = dispatcher.clone();
+        move |step: SetupStep| {
+            dispatch_auth(state, dispatcher.clone(), AuthCommand::SetSetupStep(step))
+        }
+    };
+    let back: Option<EventHandler<()>> = {
+        let go = go.clone();
+        let cancel = context.clone();
+        match step {
+            SetupStep::Name => None,
+            SetupStep::ChooseWorkspace if adding => Some(EventHandler::new(move |_| {
+                crate::ui::actions::run(
+                    &cancel,
+                    "workspace.cancel_setup",
+                    crate::command::CommandArgs::None,
+                )
+            })),
+            SetupStep::ChooseWorkspace => Some(EventHandler::new(move |_| go(SetupStep::Name))),
+            SetupStep::ConnectRepository | SetupStep::ExistingWorkspace => {
+                Some(EventHandler::new(move |_| go(SetupStep::ChooseWorkspace)))
+            }
+            SetupStep::Finish => {
+                let previous = if setup.remote {
+                    SetupStep::ExistingWorkspace
+                } else {
+                    SetupStep::ConnectRepository
+                };
+                Some(EventHandler::new(move |_| go(previous)))
+            }
+        }
+    };
+
+    match step {
         SetupStep::Name => {
-            let name_dispatcher = dispatcher.clone();
+            let next = go.clone();
             rsx! {
-                h1 { "What should we call you?" }
-                p { "Your name is used to personalize LiroxNotes." }
-                label { r#for: "display-name", "Your name"
-                    Input {
-                        id: "display-name",
-                        required: true,
-                        value: "{setup.display_name}",
-                        oninput: move |event: FormEvent| state.write().auth.setup.display_name = event.value()
+                OnboardingFrame { title: "Lirox Notes", legend: "Onboarding", step: step_label(step), on_back: back,
+                    form {
+                        class: "flex flex-col gap-[14px]",
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            next(SetupStep::ChooseWorkspace);
+                        },
+                        label { class: "lx-field",
+                            span { class: "lx-field-label", "Your name" }
+                            input {
+                                class: "lx-input",
+                                required: true,
+                                autofocus: true,
+                                autocomplete: "name",
+                                placeholder: "My name",
+                                value: "{setup.display_name}",
+                                oninput: move |event: FormEvent| state.write().auth.setup.display_name = event.value(),
+                            }
+                        }
+                        button { class: "lx-btn-primary", r#type: "submit", "Continue" }
                     }
-                }
-                form {
-                    onsubmit: move |event| {
-                        event.prevent_default();
-                        dispatch_auth(state, name_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(SetupStep::ChooseWorkspace));
-                    },
-                    Button { button_type: "submit", "Continue" }
                 }
             }
         }
         SetupStep::ChooseWorkspace => {
-            let new_dispatcher = dispatcher.clone();
-            let existing_dispatcher = dispatcher.clone();
-            let load_dispatcher = dispatcher.clone();
+            let new_repo = go.clone();
+            let existing = go.clone();
+            let keys = go.clone();
+            let load = dispatcher.clone();
+            let load_keys = dispatcher.clone();
             rsx! {
-            h1 { "Hi {auth.setup.display_name}," }
-            p { "Set up a workspace to start writing." }
-            div { class: "onboarding-choice-grid",
-                Button {
-                    button_type: "button",
-                    onclick: move |_| dispatch_auth(state, new_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(SetupStep::ConnectRepository)),
-                    "New repository"
+                OnboardingFrame { title: greeting, greeting: true, legend: "Setup Workspace", step: step_label(step), on_back: back,
+                    p { "Create a new workspace, or connect one that already exists?" }
+                    div {
+                        class: "lx-onb-choices",
+                        tabindex: "-1",
+                        onmounted: move |event| async move {
+                            let _ = event.data().set_focus(true).await;
+                        },
+                        onkeydown: move |event: KeyboardEvent| match event.data().key().to_string().as_str() {
+                            "1" => keys(SetupStep::ConnectRepository),
+                            "2" => {
+                                keys(SetupStep::ExistingWorkspace);
+                                dispatch_auth(state, load_keys.clone(), AuthCommand::LoadExistingWorkspaces);
+                            }
+                            _ => {}
+                        },
+                        button {
+                            class: "lx-btn",
+                            r#type: "button",
+                            onclick: move |_| new_repo(SetupStep::ConnectRepository),
+                            span { class: "lx-key", "1" }
+                            "New repo"
+                        }
+                        button {
+                            class: "lx-btn",
+                            r#type: "button",
+                            onclick: move |_| {
+                                existing(SetupStep::ExistingWorkspace);
+                                dispatch_auth(state, load.clone(), AuthCommand::LoadExistingWorkspaces);
+                            },
+                            span { class: "lx-key", "2" }
+                            "Existing"
+                        }
+                    }
                 }
-                Button {
-                    button_type: "button",
-                    variant: ButtonVariant::Outline,
-                    onclick: move |_| {
-                        dispatch_auth(state, existing_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(SetupStep::ExistingWorkspace));
-                        dispatch_auth(state, load_dispatcher.clone(), crate::app::AuthCommand::LoadExistingWorkspaces);
-                    },
-                    "Existing repository"
-                }
-            }
             }
         }
         SetupStep::ConnectRepository => {
-            let inspect_dispatcher = dispatcher.clone();
-            let back_dispatcher = dispatcher.clone();
+            let inspect = dispatcher.clone();
             rsx! {
-            h1 { "Setup workspace" }
-            p { "Connect a new repository, then name the workspace." }
-            form {
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    let setup = state.read().auth.setup.clone();
-                    dispatch_auth(
-                        state,
-                        inspect_dispatcher.clone(),
-                        crate::app::AuthCommand::InspectRepository {
-                            repo_url: setup.repo_url,
-                            branch: setup.branch,
+                OnboardingFrame { title: greeting, greeting: true, legend: "Setup Workspace ─ Connect", step: step_label(step), on_back: back,
+                    form {
+                        class: "flex flex-col gap-[14px]",
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            let setup = state.read().auth.setup.clone();
+                            dispatch_auth(
+                                state,
+                                inspect.clone(),
+                                AuthCommand::InspectRepository {
+                                    repo_url: setup.repo_url,
+                                    branch: setup.branch,
+                                },
+                            );
                         },
-                    );
-                },
-                if let Some(error) = auth.failure.as_deref() {
-                    p { role: "alert", class: "text-[var(--lirox-error)]", "Repository check failed: {error}" }
+                        p { "Uses your system Git user and public key." }
+                        label { class: "lx-field",
+                            span { class: "lx-field-label", "Repository URL" }
+                            input {
+                                class: "lx-input",
+                                style: "font-size: 12.5px",
+                                name: "repo-url",
+                                required: true,
+                                autofocus: true,
+                                autocomplete: "off",
+                                spellcheck: "false",
+                                placeholder: "git@github.com:you/notes.git",
+                                value: "{setup.repo_url}",
+                                oninput: move |event: FormEvent| state.write().auth.setup.repo_url = event.value(),
+                            }
+                        }
+                        label { class: "lx-field",
+                            span { class: "lx-field-label", "Branch" }
+                            input {
+                                class: "lx-input",
+                                style: "font-size: 12.5px",
+                                name: "branch",
+                                required: true,
+                                autocomplete: "off",
+                                placeholder: "e.g. main",
+                                value: "{setup.branch}",
+                                oninput: move |event: FormEvent| state.write().auth.setup.branch = event.value(),
+                            }
+                        }
+                        if let Some(error) = auth.failure.as_deref() {
+                            div { class: "lx-error", role: "alert", "! {error}" }
+                        }
+                        button {
+                            class: "lx-btn-primary",
+                            r#type: "submit",
+                            disabled: busy,
+                            if operation == AuthOperation::InspectingRepository { "connecting…" } else { "Connect" }
+                        }
+                    }
                 }
-                label { r#for: "repo-url", "Repository URL" }
-                Input {
-                    id: "repo-url",
-                    name: "repo-url",
-                    required: true,
-                    value: "{setup.repo_url}",
-                    oninput: move |event: FormEvent| state.write().auth.setup.repo_url = event.value()
-                }
-                label { r#for: "branch", "Branch" }
-                Input {
-                    id: "branch",
-                    name: "branch",
-                    required: true,
-                    value: "{setup.branch}",
-                    oninput: move |event: FormEvent| state.write().auth.setup.branch = event.value()
-                }
-                Button {
-                    button_type: "submit",
-                    disabled: operation != AuthOperation::None,
-                    if operation == AuthOperation::InspectingRepository { "Checking repository..." } else { "Connect" }
-                }
-            }
-            Button {
-                button_type: "button",
-                variant: ButtonVariant::Ghost,
-                onclick: move |_| dispatch_auth(state, back_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(SetupStep::ChooseWorkspace)),
-                "Back"
-            }
             }
         }
         SetupStep::ExistingWorkspace => {
-            let back_dispatcher = dispatcher.clone();
+            let select = dispatcher.clone();
+            let workspaces = auth.existing_workspaces.clone();
+            let chosen = workspaces.get(picked()).cloned();
             rsx! {
-            h1 { "Setup existing workspace" }
-            p { "Choose a workspace inside an existing repository. Repository roots cannot be reused." }
-            if auth.existing_workspaces.is_empty() {
-                p { class: "text-[var(--lirox-muted)]", "No reusable repository subpaths found." }
-            }
-            div { class: "onboarding-workspace-list", role: "list",
-                for workspace in auth.existing_workspaces.iter() {
-                    ExistingWorkspaceCard { workspace: workspace.clone() }
+                OnboardingFrame { title: greeting, greeting: true, legend: "Setup Existing Workspace", step: step_label(step), on_back: back,
+                    p { "Available workspaces to reuse:" }
+                    if workspaces.is_empty() {
+                        div { class: "lx-ws-card", style: "border-style: dashed; color: var(--faint); cursor: default",
+                            "No reusable repository subpaths found."
+                            span { style: "margin-top: 4px", "└ only workspaces with a subpath can share a repo" }
+                        }
+                    }
+                    for (index, workspace) in workspaces.iter().enumerate() {
+                        button {
+                            key: "{workspace.repository}:{workspace.path}",
+                            r#type: "button",
+                            class: if index == picked() { "lx-ws-card is-picked" } else { "lx-ws-card" },
+                            aria_pressed: "{index == picked()}",
+                            onclick: move |_| picked.set(index),
+                            strong {
+                                span { if index == picked() { "(•)" } else { "( )" } }
+                                "{workspace.workspace_name.as_deref().unwrap_or(\"Workspace\")}"
+                            }
+                            span { "remote {workspace.repository}" }
+                            span { "branch {workspace.branch}  ·  path {workspace.path}" }
+                        }
+                    }
+                    button {
+                        class: "lx-btn-primary",
+                        r#type: "button",
+                        disabled: chosen.is_none(),
+                        onclick: move |_| {
+                            if let Some(workspace) = chosen.clone() {
+                                dispatch_auth(state, select.clone(), AuthCommand::SelectExistingWorkspace(workspace));
+                            }
+                        },
+                        "Continue"
+                    }
                 }
-            }
-            Button {
-                button_type: "button",
-                variant: ButtonVariant::Ghost,
-                onclick: move |_| dispatch_auth(state, back_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(SetupStep::ChooseWorkspace)),
-                "Back"
-            }
             }
         }
         SetupStep::Finish => {
-            let submit_dispatcher = dispatcher.clone();
-            let back_dispatcher = dispatcher.clone();
+            let submit = dispatcher.clone();
+            let remote = if setup.remote {
+                setup.repository_path.clone()
+            } else {
+                setup.repo_url.clone()
+            };
+            let source = if setup.remote {
+                "existing workspace"
+            } else {
+                "repository"
+            };
+            let target = if setup.path.trim().is_empty() {
+                "{repo-root}/".to_string()
+            } else {
+                format!("{{repo-root}}/{}/", setup.path.trim().trim_matches('/'))
+            };
             rsx! {
-            h1 { "Finish workspace" }
-            p { "Confirm the workspace details before entering LiroxNotes." }
-            form {
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    let fields = state.read().auth.setup.clone();
-                    dispatch_auth(state, submit_dispatcher.clone(), crate::app::AuthCommand::CreateWorkspace(fields));
-                },
-                label { r#for: "workspace-name", "Workspace name" }
-                Input {
-                    id: "workspace-name",
-                    required: true,
-                    value: "{setup.name}",
-                    oninput: move |event: FormEvent| {
-                        let name = event.value();
-                        let mut state = state.write();
-                        state.auth.setup.name = name.clone();
-                        state.auth.setup.slug = slug_from_name(&name);
+                OnboardingFrame { title: greeting, greeting: true, legend: "Setup Workspace ─ Finish", step: step_label(step), on_back: back,
+                    form {
+                        class: "flex flex-col gap-3",
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            let fields = state.read().auth.setup.clone();
+                            dispatch_auth(state, submit.clone(), AuthCommand::CreateWorkspace(fields));
+                        },
+                        div { class: "lx-hint", "prefilled from {source}" }
+                        div { class: "flex flex-col gap-1 text-[11.5px]",
+                            span { class: "lx-field-label", "Repository" }
+                            span { class: "break-all", "remote {remote}" }
+                            span { "branch {setup.branch}" }
+                        }
+                        div { class: "lx-rule" }
+                        label { class: "lx-field",
+                            span { class: "lx-field-label", "Workspace name" }
+                            input {
+                                class: "lx-input",
+                                required: true,
+                                autofocus: true,
+                                autocomplete: "off",
+                                value: "{setup.name}",
+                                oninput: move |event: FormEvent| {
+                                    let name = event.value();
+                                    let mut state = state.write();
+                                    state.auth.setup.slug = slug_from_name(&name);
+                                    state.auth.setup.name = name;
+                                },
+                            }
+                            span { class: "lx-hint", "slug: "
+                                b { if setup.slug.is_empty() { "—" } else { "{setup.slug}" } }
+                            }
+                        }
+                        label { class: "lx-field",
+                            span { class: "lx-field-label", "Path (optional)" }
+                            input {
+                                class: "lx-input",
+                                autocomplete: "off",
+                                placeholder: "my-work",
+                                value: "{setup.path}",
+                                oninput: move |event: FormEvent| state.write().auth.setup.path = event.value(),
+                            }
+                            span { class: "lx-hint", "→ {target}" }
+                        }
+                        if let Some(error) = auth.failure.as_deref() {
+                            div { class: "lx-error", role: "alert", "! {error}" }
+                        }
+                        button { class: "lx-btn-primary", r#type: "submit", disabled: busy, "Save" }
                     }
                 }
-                p { class: "auth-help", "Workspace slug: "
-                    code { class: "font-mono text-[var(--lirox-fg)]", if setup.slug.is_empty() { "—" } else { "{setup.slug}" } }
-                }
-                label { r#for: "workspace-path", "Path (optional)" }
-                Input {
-                    id: "workspace-path",
-                    value: "{setup.path}",
-                    placeholder: "my-work",
-                    oninput: move |event: FormEvent| state.write().auth.setup.path = event.value()
-                }
-                Button { button_type: "submit", disabled: operation != AuthOperation::None, "Save" }
-            }
-            Button {
-                button_type: "button",
-                variant: ButtonVariant::Ghost,
-                onclick: move |_| dispatch_auth(state, back_dispatcher.clone(), crate::app::AuthCommand::SetSetupStep(if setup.remote { SetupStep::ExistingWorkspace } else { SetupStep::ConnectRepository })),
-                "Back"
-            }
             }
         }
-    };
-    rsx! {
-        {content}
     }
 }
 
@@ -212,6 +348,7 @@ pub fn AuthShell() -> Element {
     let mut state = context.state;
     let auth = state.read().auth.clone();
     let register = context.dispatcher.clone();
+    let existing = context.dispatcher.clone();
     let login = context.dispatcher.clone();
     let retry = context.dispatcher.clone();
     let failure = auth.failure.clone().unwrap_or_else(|| "Try again.".into());
@@ -231,103 +368,99 @@ pub fn AuthShell() -> Element {
         };
         if should_check {
             auto_login_attempted.set(true);
-            dispatch_auth(
-                state,
-                auto_login.clone(),
-                crate::app::AuthCommand::AutoLogin,
-            );
+            dispatch_auth(state, auto_login.clone(), AuthCommand::AutoLogin);
         }
     });
+    let busy = auth.operation != AuthOperation::None;
     let content = match auth.screen {
-        Screen::Loading => {
-            rsx! {
-                div { class: "auth-heading",
-                    h1 { "Welcome to LiroxNotes" }
-                    p { "Checking secure access..." }
-                }
-                div { class: "auth-loading", aria_live: "polite",
-                    span { class: "auth-loading-dot" }
-                    "Preparing your secure workspace"
-                }
+        Screen::Loading => rsx! {
+            OnboardingFrame { title: "Lirox Notes", legend: "Lirox",
+                div { class: "lx-loading", aria_live: "polite", "checking secure access" }
             }
-        }
+        },
         Screen::RegisterPasskey => {
+            let passkey_exists = auth
+                .bootstrap
+                .as_ref()
+                .is_some_and(|bootstrap| bootstrap.passkey_exists);
             rsx! {
-                div { class: "auth-heading",
-                    h1 { "Secure access" }
-                    p { "Create a passkey to keep your notes private. No password to remember." }
-                }
-                div { class: "auth-step", "Step 1 of 2" }
-                div { class: "auth-field",
-                    label { r#for: "display-name", "Your name"
-                        Input {
-                            id: "display-name",
-                            required: true,
-                            placeholder: "e.g. Alex Morgan",
-                            value: "{auth.setup.display_name}",
-                            oninput: move |event: FormEvent| state.write().auth.setup.display_name = event.value()
+                OnboardingFrame { title: "Lirox Notes", legend: "Onboarding", step: "1/3",
+                    form {
+                        class: "flex flex-col gap-[14px]",
+                        onsubmit: move |event| {
+                            event.prevent_default();
+                            dispatch_auth(state, register.clone(), AuthCommand::RegisterPasskey);
+                        },
+                        label { class: "lx-field",
+                            span { class: "lx-field-label", "Your name" }
+                            input {
+                                class: "lx-input",
+                                style: "font-size: 14px",
+                                required: true,
+                                autofocus: true,
+                                autocomplete: "name",
+                                placeholder: "My name",
+                                value: "{auth.setup.display_name}",
+                                oninput: move |event: FormEvent| state.write().auth.setup.display_name = event.value(),
+                            }
                         }
+                        input { class: "sr-only", autocomplete: "username webauthn", aria_label: "Use an existing passkey", tabindex: "-1" }
+                        button {
+                            class: "lx-btn-primary",
+                            r#type: "submit",
+                            disabled: busy || auth.setup.display_name.trim().is_empty(),
+                            if auth.operation == AuthOperation::Registering { "waiting for passkey…" } else { "Create Passkey" }
+                        }
+                        if passkey_exists {
+                            button {
+                                class: "lx-btn",
+                                r#type: "button",
+                                disabled: busy,
+                                onclick: move |_| dispatch_auth(state, existing.clone(), AuthCommand::Login),
+                                "Use existing passkey"
+                            }
+                        }
+                        div { class: "lx-hint", "Your browser will ask you to confirm this passkey." }
                     }
                 }
-                Input { class: "sr-only", autocomplete: "username webauthn", aria_label: "Use an existing passkey" }
-                div { class: "auth-actions",
-                    Button { autofocus: true, disabled: auth.operation != AuthOperation::None || auth.setup.display_name.trim().is_empty(), aria_label: if auth.operation == AuthOperation::Registering { "Creating passkey" } else { "Create passkey" }, onclick: move |_| dispatch_auth(state, register.clone(), crate::app::AuthCommand::RegisterPasskey), if auth.operation == AuthOperation::Registering { "Creating passkey..." } else { "Create passkey" } }
-                    if auth.bootstrap.as_ref().is_some_and(|bootstrap| bootstrap.passkey_exists) {
-                    Button { button_type: "button", variant: ButtonVariant::Outline, disabled: auth.operation != AuthOperation::None, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), "Use existing passkey" }
-                    }
-                }
-                p { class: "auth-help", "Your browser will ask you to confirm this passkey." }
             }
         }
-        Screen::WorkspaceSetup => {
-            rsx! { WorkspaceSetupForm { auth } }
-        }
-        Screen::CreatingWorkspace => {
-            rsx! {
-                div { class: "auth-heading",
-                    h1 { "Creating workspace" }
-                    p { "Preparing your notes..." }
+        Screen::WorkspaceSetup => rsx! { WorkspaceSetupForm { auth } },
+        Screen::CreatingWorkspace => rsx! {
+            OnboardingFrame { title: format!("Hi {},", auth.setup.display_name.trim()), greeting: true, legend: "Setup Workspace ─ Finish", step: "3/3",
+                div { class: "lx-loading", aria_live: "polite", "cloning…" }
+            }
+        },
+        Screen::Login => rsx! {
+            OnboardingFrame { title: "Lirox Notes", legend: "Welcome back",
+                p { "Use your passkey to return to your notes." }
+                button {
+                    class: "lx-btn-primary",
+                    r#type: "button",
+                    autofocus: true,
+                    disabled: busy,
+                    onclick: move |_| dispatch_auth(state, login.clone(), AuthCommand::Login),
+                    if auth.operation == AuthOperation::LoggingIn { "waiting for passkey…" } else { "Sign in with passkey" }
                 }
-                div { class: "auth-loading", aria_live: "polite",
-                    span { class: "auth-loading-dot" }
-                    "This usually takes a moment"
+                div { class: "lx-hint", "Your browser will ask you to confirm this passkey." }
+            }
+        },
+        Screen::Failure => rsx! {
+            OnboardingFrame { title: "Lirox Notes", legend: "Something went wrong",
+                div { class: "lx-error", role: "alert", "! {failure}" }
+                button {
+                    class: "lx-btn-primary",
+                    r#type: "button",
+                    onclick: move |_| dispatch_auth(state, retry.clone(), AuthCommand::Retry),
+                    "Try again"
                 }
             }
-        }
-        Screen::Login => {
-            rsx! {
-                div { class: "auth-heading",
-                    h1 { "Welcome back" }
-                    p { "Use your passkey to return to your notes." }
-                }
-                div { class: "auth-actions",
-                    Button { autofocus: true, disabled: auth.operation != AuthOperation::None, aria_label: if auth.operation == AuthOperation::LoggingIn { "Signing in" } else { "Sign in with passkey" }, onclick: move |_| dispatch_auth(state, login.clone(), crate::app::AuthCommand::Login), if auth.operation == AuthOperation::LoggingIn { "Signing in..." } else { "Sign in with passkey" } }
-                }
-                p { class: "auth-help", "Your browser will ask you to confirm this passkey." }
-            }
-        }
-        Screen::Failure => {
-            rsx! {
-                div { class: "auth-heading",
-                    h1 { "Something went wrong" }
-                    p { "{failure}" }
-                }
-                div { class: "auth-actions",
-                    Button { onclick: move |_| dispatch_auth(state, retry.clone(), crate::app::AuthCommand::Retry), "Try again" }
-                }
-            }
-        }
+        },
         Screen::Workbench => rsx! {},
     };
     rsx! {
-        main { id: "auth-shell", class: "grid min-h-screen place-items-center bg-[var(--lirox-bg)] p-6 text-[var(--lirox-fg)]",
-            section { class: "auth-card w-full max-w-md",
-                header { class: "auth-topline",
-                    strong { "LIROXNOTES" }
-                    span { "PRIVATE BY DEFAULT" }
-                }
-                {content}
-            }
+        main { id: "auth-shell", class: "lx-root",
+            {content}
         }
     }
 }

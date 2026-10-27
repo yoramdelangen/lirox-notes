@@ -1,3 +1,5 @@
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
+use super::WorkspaceEvent;
 #[cfg(any(target_arch = "wasm32", feature = "desktop", test))]
 use super::{ApplicationEvent, AuthEvent, StatusEvent, ThemeEvent};
 use super::{ApplicationState, Dispatcher, Effect};
@@ -31,7 +33,10 @@ pub(crate) async fn execute_effect(
 pub(crate) fn auth_error_event(effect: &Effect, message: String) -> ApplicationEvent {
     if matches!(effect, Effect::SaveWorkspaceTheme { .. }) {
         ApplicationEvent::Theme(ThemeEvent::SaveFailed(message))
-    } else if matches!(effect, Effect::SwitchWorkspace(_)) {
+    } else if matches!(
+        effect,
+        Effect::SwitchWorkspace(_) | Effect::PullWorkspace(_) | Effect::PushWorkspace(_)
+    ) {
         // Keep the current workspace open; only report why switching failed.
         ApplicationEvent::Status(StatusEvent::Message(message))
     } else if matches!(effect, Effect::AutoLogin) {
@@ -75,6 +80,56 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                     .map_err(server_error_message)?,
             )),
         ))),
+        Effect::EditorAction(action) => {
+            crate::platform::web::editor::run_action(&action);
+            Ok(None)
+        }
+        Effect::EditorGotoLine(line) => {
+            crate::platform::web::editor::goto_line(line);
+            Ok(None)
+        }
+        Effect::EditorFocus => {
+            crate::platform::web::editor::focus();
+            Ok(None)
+        }
+        Effect::SetEditorVimMode(enabled) => {
+            crate::platform::web::editor::set_vim_mode(enabled);
+            Ok(None)
+        }
+        Effect::PullWorkspace(note) => {
+            let pulled = server::pull_workspace_server_function()
+                .await
+                .map_err(server_error_message)?;
+            let view = server::workspace_server_function(note)
+                .await
+                .map_err(server_error_message)?;
+            let message = if pulled {
+                format!("pulled origin/{}", view.branch)
+            } else {
+                "no remote to pull from".into()
+            };
+            Ok(Some(ApplicationEvent::Workspace(WorkspaceEvent::Synced {
+                view: Box::new(view),
+                message,
+            })))
+        }
+        Effect::PushWorkspace(note) => {
+            let pushed = server::push_workspace_server_function()
+                .await
+                .map_err(server_error_message)?;
+            let view = server::workspace_server_function(note)
+                .await
+                .map_err(server_error_message)?;
+            let message = if pushed {
+                format!("pushed → origin/{}", view.branch)
+            } else {
+                "no remote to push to".into()
+            };
+            Ok(Some(ApplicationEvent::Workspace(WorkspaceEvent::Synced {
+                view: Box::new(view),
+                message,
+            })))
+        }
         Effect::SaveWorkspaceTheme { slug, theme } => {
             let theme = server::save_workspace_theme_server_function(slug, *theme)
                 .await

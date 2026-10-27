@@ -86,6 +86,11 @@ pub fn App() -> Element {
         });
     });
     rsx! {
+        document::Link { rel: "preconnect", href: "https://fonts.googleapis.com" }
+        document::Link {
+            rel: "stylesheet",
+            href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap",
+        }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Script { src: EDITOR_JS }
@@ -118,6 +123,14 @@ fn initial_application_state() -> ApplicationState {
     #[cfg(target_arch = "wasm32")]
     if let Some(theme) = crate::platform::web::storage::load_theme() {
         state.theme = theme;
+    }
+    // Start in touch mode on phones and tablets; a physical keypress switches
+    // to keyboard mode later.
+    #[cfg(target_arch = "wasm32")]
+    {
+        state.ui.touch = web_sys::window()
+            .and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
+            .is_some_and(|query| query.matches());
     }
     state
 }

@@ -57,9 +57,14 @@ pub enum AuthEvent {
     SessionExpired,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum WorkspaceEvent {
     OverlayClosed,
+    /// A pull or push finished; `view` is the reloaded workspace.
+    Synced {
+        view: Box<WorkspaceView>,
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

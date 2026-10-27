@@ -136,6 +136,67 @@ pub fn defaults() -> AppConfig {
         ),
     ];
 
+    let mut bindings = bindings;
+    // Shortcuts that work anywhere, also while typing: each is bound to both
+    // ⌘ (macOS) and Ctrl.
+    let anywhere = [
+        ('k', "ui.open_palette", CommandArgs::None),
+        ('/', "ui.toggle_cheat_sheet", CommandArgs::None),
+        ('.', "ui.toggle_action_bar", CommandArgs::None),
+        ('\\', "workspace.focus_file_tree", CommandArgs::None),
+        (',', "ui.show_settings", CommandArgs::None),
+        ('b', "editor.action", CommandArgs::Text("bold".into())),
+        ('i', "editor.action", CommandArgs::Text("italic".into())),
+        ('e', "editor.action", CommandArgs::Text("code".into())),
+    ];
+    for (key, command, args) in anywhere {
+        for modifiers in [
+            Modifiers::new(false, false, false, true),
+            Modifiers::new(true, false, false, false),
+        ] {
+            bindings.push(binding(
+                InputScope::Global,
+                None,
+                KeySequence::from(vec![KeyStroke::new(Key::Char(key), modifiers)]),
+                command,
+                args.clone(),
+            ));
+        }
+    }
+    bindings.push(binding(
+        InputScope::Global,
+        normal,
+        KeySequence::from(vec![KeyStroke::new(
+            Key::Char('?'),
+            Modifiers::new(false, false, true, false),
+        )]),
+        "ui.toggle_cheat_sheet",
+        CommandArgs::None,
+    ));
+    bindings.extend([
+        binding(
+            InputScope::Surface(SurfaceKind::FileTree),
+            normal,
+            keys([Key::Char('h')]),
+            "file_tree.collapse",
+            CommandArgs::None,
+        ),
+        binding(
+            InputScope::Surface(SurfaceKind::FileTree),
+            normal,
+            keys([Key::Char('l')]),
+            "file_tree.expand",
+            CommandArgs::None,
+        ),
+        binding(
+            InputScope::Surface(SurfaceKind::FileTree),
+            normal,
+            keys([Key::Char('q')]),
+            "workspace.focus_next_surface",
+            CommandArgs::None,
+        ),
+    ]);
+
     AppConfig {
         keymaps: KeymapConfig::new(leader, bindings),
         ui: UiConfig {

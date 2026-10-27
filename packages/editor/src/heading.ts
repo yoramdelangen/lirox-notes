@@ -1,6 +1,3 @@
-export const headingDecorationClass = (level: number, markersVisible: boolean) =>
-  [
-    "cm-editor-heading-line",
-    `cm-editor-heading-level-${level}`,
-    ...(markersVisible ? ["cm-editor-heading-line-focused"] : [])
-  ].join(" ");
+/** Line classes for a heading; the `#` marker hangs into the left margin. */
+export const headingDecorationClass = (level: number) =>
+  ["cm-editor-heading-line", `cm-editor-heading-level-${level}`].join(" ");

@@ -16,6 +16,7 @@ pub struct ApplicationState {
     pub domain: DomainState,
     pub config: AppConfig,
     pub status: StatusState,
+    pub ui: UiState,
     pub auth: AuthState,
     pub theme: WorkspaceTheme,
     pub theme_preview: Option<WorkspaceTheme>,
@@ -27,6 +28,119 @@ pub struct StatusState {
     pub message: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SidebarTab {
+    #[default]
+    Files,
+    Settings,
+}
+
+/// Popovers anchored in the sidebar; at most one is open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Popover {
+    Workspaces,
+    Git,
+    UserMenu,
+}
+
+/// Dropdowns opened from the action bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActionMenu {
+    Heading,
+    Lists,
+    Format,
+    More,
+}
+
+impl ActionMenu {
+    pub fn parse(id: &str) -> Option<Self> {
+        match id {
+            "heading" => Some(Self::Heading),
+            "lists" => Some(Self::Lists),
+            "format" => Some(Self::Format),
+            "more" => Some(Self::More),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PaletteState {
+    pub query: String,
+    pub index: usize,
+}
+
+/// Interface state that is not part of the document or workspace: open
+/// popovers and overlays, editor chrome preferences and the input device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiState {
+    pub sidebar_tab: SidebarTab,
+    pub popover: Option<Popover>,
+    pub palette: Option<PaletteState>,
+    pub cheat_sheet: bool,
+    pub outline: bool,
+    pub action_menu: Option<ActionMenu>,
+    pub action_menu_index: usize,
+    pub action_bar: bool,
+    pub key_hints: bool,
+    pub font_size: u8,
+    /// True after a touch on the document; a physical keypress clears it.
+    pub touch: bool,
+    /// The H1 that has scrolled out of view, shown in the top bar.
+    pub sticky_heading: String,
+    /// 1-based line and column of the editor cursor.
+    pub cursor: (usize, usize),
+    /// Folder paths folded in the file tree.
+    pub collapsed: std::collections::BTreeSet<String>,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            sidebar_tab: SidebarTab::Files,
+            popover: None,
+            palette: None,
+            cheat_sheet: false,
+            outline: false,
+            action_menu: None,
+            action_menu_index: 0,
+            action_bar: true,
+            key_hints: true,
+            font_size: 15,
+            touch: false,
+            sticky_heading: String::new(),
+            cursor: (1, 1),
+            collapsed: Default::default(),
+        }
+    }
+}
+
+impl UiState {
+    /// Closes the topmost overlay, popover or menu; false if nothing was open.
+    pub fn close_top(&mut self) -> bool {
+        if self.palette.take().is_some() {
+            return true;
+        }
+        if std::mem::take(&mut self.cheat_sheet) {
+            return true;
+        }
+        if self.action_menu.take().is_some() {
+            return true;
+        }
+        if self.popover.take().is_some() {
+            return true;
+        }
+        if std::mem::take(&mut self.outline) {
+            return true;
+        }
+        if self.sidebar_tab == SidebarTab::Settings {
+            self.sidebar_tab = SidebarTab::Files;
+            return true;
+        }
+        false
+    }
+}
+
 impl ApplicationState {
     pub fn empty() -> Self {
         Self {
@@ -35,6 +149,7 @@ impl ApplicationState {
             domain: DomainState::empty(),
             config: AppConfig::defaults(),
             status: StatusState::default(),
+            ui: UiState::default(),
             auth: AuthState::default(),
             theme: WorkspaceTheme::default(),
             theme_preview: None,

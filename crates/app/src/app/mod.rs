@@ -13,8 +13,11 @@ pub(crate) use effects::{
 pub use event::{
     ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, ThemeEvent, WorkspaceEvent,
 };
+pub(crate) use reducer::effective_vim;
 pub use reducer::{apply_event, Effect};
-pub use state::{ApplicationState, StatusState};
+pub use state::{
+    ActionMenu, ApplicationState, PaletteState, Popover, SidebarTab, StatusState, UiState,
+};
 
 #[cfg(test)]
 mod tests {
@@ -304,5 +307,177 @@ mod tests {
         let mut state = ApplicationState::empty();
         state.set_document("edited".into());
         assert_eq!(state.domain.document, "edited");
+    }
+
+    fn command_with(id: &str, args: CommandArgs) -> CommandInvocation {
+        CommandInvocation {
+            id: CommandId::new(id),
+            args,
+            source: CommandSource::System,
+        }
+    }
+
+    fn workspace_with_tree() -> ApplicationState {
+        use liroxnotes_shared::{TreeEntry, TreeKind};
+        let mut state = ApplicationState::empty();
+        let mut view = liroxnotes_shared::WorkspaceView::empty();
+        view.slug = "notes".into();
+        view.tree = vec![
+            TreeEntry {
+                kind: TreeKind::Folder,
+                label: "work".into(),
+                path: "work".into(),
+                depth: 0,
+                active: false,
+            },
+            TreeEntry {
+                kind: TreeKind::File,
+                label: "a.md".into(),
+                path: "work/a.md".into(),
+                depth: 1,
+                active: false,
+            },
+            TreeEntry {
+                kind: TreeKind::File,
+                label: "b.md".into(),
+                path: "b.md".into(),
+                depth: 0,
+                active: true,
+            },
+        ];
+        state.auth.workspace = Some(view);
+        state.domain.selected_note = Some("b.md".into());
+        state
+    }
+
+    #[test]
+    fn escape_closes_the_topmost_interface_layer_first() {
+        let mut state = ApplicationState::empty();
+        state.ui.outline = true;
+        dispatch(&mut state, command("ui.open_palette"));
+
+        let effects = dispatch(&mut state, command("overlay.close_top"));
+        assert!(state.ui.palette.is_none());
+        assert!(state.ui.outline);
+        assert_eq!(effects, vec![Effect::EditorFocus]);
+
+        dispatch(&mut state, command("overlay.close_top"));
+        assert!(!state.ui.outline);
+    }
+
+    #[test]
+    fn palette_accept_runs_the_selected_command() {
+        let mut state = ApplicationState::empty();
+        dispatch(
+            &mut state,
+            command_with(
+                "ui.open_palette",
+                CommandArgs::Text("> toggle action".into()),
+            ),
+        );
+        assert!(state.ui.action_bar);
+
+        let effects = dispatch(&mut state, command("ui.palette_accept"));
+        assert!(!state.ui.action_bar);
+        assert!(state.ui.palette.is_none());
+        assert!(effects.contains(&Effect::EditorFocus));
+    }
+
+    #[test]
+    fn selecting_a_theme_previews_and_saves_it_to_the_workspace() {
+        let mut state = workspace_with_tree();
+        let effects = dispatch(
+            &mut state,
+            command_with("theme.select", CommandArgs::Text("dracula".into())),
+        );
+
+        let preview = state.theme_preview.clone().expect("preview");
+        assert_eq!(preview.colors.bg, "#282a36");
+        assert_eq!(
+            effects,
+            vec![Effect::SaveWorkspaceTheme {
+                slug: "notes".into(),
+                theme: Box::new(preview)
+            }]
+        );
+    }
+
+    #[test]
+    fn action_menu_accept_runs_the_item_in_the_editor() {
+        let mut state = ApplicationState::empty();
+        dispatch(
+            &mut state,
+            command_with("ui.open_action_menu", CommandArgs::Text("heading".into())),
+        );
+        assert_eq!(state.ui.action_menu, Some(ActionMenu::Heading));
+        dispatch(
+            &mut state,
+            command_with(
+                "ui.action_menu_move",
+                CommandArgs::Direction(crate::command::Direction::Down),
+            ),
+        );
+
+        let effects = dispatch(&mut state, command("ui.action_menu_accept"));
+        assert_eq!(
+            effects,
+            vec![Effect::EditorAction("h2".into()), Effect::EditorFocus]
+        );
+        assert_eq!(state.ui.action_menu, None);
+    }
+
+    #[test]
+    fn tree_cursor_moves_over_visible_rows_without_changing_the_open_note() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.move_up"));
+        let cursor = |state: &ApplicationState| {
+            state
+                .workspace
+                .surface(SurfaceId::FILE_TREE)
+                .and_then(|surface| surface.selected_path())
+                .map(str::to_string)
+        };
+        assert_eq!(cursor(&state).as_deref(), Some("work/a.md"));
+        assert_eq!(state.domain.selected_note.as_deref(), Some("b.md"));
+
+        dispatch(&mut state, command("file_tree.move_up"));
+        assert_eq!(cursor(&state).as_deref(), Some("work"));
+        assert!(dispatch(&mut state, command("file_tree.open_selected")).is_empty());
+        assert!(state.ui.collapsed.contains("work"));
+
+        dispatch(&mut state, command("file_tree.move_down"));
+        assert_eq!(cursor(&state).as_deref(), Some("b.md"));
+    }
+
+    #[test]
+    fn switching_to_touch_turns_vim_keys_off() {
+        let mut state = ApplicationState::empty();
+        let effects = dispatch(
+            &mut state,
+            command_with("ui.set_input_device", CommandArgs::Text("touch".into())),
+        );
+        assert!(state.ui.touch);
+        assert_eq!(effects, vec![Effect::SetEditorVimMode(false)]);
+
+        let effects = dispatch(
+            &mut state,
+            command_with("ui.set_input_device", CommandArgs::Text("keyboard".into())),
+        );
+        assert_eq!(effects, vec![Effect::SetEditorVimMode(true)]);
+    }
+
+    #[test]
+    fn adding_a_workspace_opens_setup_and_cancel_returns_to_the_workbench() {
+        let mut state = workspace_with_tree();
+        state.auth.screen = crate::auth::Screen::Workbench;
+        dispatch(&mut state, command("workspace.add"));
+        assert_eq!(state.auth.screen, crate::auth::Screen::WorkspaceSetup);
+        assert_eq!(
+            state.auth.setup.step,
+            crate::auth::SetupStep::ChooseWorkspace
+        );
+
+        dispatch(&mut state, command("workspace.cancel_setup"));
+        assert_eq!(state.auth.screen, crate::auth::Screen::Workbench);
     }
 }

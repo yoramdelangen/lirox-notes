@@ -33,7 +33,7 @@ pub fn OverlayRenderer(
                 dispatcher.dispatch(
                     &mut state.write(),
                     CommandInvocation {
-                        id: CommandId::new("overlay.close_top"),
+                        id: CommandId::new("workspace.toggle_file_tree"),
                         args: CommandArgs::None,
                         source: CommandSource::Pointer,
                     },

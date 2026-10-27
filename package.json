@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build:css": "BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -i ./crates/app/tailwind.css -o ./crates/app/assets/tailwind.css --minify",
-    "watch:css": "BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -i ./crates/app/tailwind.css -o ./crates/app/assets/tailwind.css --watch"
+    "build:css": "BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -i ./crates/app/tailwind.css -o ./crates/app/assets/tailwind.css --minify && BROWSERSLIST_IGNORE_OLD_DATA=1 tailwindcss -i ./crates/app/assets/main.css -o ./crates/app/assets/main.compiled.css --minify",
+    "watch:css": "BROWSERSLIST_IGNORE_OLD_DATA=1 sh -c 'tailwindcss -i ./crates/app/tailwind.css -o ./crates/app/assets/tailwind.css --watch & tailwindcss -i ./crates/app/assets/main.css -o ./crates/app/assets/main.compiled.css --watch & wait'"
   },
   "devDependencies": {
     "browserslist": "^4.28.7",

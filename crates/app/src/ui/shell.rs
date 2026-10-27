@@ -6,7 +6,10 @@ use crate::{
     app::{ApplicationState, Dispatcher},
     input::InputEvent,
     platform::web::keyboard,
-    ui::workspace_renderer::WorkspaceRenderer,
+    ui::{
+        overlays::{CheatSheet, Palette, Toast},
+        workspace_renderer::WorkspaceRenderer,
+    },
     workspace::ViewportMode,
     AppContext, FocusTarget, SidebarMode,
 };
@@ -94,6 +97,34 @@ fn WorkspaceShellContent(
     });
     #[cfg(not(target_arch = "wasm32"))]
     use_hook(update_viewport);
+    // Keys an on-screen keyboard cannot send (Esc, Tab, arrows, ⌘/Ctrl/Alt
+    // chords) mean a hardware keyboard is attached, wherever focus is.
+    #[cfg(target_arch = "wasm32")]
+    let _keyboard_listener = use_hook({
+        let context = context.clone();
+        move || {
+            crate::platform::web::viewport::WindowListener::on("keydown", move |event| {
+                use wasm_bindgen::JsCast;
+                let Some(event) = event.dyn_ref::<web_sys::KeyboardEvent>() else {
+                    return;
+                };
+                let hardware = event.meta_key()
+                    || event.ctrl_key()
+                    || event.alt_key()
+                    || matches!(event.key().as_str(), "Escape" | "Tab")
+                    || event.key().starts_with("Arrow");
+                if hardware && context.state.peek().ui.touch {
+                    crate::ui::actions::run_from(
+                        &context,
+                        "ui.set_input_device",
+                        crate::ui::actions::text("keyboard"),
+                        crate::command::CommandSource::Keyboard,
+                    );
+                }
+            })
+            .map(std::rc::Rc::new)
+        }
+    });
     let onkeydown = move |event: KeyboardEvent| {
         let Some(InputEvent::Key(stroke)) = keyboard::normalize_keyboard_event(&event) else {
             return;
@@ -114,11 +145,17 @@ fn WorkspaceShellContent(
         }
     };
 
+    let touch_class = if state.read().ui.touch {
+        "lx-touch"
+    } else {
+        ""
+    };
+
     rsx! {
         div {
             id: "workspace-shell",
             style: "{theme_style}",
-            class: "flex h-screen min-h-0 flex-col bg-[var(--lirox-bg)] text-[var(--lirox-fg)]",
+            class: "lx-root relative flex h-screen min-h-0 flex-col {touch_class}",
             onkeydown: onkeydown,
             main {
                 class: "relative flex min-h-0 flex-1 overflow-hidden",
@@ -129,6 +166,9 @@ fn WorkspaceShellContent(
                     on_select_note,
                 }
             }
+            Palette {}
+            CheatSheet {}
+            Toast {}
         }
     }
 }

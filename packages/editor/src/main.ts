@@ -1,11 +1,11 @@
 import { minimalSetup } from "codemirror";
-import { javascriptLanguage } from "@codemirror/lang-javascript";
-import { Compartment, EditorSelection, EditorState, StateField } from "@codemirror/state";
-import { markdown } from "@codemirror/lang-markdown";
+import { indentLess, indentMore, redo, undo } from "@codemirror/commands";
+import { Compartment, EditorSelection, EditorState, RangeSetBuilder } from "@codemirror/state";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { getCM, Vim, vim } from "@replit/codemirror-vim";
-import { HighlightStyle, defaultHighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
-import { Decoration, DecorationSet, EditorView, WidgetType, lineNumbers, showPanel, type Panel } from "@codemirror/view";
-import { tags as t } from "@lezer/highlight";
+import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
+import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, lineNumbers } from "@codemirror/view";
+import { styleTags, Tag, tags as t } from "@lezer/highlight";
 import { headingDecorationClass } from "./heading";
 
 type EditorRoot = HTMLElement & {
@@ -14,7 +14,7 @@ type EditorRoot = HTMLElement & {
 		editorMounted?: string;
 		lineNumbers?: string;
 		vimModeEnabled?: string;
-		writingWidth?: string;
+		autofocus?: string;
 	};
 };
 
@@ -25,18 +25,18 @@ type EditorEventDetail = {
 	headingLevel: number;
 	selectionText: string;
 	selectionEmpty: boolean;
-};
-
-type HeadingSplit = {
-	exists: boolean;
-	level: number;
-	title: string;
+	/** 1-based cursor line and column. */
+	line: number;
+	col: number;
 };
 
 type LiroxNotesEditorApi = {
 	mountAllLiroxNotesEditors: () => void;
 	setVimModeEnabled: (enabled: boolean) => void;
 	updateLiroxNotesEditor: (root: EditorRoot, nextDoc?: string) => EditorView | undefined;
+	run: (action: string) => void;
+	gotoLine: (line: number) => void;
+	focus: () => void;
 };
 
 type MountedEditor = {
@@ -45,947 +45,443 @@ type MountedEditor = {
 };
 
 const mountedEditors = new WeakMap<EditorRoot, MountedEditor>();
+let activeView: EditorView | undefined;
 let vimModeEnabled = true;
 
-Vim.defineEx("write", "w", (cm) => {
-	cm.getWrapperElement().dispatchEvent(
-		new CustomEvent("lirox-editor-save", { bubbles: true })
-	);
-});
+const FENCE = "```";
 
-const parseBoolean = (value: string | undefined, fallback: boolean) => {
-	if (value == null) {
-		return fallback;
-	}
+// Markdown syntax marks stay visible, drawn faint, except the block markers
+// that carry structure (headings, list bullets, quotes), which use the accent.
+const blockMark = Tag.define();
 
-	return value === "true";
-};
-
-const splitHeading = (doc: string): HeadingSplit => {
-	const match = doc.match(/^(#{1,6})\s+(.+?)(?:\n|$)/);
-	if (!match) {
-		return {
-			exists: false,
-			level: 0,
-			title: ""
-		};
-	}
-
-	return {
-		exists: true,
-		level: match[1].length,
-		title: match[2].trim()
-	};
-};
-
-const hiddenMarkdownMarker = Decoration.replace({});
-
-const codeEditorHighlightStyle = HighlightStyle.define([
-	{ tag: t.comment, color: "var(--lirox-subtle)", fontStyle: "italic" },
-	{ tag: [t.keyword, t.operatorKeyword, t.controlKeyword], color: "var(--lirox-accent)" },
-	{ tag: [t.string, t.special(t.string)], color: "var(--lirox-success)" },
-	{ tag: [t.number, t.bool, t.null], color: "var(--lirox-warning)" },
-	{ tag: [t.variableName, t.propertyName, t.name], color: "var(--lirox-fg)" },
-	{ tag: [t.typeName, t.className, t.definition(t.variableName)], color: "var(--lirox-info)" },
-	{ tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--lirox-accent)" },
-	{ tag: [t.atom, t.meta, t.url], color: "var(--lirox-warning)" },
-	{ tag: t.heading, color: "var(--lirox-fg)", fontWeight: "bold", textDecoration: "none" }
+const markdownStyle = HighlightStyle.define([
+	{ tag: t.processingInstruction, color: "var(--faint)" },
+	{ tag: blockMark, color: "var(--blue)" },
+	{ tag: t.heading, fontWeight: "700", textDecoration: "none" },
+	{ tag: t.strong, fontWeight: "700" },
+	{ tag: t.emphasis, fontStyle: "italic" },
+	{ tag: t.strikethrough, textDecoration: "line-through", color: "var(--dim)" },
+	{ tag: t.monospace, color: "var(--coral)" },
+	{ tag: t.link, color: "var(--blue)", textDecoration: "underline", textUnderlineOffset: "3px" },
+	{ tag: t.url, color: "var(--faint)" },
+	{ tag: t.quote, color: "var(--dim)", fontStyle: "italic" },
+	{ tag: t.contentSeparator, color: "var(--faint)" }
 ]);
+
+const markdownExtension = markdown({
+	base: markdownLanguage,
+	extensions: [{ props: [styleTags({ "HeaderMark ListMark QuoteMark": blockMark })] }]
+});
 
 const isPosInCode = (state: EditorState, pos: number) => {
 	const cursor = syntaxTree(state).cursor();
-	if (!cursor.moveTo(pos, -1)) return false;
+	if (!cursor.moveTo(pos, 1)) return false;
 	do {
 		if (cursor.type.name === "FencedCode" || cursor.type.name === "InlineCode") return true;
 	} while (cursor.parent());
 	return false;
 };
 
-class InlineIconWidget extends WidgetType {
-	constructor(private readonly symbol: string, private readonly className: string) {
-		super();
-	}
+// Code blocks use one small highlighter for every language, so the colors
+// follow the theme's four syntax roles instead of per-language grammars.
+const KEYWORDS = new Set(
+	"fn let mut pub use mod impl struct enum match if else for while loop return async await const type interface function class import export from new true false null None Some Ok Err self Self in of where select create index on and or not is sudo cd".split(" ")
+);
 
-	eq(other: InlineIconWidget) {
-		return other.symbol === this.symbol && other.className === this.className;
-	}
-
-	toDOM() {
-		const span = document.createElement("span");
-		span.className = this.className;
-		span.textContent = this.symbol;
-		return span;
-	}
-}
-
-class HeadingLabelWidget extends WidgetType {
-	constructor(
-		private readonly level: number,
-		private readonly start: number,
-		private readonly end: number
-	) { super(); }
-
-	eq(other: HeadingLabelWidget) {
-		return other.level === this.level;
-	}
-
-	toDOM() {
-		const span = document.createElement("span");
-		span.className = "cm-editor-heading-label";
-		span.textContent = `H${this.level}`;
-		span.addEventListener("mousedown", (e) => {
-			e.stopPropagation();
-			e.preventDefault();
-			const view = EditorView.findFromDOM(span);
-			if (view) showHeadingDropdown(view, span, this.start, this.end, this.level);
-		});
-		return span;
-	}
-}
-
-type ToolbarMenuItem = {
-	label: string;
-	active?: boolean;
-	run: () => void;
+const codeTokenRegex = (lang: string) => {
+	const comment = /^(sh|bash|zsh|py|python|nix|toml|yaml|yml)$/.test(lang) ? "(?:^|\\s)#" : lang === "sql" ? "--" : "\\/\\/";
+	return new RegExp(`(${comment}.*$)|("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')|(\\b\\d[\\d_.]*\\b)|([A-Za-z_][\\w-]*!?)`, "g");
 };
 
-const closeToolbarDropdowns = () => {
-	document.querySelectorAll(".cm-editor-toolbar-dropdown").forEach(el => el.remove());
+const codeMark = (name: string) => Decoration.mark({ class: `cm-lx-${name}` });
+const CODE_MARKS = {
+	comment: codeMark("comment"),
+	string: codeMark("str"),
+	number: codeMark("num"),
+	keyword: codeMark("kw"),
+	call: codeMark("call"),
+	type: codeMark("type")
 };
+const hashtagMark = codeMark("tag");
+const taskDoneMark = codeMark("task-done");
+const taskOpenMark = codeMark("task-open");
+const doneTextMark = codeMark("done");
 
-const showToolbarDropdown = (anchor: HTMLElement, items: ToolbarMenuItem[]) => {
-	closeToolbarDropdowns();
-	const dropdown = document.createElement("div");
-	dropdown.className = "cm-editor-toolbar-dropdown";
+const lineDecoration = (className: string) => Decoration.line({ attributes: { class: className } });
 
-	for (const item of items) {
-		const button = document.createElement("button");
-		button.type = "button";
-		button.className = "cm-editor-toolbar-dropdown-item";
-		if (item.active) {
-			button.classList.add("cm-editor-toolbar-dropdown-item-active");
+/** Line classes for headings, code blocks and rules, plus inline marks for code tokens, tasks and #tags. */
+const buildDecorations = (view: EditorView) => {
+	const { state } = view;
+	const builder = new RangeSetBuilder<Decoration>();
+	let inFence = false;
+	let lang = "";
+
+	for (const { from, to } of view.visibleRanges) {
+		let pos = from;
+		// Recover fence state for the first visible line.
+		const startLine = state.doc.lineAt(from);
+		inFence = isPosInCode(state, startLine.from) && !startLine.text.startsWith(FENCE);
+		if (inFence) {
+			for (let n = startLine.number - 1; n >= 1; n--) {
+				const text = state.doc.line(n).text;
+				if (text.startsWith(FENCE)) {
+					lang = text.slice(3).trim().toLowerCase();
+					break;
+				}
+			}
 		}
-		button.textContent = item.label;
-		button.addEventListener("click", (e) => {
-			e.stopPropagation();
-			item.run();
-			dropdown.remove();
-		});
-		dropdown.append(button);
-	}
 
-	const rect = anchor.getBoundingClientRect();
-	dropdown.style.position = "fixed";
-	dropdown.style.top = `${rect.bottom + 2}px`;
-	dropdown.style.left = `${rect.left}px`;
+		while (pos <= to) {
+			const line = state.doc.lineAt(pos);
+			const text = line.text;
 
-	const close = (ev: MouseEvent) => {
-		if (!dropdown.contains(ev.target as Node)) {
-			dropdown.remove();
-			document.removeEventListener("click", close);
-		}
-	};
-
-	requestAnimationFrame(() => document.addEventListener("click", close));
-	const editor = anchor.closest<HTMLElement>(".cm-editor");
-	(editor ?? document.body).append(dropdown);
-
-	const dropdownRect = dropdown.getBoundingClientRect();
-	if (dropdownRect.bottom > window.innerHeight && rect.top > dropdownRect.height) {
-		dropdown.classList.add("cm-editor-toolbar-dropdown-up");
-		dropdown.style.top = `${rect.top - dropdownRect.height - 2}px`;
-	}
-};
-
-const headingMarkerDecorations = StateField.define<DecorationSet>({
-	create(state) {
-		return buildHeadingMarkerDecorations(state);
-	},
-	update(_, transaction) {
-		if (!transaction.docChanged && !transaction.selection) {
-			return buildHeadingMarkerDecorations(transaction.state);
-		}
-		return buildHeadingMarkerDecorations(transaction.state);
-	},
-	provide(field) {
-		return EditorView.decorations.from(field);
-	}
-});
-
-const buildHeadingMarkerDecorations = (state: EditorState) => {
-	const doc = state.doc.toString();
-	const main = state.selection.main;
-	const decorations = [];
-	const headingRegex = /^(#{1,6})\s/gm;
-
-	for (const match of doc.matchAll(headingRegex)) {
-		const level = match[1].length;
-		const start = match.index ?? 0;
-		const end = start + match[0].length;
-
-		if (isPosInCode(state, start)) continue;
-
-		const cursorNear = main.from <= end && main.to >= start;
-		if (cursorNear) continue;
-
-		decorations.push(
-			Decoration.replace({
-				widget: new HeadingLabelWidget(level, start, end)
-			}).range(start, end)
-		);
-	}
-
-	return decorations.length ? Decoration.set(decorations, true) : Decoration.none;
-};
-
-const showHeadingDropdown = (
-	view: EditorView,
-	anchor: HTMLElement,
-	start: number,
-	end: number,
-	currentLevel: number
-) => {
-	const items = [
-		{ level: 0, label: "Paragraph" },
-		{ level: 1, label: "Heading 1" },
-		{ level: 2, label: "Heading 2" },
-		{ level: 3, label: "Heading 3" },
-		{ level: 4, label: "Heading 4" },
-		{ level: 5, label: "Heading 5" },
-		{ level: 6, label: "Heading 6" },
-	];
-
-	showToolbarDropdown(anchor, items.map((item) => ({
-		label: item.label,
-		active: item.level === currentLevel,
-		run: () => {
-			if (item.level === 0) {
-				view.dispatch({ changes: { from: start, to: end, insert: "" } });
+			if (text.startsWith(FENCE)) {
+				const opening = !inFence;
+				if (opening) lang = text.slice(3).trim().toLowerCase();
+				builder.add(line.from, line.from, lineDecoration(`cm-lx-code cm-lx-fence ${opening ? "cm-lx-fence-open" : "cm-lx-fence-close"}`));
+				builder.add(line.from, line.to, codeMark("fence-mark"));
+				inFence = !inFence;
+			} else if (inFence) {
+				builder.add(line.from, line.from, lineDecoration("cm-lx-code"));
+				const re = codeTokenRegex(lang);
+				let match: RegExpExecArray | null;
+				while ((match = re.exec(text))) {
+					if (match[0] === "") {
+						re.lastIndex++;
+						continue;
+					}
+					const start = line.from + match.index;
+					const end = start + match[0].length;
+					let mark: Decoration | undefined;
+					if (match[1]) mark = CODE_MARKS.comment;
+					else if (match[2]) mark = CODE_MARKS.string;
+					else if (match[3]) mark = CODE_MARKS.number;
+					else if (match[4]) {
+						const next = text[match.index + match[0].length];
+						if (KEYWORDS.has(match[0])) mark = CODE_MARKS.keyword;
+						else if (match[0].endsWith("!") || next === "(") mark = CODE_MARKS.call;
+						else if (/^[A-Z]/.test(match[0])) mark = CODE_MARKS.type;
+					}
+					if (mark) builder.add(start, end, mark);
+				}
 			} else {
-				view.dispatch({ changes: { from: start, to: end, insert: "#".repeat(item.level) + " " } });
-			}
-			view.focus();
-		}
-	})));
-};
-
-const headingDecorations = StateField.define<DecorationSet>({
-	create(state) {
-		return buildHeadingDecorations(state);
-	},
-	update(_, transaction) {
-		return buildHeadingDecorations(transaction.state);
-	},
-	provide(field) {
-		return EditorView.decorations.from(field);
-	}
-});
-
-const buildHeadingDecorations = (state: EditorState) => {
-	const doc = state.doc.toString();
-	const main = state.selection.main;
-	const decorations = [];
-	const headingRegex = /^(#{1,6})\s+.+$/gm;
-
-	for (const match of doc.matchAll(headingRegex)) {
-		const level = match[1]?.length;
-		const from = match.index;
-		if (level == null || from == null) {
-			continue;
-		}
-
-		if (isPosInCode(state, from)) {
-			continue;
-		}
-
-		const markerEnd = from + (match[1]?.length ?? 0) + 1;
-		const markersVisible = main.from <= markerEnd && main.to >= from;
-
-		decorations.push(
-			Decoration.line({
-				attributes: {
-					class: headingDecorationClass(level, markersVisible)
+				const heading = text.match(/^(#{1,6}) /);
+				if (heading) {
+					builder.add(line.from, line.from, lineDecoration(headingDecorationClass(heading[1].length)));
+				} else if (/^(?:---+|\*\*\*+|___+)\s*$/.test(text)) {
+					builder.add(line.from, line.from, lineDecoration("cm-lx-hr"));
 				}
-			}).range(from)
-		);
-	}
 
-	if (!decorations.length) {
-		return Decoration.none;
-	}
-
-	return Decoration.set(decorations, true);
-};
-
-const strongMarkerDecorations = StateField.define<DecorationSet>({
-	create(state) {
-		return buildStrongMarkerDecorations(state);
-	},
-	update(_, transaction) {
-		if (!transaction.docChanged && !transaction.selection) {
-			return buildStrongMarkerDecorations(transaction.state);
-		}
-
-		return buildStrongMarkerDecorations(transaction.state);
-	},
-	provide(field) {
-		return EditorView.decorations.from(field);
-	}
-});
-
-const linkDecorations = StateField.define<DecorationSet>({
-	create(state) {
-		return buildLinkDecorations(state);
-	},
-	update(_, transaction) {
-		if (!transaction.docChanged && !transaction.selection) {
-			return buildLinkDecorations(transaction.state);
-		}
-
-		return buildLinkDecorations(transaction.state);
-	},
-	provide(field) {
-		return EditorView.decorations.from(field);
-	}
-});
-
-const hrLineDecorations = StateField.define<DecorationSet>({
-	create(state) {
-		return buildHrLineDecorations(state.doc.toString());
-	},
-	update(_, transaction) {
-		return buildHrLineDecorations(transaction.state.doc.toString());
-	},
-	provide(field) {
-		return EditorView.decorations.from(field);
-	}
-});
-
-const codeBlockDecorations = StateField.define<DecorationSet>({
-	create(state) {
-		return buildCodeBlockDecorations(state);
-	},
-	update(_, transaction) {
-		if (!transaction.docChanged && !transaction.selection) {
-			return buildCodeBlockDecorations(transaction.state);
-		}
-		return buildCodeBlockDecorations(transaction.state);
-	},
-	provide(field) {
-		return EditorView.decorations.from(field);
-	}
-});
-
-const buildCodeBlockDecorations = (state: EditorState) => {
-	const main = state.selection.main;
-	const decorations: Decoration[] = [];
-
-	const walk = (nodeCursor: any) => {
-		if (nodeCursor.type.name === "FencedCode") {
-			const from = nodeCursor.from;
-			const to = nodeCursor.to;
-			const docText = state.doc.sliceString(from, to);
-
-			const firstNl = docText.indexOf('\n');
-			const openEnd = firstNl >= 0 ? from + firstNl + 1 : to;
-
-			const lastNl = docText.lastIndexOf('\n', docText.length - 2);
-			const closeStart = lastNl > firstNl ? from + lastNl + 1 : openEnd;
-
-			const cursorTouches = main.from <= to && main.to >= from;
-			const firstLine = state.doc.lineAt(from);
-			const lastLine = state.doc.lineAt(Math.max(from, to - 1));
-
-			if (!cursorTouches) {
-				decorations.push(hiddenMarkdownMarker.range(from, openEnd));
-				decorations.push(hiddenMarkdownMarker.range(closeStart, to));
-			}
-
-			for (let pos = from; pos < to;) {
-				const line = state.doc.lineAt(pos);
-				const classes = ["cm-editor-code-block"];
-				if (line.from === firstLine.from) classes.push("cm-editor-code-block-first");
-				if (line.from === lastLine.from) classes.push("cm-editor-code-block-last");
-				decorations.push(
-					Decoration.line({
-						attributes: { class: classes.join(" ") }
-					}).range(line.from)
-				);
-				pos = line.to < to ? line.to + 1 : to;
-			}
-		}
-
-		if (nodeCursor.firstChild()) {
-			do {
-				walk(nodeCursor);
-			} while (nodeCursor.nextSibling());
-			nodeCursor.parent();
-		}
-	};
-
-	const root = syntaxTree(state).cursor();
-	if (root.firstChild()) {
-		do {
-			walk(root);
-		} while (root.nextSibling());
-	}
-
-	return decorations.length ? Decoration.set(decorations, true) : Decoration.none;
-};
-
-const buildStrongMarkerDecorations = (state: EditorState) => {
-	const doc = state.doc.toString();
-	const main = state.selection.main;
-	const decorations = [];
-	const strongRegex = /\*\*([^*\n][\s\S]*?)\*\*/g;
-
-	for (const match of doc.matchAll(strongRegex)) {
-		const full = match[0];
-		const content = match[1];
-		const start = match.index ?? 0;
-		const contentFrom = start + 2;
-		const contentTo = contentFrom + content.length;
-		const end = start + full.length;
-		const selectionTouches = main.from <= contentTo && main.to >= contentFrom;
-		const cursorInside = main.empty && main.from >= contentFrom && main.from <= contentTo;
-
-		if (selectionTouches || cursorInside) {
-			continue;
-		}
-
-		if (isPosInCode(state, start)) {
-			continue;
-		}
-
-		decorations.push(hiddenMarkdownMarker.range(start, start + 2));
-		decorations.push(hiddenMarkdownMarker.range(end - 2, end));
-	}
-
-	return decorations.length ? Decoration.set(decorations, true) : Decoration.none;
-};
-
-const buildLinkDecorations = (state: EditorState) => {
-	const doc = state.doc.toString();
-	const main = state.selection.main;
-	const decorations = [];
-	const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-
-	for (const match of doc.matchAll(linkRegex)) {
-		const full = match[0];
-		const label = match[1];
-		const start = match.index ?? 0;
-		const labelFrom = start + 1;
-		const labelTo = labelFrom + label.length;
-		const end = start + full.length;
-		const selectionTouches = main.from <= end && main.to >= start;
-		const cursorInside = main.empty && main.from >= start && main.from <= end;
-
-		if (selectionTouches || cursorInside) {
-			continue;
-		}
-
-		if (isPosInCode(state, start)) {
-			continue;
-		}
-
-		decorations.push(hiddenMarkdownMarker.range(start, start + 1));
-		decorations.push(hiddenMarkdownMarker.range(labelTo, end));
-		decorations.push(
-			Decoration.widget({
-				widget: new InlineIconWidget("↗", "cm-editor-link-icon"),
-				side: 1
-			}).range(labelTo)
-		);
-	}
-
-	return decorations.length ? Decoration.set(decorations, true) : Decoration.none;
-};
-
-const buildHrLineDecorations = (doc: string) => {
-	const decorations = [];
-	const hrRegex = /^(?:---+|\*\*\*+|___+)$/gm;
-
-	for (const match of doc.matchAll(hrRegex)) {
-		const from = match.index;
-		if (from == null) {
-			continue;
-		}
-
-		decorations.push(
-			Decoration.line({
-				attributes: {
-					class: "cm-editor-hr-line"
+				const marks: [number, number, Decoration][] = [];
+				const task = text.match(/^(\s*- )\[( |x)\] /);
+				if (task) {
+					const markerFrom = line.from + task[1].length;
+					const done = task[2] === "x";
+					marks.push([markerFrom, markerFrom + 3, done ? taskDoneMark : taskOpenMark]);
+					if (done && line.to > markerFrom + 4) marks.push([markerFrom + 4, line.to, doneTextMark]);
 				}
-			}).range(from)
-		);
+				for (const tag of text.matchAll(/(?:^|(?<=\s))#[A-Za-z][\w-]*/g)) {
+					const start = line.from + (tag.index ?? 0);
+					if (!heading || start > line.from) marks.push([start, start + tag[0].length, hashtagMark]);
+				}
+				marks.sort((a, b) => a[0] - b[0]);
+				for (const [start, end, mark] of marks) builder.add(start, end, mark);
+			}
+
+			if (line.to >= to) break;
+			pos = line.to + 1;
+		}
 	}
-
-	return decorations.length ? Decoration.set(decorations, true) : Decoration.none;
+	return builder.finish();
 };
 
-const wrapMainSelection = (view: EditorView, open: string, close = open) => {
-	const range = view.state.selection.main;
-	if (range.empty) {
-		view.dispatch({
-			changes: { from: range.from, to: range.to, insert: `${open}${close}` },
-			selection: EditorSelection.cursor(range.from + open.length)
-		});
-		view.focus();
-		return;
-	}
-
-	const selected = view.state.sliceDoc(range.from, range.to);
-	view.dispatch({
-		changes: { from: range.from, to: range.to, insert: `${open}${selected}${close}` },
-		selection: EditorSelection.range(range.from + open.length, range.to + open.length)
-	});
-	view.focus();
-};
-
-const insertAtLineStart = (view: EditorView, insert: string, cursorOffset = insert.length) => {
-	const range = view.state.selection.main;
-	const line = view.state.doc.lineAt(range.from);
-	view.dispatch({
-		changes: { from: line.from, to: line.from, insert },
-		selection: EditorSelection.cursor(line.from + cursorOffset)
-	});
-	view.focus();
-};
-
-const showListDropdown = (view: EditorView, anchor: HTMLElement) => {
-	showToolbarDropdown(anchor, [
-		{ label: "Bullet list", run: () => insertAtLineStart(view, "- ") },
-		{ label: "Numbered list", run: () => insertAtLineStart(view, "1. ") },
-		{ label: "Task list", run: () => insertAtLineStart(view, "- [ ] ") }
-	]);
-};
-
-const showFormatDropdown = (view: EditorView, anchor: HTMLElement) => {
-	showToolbarDropdown(anchor, [
-		{ label: "Inline code", run: () => wrapMainSelection(view, "`") },
-		{ label: "Code block", run: () => insertAtLineStart(view, "```javascript\n\n```", "```javascript\n".length) },
-		{ label: "Quote", run: () => insertAtLineStart(view, "> ") }
-	]);
-};
-
-const showMoreDropdown = (view: EditorView, anchor: HTMLElement) => {
-	showToolbarDropdown(anchor, [
-		{ label: "Horizontal rule", run: () => insertAtLineStart(view, "---\n\n", 5) }
-	]);
-};
-
-const readEditorMode = (view: EditorView) => {
-	const vimState = (getCM(view)?.state as unknown as { vim?: { mode?: string } }).vim;
-	return vimState?.mode ?? "normal";
-};
-
-const readEditorDetail = (view: EditorView): EditorEventDetail => {
-	const doc = view.state.doc.toString();
-	const heading = splitHeading(doc);
-	const selection = view.state.selection.main;
-
-	return {
-		doc,
-		mode: readEditorMode(view),
-		hasHeading: heading.exists,
-		headingLevel: heading.level,
-		selectionText: selection.empty ? "" : view.state.sliceDoc(selection.from, selection.to),
-		selectionEmpty: selection.empty
-	};
-};
-
-const emitEditorState = (root: EditorRoot, view: EditorView) => {
-	const detail = readEditorDetail(view);
-
-	root.dispatchEvent(new CustomEvent<EditorEventDetail>("lirox-editor-change", { detail }));
-};
+const tuiDecorations = ViewPlugin.fromClass(
+	class {
+		decorations: DecorationSet;
+		constructor(view: EditorView) {
+			this.decorations = buildDecorations(view);
+		}
+		update(update: ViewUpdate) {
+			if (update.docChanged || update.viewportChanged) this.decorations = buildDecorations(update.view);
+		}
+	},
+	{ decorations: (plugin) => plugin.decorations }
+);
 
 const theme = EditorView.theme({
 	"&": {
 		height: "100%",
 		backgroundColor: "transparent",
-		color: "var(--lirox-fg)",
-		fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+		color: "var(--fg)",
+		fontSize: "inherit"
 	},
+	"&.cm-focused": { outline: "none" },
 	".cm-scroller": {
 		overflow: "auto",
-		fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
-		padding: "0 1.5rem 1.5rem"
-	},
-	".cm-content, .cm-gutter": {
-		minHeight: "100%",
-		paddingTop: "0",
-		paddingBottom: "1.25rem"
+		fontFamily: "inherit",
+		lineHeight: "1.62",
+		scrollbarWidth: "none"
 	},
 	".cm-content": {
-		caretColor: "var(--lirox-accent)",
+		caretColor: "var(--coral)",
 		fontFamily: "inherit",
-		fontSize: "var(--text-base)",
-		lineHeight: "1.65"
+		whiteSpace: "pre-wrap"
 	},
-	".cm-panels": {
-		zIndex: "10",
-		backgroundColor: "transparent",
-		color: "var(--lirox-fg, rgb(var(--theme-text)))",
-		border: "0"
+	".cm-line": { padding: "0" },
+	".cm-cursor, .cm-dropCursor": { borderLeft: "2px solid var(--coral)", marginLeft: "-1px" },
+	".cm-selectionBackground, &.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, ::selection": {
+		backgroundColor: "var(--sel) !important"
 	},
-	".cm-panels-bottom": {
-		display: "flex",
-		alignItems: "center",
-		backgroundColor: "transparent",
-		border: "0"
+	".cm-fat-cursor": {
+		background: "var(--coral) !important",
+		color: "var(--bg) !important",
+		outline: "none !important",
+		border: "none"
 	},
-	".cm-panels-bottom > .cm-panel": {
-		alignItems: "center",
-		width: "100%",
-		backgroundColor: "var(--lirox-bg-alt, rgb(var(--theme-surface)))",
+	"&:not(.cm-focused) .cm-fat-cursor": {
+		background: "transparent !important",
+		outline: "1px solid var(--coral) !important"
 	},
-	".cm-editor-heading-line": {
-		position: "relative",
-		fontFamily: "inherit",
-		fontWeight: "600",
-		lineHeight: "1.15",
-		marginTop: "0.3em",
-		marginBottom: "0.15em",
-		textDecoration: "none !important",
-		color: "rgb(var(--theme-text))"
+	".cm-gutters": { backgroundColor: "transparent", border: "0", color: "var(--faint)" },
+	".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "transparent" },
+	".cm-editor-heading-line": { fontWeight: "700" },
+	".cm-editor-heading-level-1": { fontSize: "1.38em", lineHeight: "1.3", padding: "0.1em 0 0.45em", textIndent: "-2ch" },
+	".cm-editor-heading-level-2": { fontSize: "1.12em", lineHeight: "1.35", padding: "0.9em 0 0.25em", textIndent: "-3ch" },
+	".cm-editor-heading-level-3": { padding: "0.6em 0 0.15em", textIndent: "-4ch" },
+	".cm-editor-heading-level-4": { textIndent: "-5ch" },
+	".cm-editor-heading-level-5": { textIndent: "-6ch" },
+	".cm-editor-heading-level-6": { textIndent: "-7ch" },
+	".cm-lx-code": {
+		background: "var(--surface)",
+		fontSize: ".86em",
+		padding: "0 12px !important",
+		margin: "0 -8px 0 -12px"
 	},
-	".cm-editor-heading-line.cm-editor-heading-line-focused": {
-		marginLeft: "-1.7rem",
-	},
-	".cm-editor-heading-line .tok-heading, .cm-editor-heading-line .tok-heading *": {
-		color: "rgb(var(--theme-subtle))",
-		textDecoration: "none !important"
-	},
-	".cm-editor-heading-line > *": {
-		textDecoration: "none !important"
-	},
-	".cm-editor-heading-label": {
-		position: "absolute",
-		left: "0",
-		top: "0",
-		transform: "translate(-100%, 0.4em)",
-		display: "inline-flex",
-		alignItems: "center",
-		fontSize: "0.5em",
-		fontWeight: "700",
-		color: "rgb(var(--theme-subtle))",
-		letterSpacing: "0.02em",
-		cursor: "pointer",
-		borderRadius: "3px",
-		padding: "0 2px",
-		lineHeight: "2.3",
-		userSelect: "none"
-	},
-	".cm-editor-heading-label:hover": {
-		color: "rgb(var(--theme-text))",
-		backgroundColor: "rgb(var(--theme-surface-alt) / 0.5)"
-	},
-	".cm-editor-heading-dropdown": {
-		position: "fixed",
-		zIndex: "10",
-		display: "flex",
-		flexDirection: "column",
-		alignItems: "stretch",
-		backgroundColor: "var(--lirox-bg-alt, rgb(var(--theme-surface)))",
-		border: "1px solid var(--lirox-border, rgb(var(--shell-border)))",
-		borderRadius: "0.5rem",
-		padding: "0.25rem",
-		boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-		minWidth: "140px"
-	},
-	".cm-editor-heading-dropdown-item": {
-		display: "block",
-		width: "100%",
-		textAlign: "left",
-		padding: "0.4rem 0.65rem",
-		border: "0",
-		backgroundColor: "transparent",
-		color: "var(--lirox-fg, rgb(var(--theme-text)))",
-		fontSize: "13px",
-		borderRadius: "0.375rem",
-		cursor: "pointer"
-	},
-	".cm-editor-heading-dropdown-item:hover": {
-		backgroundColor: "var(--lirox-surface-alt, rgb(var(--theme-surface-alt)))"
-	},
-	".cm-editor-heading-dropdown-item-active": {
-		fontWeight: "600",
-		color: "var(--lirox-accent, rgb(var(--theme-accent)))"
-	},
-	".cm-editor-code-block": {
-		backgroundColor: "#0f1419",
-		color: "#e6e1cf",
-		fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-		borderLeft: "1px solid #272d38",
-		borderRight: "1px solid #272d38",
-		paddingLeft: "0.85rem",
-		paddingRight: "0.85rem",
-		fontSize: "0.98em"
-	},
-	".cm-editor-code-block-first": {
-		borderTop: "1px solid #272d38",
-		borderTopLeftRadius: "0.9rem",
-		borderTopRightRadius: "0.9rem",
-		paddingTop: "0.65rem"
-	},
-	".cm-editor-code-block-last": {
-		borderBottom: "1px solid #272d38",
-		borderBottomLeftRadius: "0.9rem",
-		borderBottomRightRadius: "0.9rem",
-		paddingBottom: "0.65rem"
-	},
-	".cm-editor-heading-level-1": { fontSize: "2rem" },
-	".cm-editor-heading-level-2": { fontSize: "1.625rem" },
-	".cm-editor-heading-level-3": { fontSize: "1.375rem" },
-	".cm-editor-heading-level-4": { fontSize: "1.125rem" },
-	".cm-editor-heading-level-5": { fontSize: "1.0625rem" },
-	".cm-editor-heading-level-6": { fontSize: "1rem" },
-	".cm-editor-toolbar": {
-		display: "flex",
-		justifyContent: "center",
-		// width: "fit-content",
-		maxWidth: "100%",
-		// margin: "0.25rem auto 0.75rem",
-		boxSizing: "border-box",
-		overflowX: "auto",
-		overflowY: "hidden",
-		// padding: "0.25rem",
-		border: "1px solid var(--lirox-border, rgb(var(--shell-border)))",
-		borderRadius: "0.5rem",
-		backgroundColor: "var(--lirox-surface, rgb(var(--shell-panel)))",
-		boxShadow: "0 1px 3px rgb(0 0 0 / 0.18)",
-		fontFamily: "inherit"
-	},
-	".cm-editor-toolbar-inner": {
-		display: "flex",
-		alignItems: "center",
-		gap: "0.25rem",
-		// width: "max-content",
-		// flexShrink: "0"
-	},
-	".cm-editor-toolbar-group": {
-		display: "flex",
-		alignItems: "center",
-		gap: "0.125rem"
-	},
-	".cm-editor-toolbar-separator": {
-		width: "1px",
-		height: "1.25rem",
-		flexShrink: "0",
-		margin: "0 0.25rem",
-		backgroundColor: "var(--lirox-border, rgb(var(--shell-border)))"
-	},
-	".cm-editor-toolbar-button": {
-		border: "0",
-		backgroundColor: "transparent",
-		color: "var(--lirox-muted, rgb(var(--theme-muted)))",
-		display: "inline-flex",
-		alignItems: "center",
-		justifyContent: "center",
-		gap: "0.35rem",
-		flexShrink: "0",
-		minHeight: "2rem",
-		padding: "0.4rem 0.65rem",
-		borderRadius: "0.375rem",
-		fontSize: "13px",
-		lineHeight: "1",
-		fontWeight: "500",
-		fontFamily: "inherit",
-		cursor: "pointer",
-		transition: "background-color 120ms ease, color 120ms ease"
-	},
-	".cm-editor-toolbar-button:hover": {
-		backgroundColor: "var(--lirox-surface-alt, rgb(var(--theme-surface-alt)))",
-		color: "var(--lirox-fg, rgb(var(--theme-text)))"
-	},
-	".cm-editor-toolbar-button:focus-visible": {
-		outline: "2px solid var(--lirox-accent, rgb(var(--theme-accent)))",
-		outlineOffset: "-2px"
-	},
-	".cm-editor-toolbar-button:disabled": {
-		opacity: "0.45",
-		cursor: "default"
-	},
-	".cm-editor-toolbar-button-active": {
-		backgroundColor: "var(--lirox-selection, rgb(var(--theme-surface-alt)))",
-		color: "var(--lirox-accent, rgb(var(--theme-accent)))"
-	},
-	".cm-editor-toolbar-button-arrow": {
-		width: "0.35rem",
-		height: "0.35rem",
-		borderRight: "1.5px solid currentColor",
-		borderBottom: "1.5px solid currentColor",
-		transform: "rotate(45deg) translateY(-1px)"
-	},
-	".cm-editor-toolbar-dropdown": {
-		position: "fixed",
-		zIndex: "100",
-		display: "flex",
-		flexDirection: "column",
-		minWidth: "160px",
-		backgroundColor: "var(--lirox-bg-alt, rgb(var(--theme-surface)))",
-		border: "1px solid var(--lirox-border, rgb(var(--shell-border)))",
-		borderRadius: "0.5rem",
-		padding: "0.25rem",
-		boxShadow: "0 8px 24px rgba(0,0,0,0.3)"
-	},
-	".cm-editor-toolbar-dropdown-item": {
-		display: "block",
-		width: "100%",
-		textAlign: "left",
-		padding: "0.4rem 0.65rem",
-		border: "0",
-		backgroundColor: "transparent",
-		color: "var(--lirox-fg, rgb(var(--theme-text)))",
-		fontSize: "13px",
-		borderRadius: "0.375rem",
-		cursor: "pointer"
-	},
-	".cm-editor-toolbar-dropdown-item:hover": {
-		backgroundColor: "var(--lirox-surface-alt, rgb(var(--theme-surface-alt)))"
-	},
-	".cm-editor-toolbar-dropdown-item-active": {
-		fontWeight: "600",
-		color: "var(--lirox-accent, rgb(var(--theme-accent)))"
-	},
-	".cm-editor-link-icon": {
-		display: "inline-block",
-		marginLeft: "0.35rem",
-		color: "rgb(var(--theme-accent))",
-		fontSize: "0.85em"
-	},
-	".cm-editor-hr-line": {
-		borderTop: "1px solid rgb(var(--shell-border))",
-		paddingBottom: "0.75rem",
-		height: "0",
-		fontSize: "0",
-		lineHeight: "0"
-	},
-	".cm-focused": {
-		outline: "none !important"
-	},
-	".cm-lineNumbers": {
-		color: "rgb(var(--theme-subtle))"
-	},
-	".cm-gutters": {
-		backgroundColor: "transparent",
-		border: "0",
-		color: "rgb(var(--theme-subtle))"
-	},
-	".cm-activeLine": {
-		backgroundColor: "rgba(var(--theme-surface), 0.45)"
-	},
-	".cm-activeLineGutter": {
-		backgroundColor: "transparent"
-	},
-	".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": {
-		backgroundColor: "rgba(var(--theme-accent), 0.22)"
-	},
-	".cm-cursor": {
-		borderLeftColor: "rgb(var(--theme-accent-soft))"
-	},
-	".cm-vimCursorLayer .cm-fat-cursor": {
-		minWidth: "0.75em",
-		boxSizing: "border-box",
-		backgroundColor: "var(--lirox-accent, rgb(var(--theme-accent)))",
-		color: "var(--lirox-bg, rgb(var(--theme-bg)))"
-	},
+	".cm-lx-fence-open": { paddingTop: "6px !important" },
+	".cm-lx-fence-close": { paddingBottom: "6px !important" },
+	".cm-lx-fence-mark, .cm-lx-comment": { color: "var(--faint)" },
+	".cm-lx-comment": { fontStyle: "italic" },
+	".cm-lx-str": { color: "var(--str)" },
+	".cm-lx-num": { color: "var(--num)" },
+	".cm-lx-kw": { color: "var(--kw)" },
+	".cm-lx-call": { color: "var(--coral)" },
+	".cm-lx-type": { color: "var(--blue)" },
+	".cm-lx-tag": { color: "var(--coral)" },
+	".cm-lx-task-open": { color: "var(--faint)" },
+	".cm-lx-task-done": { color: "var(--blue)" },
+	".cm-lx-done": { textDecoration: "line-through", color: "var(--dim)" },
+	".cm-lx-hr": {
+		color: "var(--faint)",
+		backgroundImage: "linear-gradient(var(--line2), var(--line2))",
+		backgroundSize: "calc(100% - 4ch) 1px",
+		backgroundPosition: "right center",
+		backgroundRepeat: "no-repeat"
+	}
 });
 
-const toolbarPanel = (view: EditorView): Panel => {
-	const dom = document.createElement("div");
-	dom.className = "cm-editor-toolbar";
-	dom.dataset.name = "Toolbar";
-	dom.setAttribute("role", "toolbar");
-	dom.setAttribute("aria-label", "Editor formatting");
-	dom.setAttribute("aria-orientation", "horizontal");
+const lineRange = (state: EditorState) => {
+	const head = state.selection.main.head;
+	return state.doc.lineAt(head);
+};
 
-	const inner = document.createElement("div");
-	inner.className = "cm-editor-toolbar-inner";
+const BLOCK_PREFIX = /^(\s*)(#{1,6} |- \[[ x]\] |[-*] |\d+\. |> )?/;
+const PREFIXES: Record<string, string> = { h1: "# ", h2: "## ", h3: "### ", task: "- [ ] ", ul: "- ", ol: "1. ", quote: "> ", p: "" };
 
-	const addGroup = (label: string) => {
-		const group = document.createElement("div");
-		group.className = "cm-editor-toolbar-group";
-		group.dataset.name = "ToolbarToggleGroup";
-		group.setAttribute("role", "group");
-		group.setAttribute("aria-label", label);
-		inner.append(group);
-		return group;
-	};
-
-	const addSeparator = () => {
-		const separator = document.createElement("div");
-		separator.className = "cm-editor-toolbar-separator";
-		separator.dataset.name = "ToolbarSeparator";
-		separator.setAttribute("role", "separator");
-		separator.setAttribute("aria-orientation", "vertical");
-		inner.append(separator);
-	};
-
-	const addButton = (group: HTMLElement, label: string, title: string, run: () => void) => {
-		const button = document.createElement("button");
-		button.type = "button";
-		button.dataset.name = "ToolbarButton";
-		button.className = "cm-editor-toolbar-button";
-		button.title = title;
-		button.setAttribute("aria-label", title);
-		button.textContent = label;
-		button.addEventListener("mousedown", (event) => event.preventDefault());
-		button.addEventListener("click", () => run());
-		group.append(button);
-	};
-
-	const addMenuButton = (group: HTMLElement, label: string, title: string, run: (button: HTMLButtonElement) => void) => {
-		const button = document.createElement("button");
-		button.type = "button";
-		button.dataset.name = "ToolbarButton";
-		button.className = "cm-editor-toolbar-button";
-		button.title = title;
-		button.setAttribute("aria-label", title);
-		const text = document.createElement("span");
-		text.textContent = label;
-		const arrow = document.createElement("span");
-		arrow.className = "cm-editor-toolbar-button-arrow";
-		arrow.setAttribute("aria-hidden", "true");
-		button.append(text, arrow);
-		button.addEventListener("mousedown", (event) => event.preventDefault());
-		button.addEventListener("click", () => run(button));
-		group.append(button);
-	};
-
-	const structure = addGroup("Structure");
-	addMenuButton(structure, "Heading", "Headings", (button) => {
-		const range = view.state.selection.main;
-		const line = view.state.doc.lineAt(range.from);
-		const match = line.text.match(/^(#{1,6})\s+/);
-		showHeadingDropdown(view, button, line.from, line.to, match ? match[1].length : 0);
+/** Turns the cursor line into `kind`, or back into a paragraph if it already is one. */
+const setBlock = (view: EditorView, kind: string) => {
+	const line = lineRange(view.state);
+	const match = line.text.match(BLOCK_PREFIX)!;
+	const indent = match[1];
+	const current = match[2] ?? "";
+	let prefix = PREFIXES[kind] ?? "";
+	if (current === prefix || (kind === "task" && current === "- [x] ")) prefix = "";
+	const rest = line.text.slice(indent.length + current.length);
+	const keepIndent = kind.startsWith("h") || kind === "quote" ? "" : indent;
+	const next = keepIndent + prefix + rest;
+	const head = view.state.selection.main.head;
+	view.dispatch({
+		changes: { from: line.from, to: line.to, insert: next },
+		selection: EditorSelection.cursor(Math.max(line.from + keepIndent.length + prefix.length, head + next.length - line.text.length))
 	});
+};
 
-	addButton(structure, "Task list", "Task list", () => insertAtLineStart(view, "- [ ] "));
-	addMenuButton(structure, "Lists", "Lists", (button) => showListDropdown(view, button));
+const cycleHeading = (view: EditorView) => {
+	const level = lineRange(view.state).text.match(/^(#{0,3}) ?/)![1].length;
+	setBlock(view, ["h1", "h2", "h3", "p"][level] ?? "p");
+};
 
-	addSeparator();
+const wrap = (view: EditorView, open: string, close = open) => {
+	const range = view.state.selection.main;
+	const selected = view.state.sliceDoc(range.from, range.to);
+	view.dispatch({
+		changes: { from: range.from, to: range.to, insert: `${open}${selected}${close}` },
+		selection: range.empty
+			? EditorSelection.cursor(range.from + open.length)
+			: EditorSelection.range(range.from + open.length, range.to + open.length)
+	});
+};
 
-	const inline = addGroup("Inline formatting");
-	addButton(inline, "Bold", "Bold", () => wrapMainSelection(view, "**"));
-	addButton(inline, "Italic", "Italic", () => wrapMainSelection(view, "*"));
-	addMenuButton(inline, "Format", "Formatting", (button) => showFormatDropdown(view, button));
-	addButton(inline, "Link", "Link", () => wrapMainSelection(view, "[", "](https://)"));
+/** Inserts `text` on its own line below the cursor line (or in place of an empty one). */
+const insertLine = (view: EditorView, text: string, caret = text.length) => {
+	const line = lineRange(view.state);
+	const empty = line.length === 0;
+	const insertAt = empty ? line.from : line.to;
+	const insert = empty ? text : `\n${text}`;
+	const start = empty ? line.from : line.to + 1;
+	view.dispatch({ changes: { from: insertAt, insert }, selection: EditorSelection.cursor(start + caret) });
+};
 
-	addSeparator();
+const toggleDone = (view: EditorView) => {
+	const line = lineRange(view.state);
+	const match = line.text.match(/^(\s*)- \[( |x)\] /);
+	if (!match) return setBlock(view, "task");
+	const at = line.from + match[1].length + 3;
+	view.dispatch({ changes: { from: at, to: at + 1, insert: match[2] === "x" ? " " : "x" } });
+};
 
-	const insert = addGroup("Insert");
-	addButton(insert, "Table", "Table", () => insertAtLineStart(view, "| Column 1 | Column 2 |\n| --- | --- |\n|  |  |\n", "| --- | --- |\n| ".length));
-	addButton(insert, "Image", "Image", () => insertAtLineStart(view, "![](https://)", 4));
-	addMenuButton(insert, "More", "More", (button) => showMoreDropdown(view, button));
+const ACTIONS: Record<string, (view: EditorView) => unknown> = {
+	heading: cycleHeading,
+	h1: (view) => setBlock(view, "h1"),
+	h2: (view) => setBlock(view, "h2"),
+	h3: (view) => setBlock(view, "h3"),
+	p: (view) => setBlock(view, "p"),
+	task: (view) => setBlock(view, "task"),
+	lists: (view) => setBlock(view, "ul"),
+	ul: (view) => setBlock(view, "ul"),
+	ol: (view) => setBlock(view, "ol"),
+	quote: (view) => setBlock(view, "quote"),
+	done: toggleDone,
+	bold: (view) => wrap(view, "**"),
+	italic: (view) => wrap(view, "*"),
+	strike: (view) => wrap(view, "~~"),
+	mark: (view) => wrap(view, "=="),
+	code: (view) => wrap(view, "`"),
+	link: (view) => wrap(view, "[", "](https://)"),
+	image: (view) => insertLine(view, "![photo](photo.jpg)"),
+	table: (view) => insertLine(view, "| col | col |\n| --- | --- |\n|  |  |", 30),
+	fence: (view) => insertLine(view, `${FENCE}\n\n${FENCE}`, 4),
+	hr: (view) => insertLine(view, "---"),
+	indent: indentMore,
+	outdent: indentLess,
+	undo,
+	redo
+};
 
-	dom.append(inner);
+/** Runs a formatting action on the active editor, see `ACTIONS`. */
+export const run = (action: string) => {
+	const view = activeView;
+	const command = ACTIONS[action];
+	if (!view || !command) return;
+	command(view);
+	view.focus();
+};
+
+/** Puts the cursor after the line's heading marker and scrolls it to the top. */
+export const gotoLine = (lineNumber: number) => {
+	const view = activeView;
+	if (!view) return;
+	const line = view.state.doc.line(Math.max(1, Math.min(lineNumber, view.state.doc.lines)));
+	const marker = line.text.match(/^#{1,6} /)?.[0].length ?? 0;
+	view.dispatch({
+		selection: EditorSelection.cursor(line.from + marker),
+		effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 12 })
+	});
+	view.focus();
+};
+
+export const focus = () => activeView?.focus();
+
+// `:w` saves, and the leader (space) opens the same menus as the action bar.
+Vim.defineEx("write", "w", (cm) => {
+	cm.getWrapperElement().dispatchEvent(new CustomEvent("lirox-editor-save", { bubbles: true }));
+});
+
+Vim.defineAction("liroxCommand", (cm, args) => {
+	const id = (args as { id?: string }).id ?? "";
+	if (id.startsWith("action:")) {
+		run(id.slice("action:".length));
+		return;
+	}
+	cm.getWrapperElement().dispatchEvent(new CustomEvent("lirox-editor-command", { bubbles: true, detail: { id } }));
+});
+
+const LEADER: [string, string][] = [
+	["h", "menu:heading"],
+	["l", "menu:lists"],
+	["f", "menu:format"],
+	[".", "menu:more"],
+	["t", "action:task"],
+	["b", "action:bold"],
+	["i", "action:italic"],
+	["k", "action:link"],
+	["m", "action:image"],
+	["T", "action:table"],
+	["<Space>", "palette"]
+];
+for (const [key, id] of LEADER) {
+	Vim.mapCommand(`<Space>${key}`, "action", "liroxCommand", { id }, { context: "normal" });
+}
+Vim.mapCommand("?", "action", "liroxCommand", { id: "cheat" }, { context: "normal" });
+
+const readEditorMode = (view: EditorView) => {
+	if (!vimModeEnabled) return "plain";
+	const vimState = (getCM(view)?.state as unknown as { vim?: { mode?: string; insertMode?: boolean; visualMode?: boolean } }).vim;
+	if (vimState?.insertMode) return "insert";
+	if (vimState?.visualMode) return "visual";
+	return vimState?.mode ?? "normal";
+};
+
+const readEditorDetail = (view: EditorView): EditorEventDetail => {
+	const doc = view.state.doc.toString();
+	const heading = doc.match(/^(#{1,6})\s+(.+?)(?:\n|$)/);
+	const selection = view.state.selection.main;
+	const line = view.state.doc.lineAt(selection.head);
 
 	return {
-		top: false,
-		dom
+		doc,
+		mode: readEditorMode(view),
+		hasHeading: Boolean(heading),
+		headingLevel: heading ? heading[1].length : 0,
+		selectionText: selection.empty ? "" : view.state.sliceDoc(selection.from, selection.to),
+		selectionEmpty: selection.empty,
+		line: line.number,
+		col: selection.head - line.from + 1
 	};
+};
+
+/** Reports mode and cursor; the document only when `withDoc`, so a focus or
+ * cursor move never overwrites a note the host has just loaded. */
+const emitEditorState = (root: EditorRoot, view: EditorView, withDoc = false) => {
+	const detail: Partial<EditorEventDetail> = readEditorDetail(view);
+	if (!withDoc) delete detail.doc;
+	root.dispatchEvent(new CustomEvent("lirox-editor-change", { detail }));
+};
+
+/** The first H1 once it has scrolled above the viewport, else "". */
+const stickyHeading = (view: EditorView) => {
+	const doc = view.state.doc;
+	for (let n = 1; n <= doc.lines; n++) {
+		const line = doc.line(n);
+		const match = line.text.match(/^# (.+)/);
+		if (!match || isPosInCode(view.state, line.from)) continue;
+		const block = view.lineBlockAt(line.from);
+		return block.bottom < view.scrollDOM.scrollTop - view.documentPadding.top + 4 ? match[1].trim() : "";
+	}
+	return "";
+};
+
+const watchScroll = (root: EditorRoot, view: EditorView) => {
+	let last = "";
+	view.scrollDOM.addEventListener(
+		"scroll",
+		() => {
+			const sticky = stickyHeading(view);
+			if (sticky === last) return;
+			last = sticky;
+			root.dispatchEvent(new CustomEvent("lirox-editor-scroll", { detail: { sticky } }));
+		},
+		{ passive: true }
+	);
 };
 
 export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => {
@@ -995,32 +491,28 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
 	}
 
 	const source = initialDoc ?? root.dataset.initialDoc ?? "";
-	const writingWidth = root.dataset.writingWidth ?? "650px";
-	const showLineNumbers = parseBoolean(root.dataset.lineNumbers, false);
+	const showLineNumbers = root.dataset.lineNumbers === "true";
 	vimModeEnabled = root.dataset.vimModeEnabled !== "false";
 	const vimMode = new Compartment();
 	root.style.height = "100%";
-	root.style.maxWidth = writingWidth;
-	root.style.margin = "0 auto";
 
 	const extensions = [
 		vimMode.of(vimModeEnabled ? vim() : []),
 		minimalSetup,
 		EditorView.lineWrapping,
-		markdown({ defaultCodeLanguage: javascriptLanguage }),
-		syntaxHighlighting(defaultHighlightStyle),
-		syntaxHighlighting(codeEditorHighlightStyle),
-		headingDecorations,
-		linkDecorations,
-		hrLineDecorations,
-		codeBlockDecorations,
-		strongMarkerDecorations,
-		headingMarkerDecorations,
+		markdownExtension,
+		syntaxHighlighting(markdownStyle),
+		tuiDecorations,
 		theme,
-		showPanel.of(toolbarPanel),
+		EditorView.domEventHandlers({
+			focus: (_, view) => {
+				activeView = view;
+				emitEditorState(root, view);
+			}
+		}),
 		EditorView.updateListener.of((update) => {
 			if (update.docChanged || update.selectionSet) {
-				emitEditorState(root, update.view);
+				emitEditorState(root, update.view, update.docChanged);
 			}
 		})
 	];
@@ -1029,19 +521,29 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
 		extensions.splice(1, 0, lineNumbers());
 	}
 
-	const state = EditorState.create({
-		doc: source,
-		extensions
-	});
-
 	const view = new EditorView({
-		state,
+		state: EditorState.create({ doc: source, extensions }),
 		parent: root
 	});
+	activeView = view;
 
 	getCM(view)?.on("vim-mode-change", () => emitEditorState(root, view));
-
+	watchScroll(root, view);
 	emitEditorState(root, view);
+	if (root.dataset.autofocus === "true") view.focus();
+
+	// The host reuses this root when another note opens and only updates
+	// `data-initial-doc`. Edits flow back into that attribute too, so only a
+	// value that differs from the editor's own text is a newly loaded note.
+	new MutationObserver(() => {
+		const next = root.dataset.initialDoc ?? "";
+		if (next === view.state.doc.toString()) return;
+		view.setState(EditorState.create({ doc: next, extensions }));
+		view.dispatch({ effects: vimMode.reconfigure(vimModeEnabled ? vim() : []) });
+		view.scrollDOM.scrollTop = 0;
+		emitEditorState(root, view);
+		if (root.dataset.autofocus === "true") view.focus();
+	}).observe(root, { attributes: true, attributeFilter: ["data-initial-doc"] });
 
 	root.dataset.editorMounted = "true";
 	mountedEditors.set(root, { view, vimMode });
@@ -1097,6 +599,9 @@ if (!editorGlobal.LiroxNotesEditor) {
 		mountAllLiroxNotesEditors,
 		setVimModeEnabled,
 		updateLiroxNotesEditor,
+		run,
+		gotoLine,
+		focus
 	};
 	startAutoMount();
 }
