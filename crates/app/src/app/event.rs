@@ -4,6 +4,8 @@ use liroxnotes_shared::WorkspaceView;
 #[derive(Clone, PartialEq, Eq)]
 #[allow(clippy::large_enum_variant)]
 pub enum ApplicationEvent {
+    /// The user's `config.toml`; empty when there is none.
+    ConfigLoaded(String),
     Workspace(WorkspaceEvent),
     Theme(ThemeEvent),
     Status(StatusEvent),

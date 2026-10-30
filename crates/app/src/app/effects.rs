@@ -35,7 +35,11 @@ pub(crate) fn auth_error_event(effect: &Effect, message: String) -> ApplicationE
         ApplicationEvent::Theme(ThemeEvent::SaveFailed(message))
     } else if matches!(
         effect,
-        Effect::SwitchWorkspace(_) | Effect::PullWorkspace(_) | Effect::PushWorkspace(_)
+        Effect::SwitchWorkspace(_)
+            | Effect::PullWorkspace(_)
+            | Effect::PushWorkspace(_)
+            | Effect::LoadAppConfig
+            | Effect::SaveEditorOptions { .. }
     ) {
         // Keep the current workspace open; only report why switching failed.
         ApplicationEvent::Status(StatusEvent::Message(message))
@@ -86,6 +90,26 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
         }
         Effect::EditorGotoLine(line) => {
             crate::platform::web::editor::goto_line(line);
+            Ok(None)
+        }
+        Effect::SetEditorVimMappings(mappings) => {
+            crate::platform::web::editor::set_vim_mappings(&mappings);
+            Ok(None)
+        }
+        Effect::LoadAppConfig => Ok(Some(ApplicationEvent::ConfigLoaded(
+            server::app_config_server_function()
+                .await
+                .map_err(server_error_message)?,
+        ))),
+        Effect::SaveEditorOptions {
+            vim,
+            action_bar,
+            key_hints,
+            font_size,
+        } => {
+            server::save_editor_options_server_function(vim, action_bar, key_hints, font_size)
+                .await
+                .map_err(server_error_message)?;
             Ok(None)
         }
         Effect::EditorFocus => {

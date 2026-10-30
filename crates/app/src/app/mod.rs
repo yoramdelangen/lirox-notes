@@ -480,4 +480,57 @@ mod tests {
         dispatch(&mut state, command("workspace.cancel_setup"));
         assert_eq!(state.auth.screen, crate::auth::Screen::Workbench);
     }
+
+    #[test]
+    fn the_first_workspace_load_requests_the_user_config_once() {
+        let mut state = ApplicationState::empty();
+        let view = Box::new(liroxnotes_shared::WorkspaceView::empty());
+        let effects = apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(view.clone())),
+        );
+        assert!(effects.contains(&Effect::LoadAppConfig));
+        let effects = apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::WorkspaceLoaded(view)),
+        );
+        assert!(!effects.contains(&Effect::LoadAppConfig));
+    }
+
+    #[test]
+    fn loaded_config_applies_options_and_reports_errors() {
+        let mut state = ApplicationState::empty();
+        let effects = apply_event(
+            &mut state,
+            ApplicationEvent::ConfigLoaded("[editor]\naction_bar = false\nfont_size = 17".into()),
+        );
+        assert!(!state.ui.action_bar);
+        assert_eq!(state.ui.font_size, 17);
+        assert!(matches!(effects[0], Effect::SetEditorVimMappings(_)));
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::ConfigLoaded("[keymap.nope]\nj = \"x\"".into()),
+        );
+        assert!(state.status.message.unwrap().starts_with("config.toml:"));
+        assert!(!state.ui.action_bar);
+    }
+
+    #[test]
+    fn changing_an_editor_setting_saves_it_to_the_config_file() {
+        let mut state = ApplicationState::empty();
+        let effects = dispatch(&mut state, command("ui.cycle_font_size"));
+        assert_eq!(
+            effects.last(),
+            Some(&Effect::SaveEditorOptions {
+                vim: true,
+                action_bar: true,
+                key_hints: true,
+                font_size: 16
+            })
+        );
+        assert!(!dispatch(&mut state, command("ui.toggle_outline"))
+            .iter()
+            .any(|effect| matches!(effect, Effect::SaveEditorOptions { .. })));
+    }
 }

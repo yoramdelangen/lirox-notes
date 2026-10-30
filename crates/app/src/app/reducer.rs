@@ -46,6 +46,16 @@ pub enum Effect {
     EditorGotoLine(usize),
     EditorFocus,
     SetEditorVimMode(bool),
+    SetEditorVimMappings(Vec<crate::config::toml_config::VimMapping>),
+    /// Reads `~/.config/lirox-notes/config.toml` from the server.
+    LoadAppConfig,
+    /// Writes the editor settings back to `config.toml`.
+    SaveEditorOptions {
+        vim: bool,
+        action_bar: bool,
+        key_hints: bool,
+        font_size: u8,
+    },
 }
 
 pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec<Effect> {
@@ -64,9 +74,37 @@ pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec
             return effects;
         }
         ApplicationEvent::Theme(event) => apply_theme_event(state, event),
+        ApplicationEvent::ConfigLoaded(source) => return apply_user_config(state, &source),
         ApplicationEvent::Auth(event) => return apply_auth_event(state, event),
     }
     Vec::new()
+}
+
+/// Merges the user's config over the built-in one; on an error the current
+/// keymap stays and the problem is shown.
+fn apply_user_config(state: &mut ApplicationState, source: &str) -> Vec<Effect> {
+    match crate::config::toml_config::config_with_user(source) {
+        Ok((config, options)) => {
+            state.config = config;
+            if let Some(action_bar) = options.action_bar {
+                state.ui.action_bar = action_bar;
+            }
+            if let Some(key_hints) = options.key_hints {
+                state.ui.key_hints = key_hints;
+            }
+            if let Some(font_size) = options.font_size {
+                state.ui.font_size = font_size;
+            }
+            vec![
+                Effect::SetEditorVimMappings(state.config.keymaps.vim.clone()),
+                Effect::SetEditorVimMode(effective_vim(state)),
+            ]
+        }
+        Err(error) => {
+            state.status.message = Some(format!("config.toml: {error}"));
+            Vec::new()
+        }
+    }
 }
 
 fn apply_theme_event(state: &mut ApplicationState, event: ThemeEvent) {
@@ -257,6 +295,8 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             vec![]
         }
         AuthEvent::WorkspaceLoaded(view) => {
+            let load_config = !state.ui.config_requested;
+            state.ui.config_requested = true;
             let hydrated = ApplicationState::from_workspace_view(&view);
             state.domain = hydrated.domain;
             state.workspace = hydrated.workspace;
@@ -268,7 +308,11 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             }) {
                 auth.screen = Screen::Workbench;
             }
-            vec![]
+            if load_config {
+                vec![Effect::LoadAppConfig]
+            } else {
+                vec![]
+            }
         }
         AuthEvent::RepositoryInspected { name, slug } => {
             if let Some(name) = name {
@@ -296,6 +340,23 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
 }
 
 pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation) -> Vec<Effect> {
+    let persist = matches!(
+        invocation.id.as_str(),
+        "editor.toggle_vim" | "ui.toggle_action_bar" | "ui.toggle_key_hints" | "ui.cycle_font_size"
+    );
+    let mut effects = reduce_command(state, invocation);
+    if persist {
+        effects.push(Effect::SaveEditorOptions {
+            vim: state.config.editor.vim_mode_enabled,
+            action_bar: state.ui.action_bar,
+            key_hints: state.ui.key_hints,
+            font_size: state.ui.font_size,
+        });
+    }
+    effects
+}
+
+fn reduce_command(state: &mut ApplicationState, invocation: CommandInvocation) -> Vec<Effect> {
     let id = invocation.id.as_str();
     match id {
         "app.open_command_palette" => vec![Effect::OpenCommandPalette],
@@ -480,8 +541,13 @@ pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation
             let Some(menu) = state.ui.action_menu.take() else {
                 return Vec::new();
             };
-            let index = match invocation.args {
-                CommandArgs::Count(index) => index as usize,
+            let index = match &invocation.args {
+                CommandArgs::Count(index) => *index as usize,
+                // A 1-based position from a key such as `2`.
+                CommandArgs::Text(position) => match position.parse::<usize>() {
+                    Ok(position) if position >= 1 => position - 1,
+                    _ => return Vec::new(),
+                },
                 _ => state.ui.action_menu_index,
             };
             crate::ui::model::action_menu_items(menu)
@@ -596,6 +662,19 @@ pub(crate) fn reduce(state: &mut ApplicationState, invocation: CommandInvocation
             state.ui.popover = None;
             state.status.message = Some("pushing…".into());
             vec![Effect::PushWorkspace(state.domain.selected_note.clone())]
+        }
+        "auth.logout" => {
+            state.ui.popover = None;
+            apply_auth_event(state, AuthEvent::Logout)
+        }
+        "workspace.switch" => {
+            state.ui.popover = None;
+            match &invocation.args {
+                CommandArgs::Text(slug) => {
+                    apply_auth_event(state, AuthEvent::SwitchWorkspace(slug.clone()))
+                }
+                _ => Vec::new(),
+            }
         }
         "workspace.add" => {
             state.ui.popover = None;

@@ -234,6 +234,48 @@ pub async fn delete_workspace_file_server_function(path: String) -> Result<bool,
     })
 }
 
+/// The user's `config.toml` (keymaps, editor options); empty if absent.
+/// See `liroxnotes_backend::user_config::user_config_path` for its location.
+#[server]
+pub async fn app_config_server_function() -> Result<String, ServerFnError> {
+    use liroxnotes_backend::user_config::{read_user_config, user_config_path};
+    authenticated_paths()?;
+    let Some(path) = user_config_path() else {
+        return Ok(String::new());
+    };
+    read_user_config(&path).map_err(|_| internal_error("could not read config.toml"))
+}
+
+/// Writes the Settings' editor options into `config.toml`'s `[editor]` table,
+/// keeping the rest of the file as written.
+#[server]
+pub async fn save_editor_options_server_function(
+    vim: bool,
+    action_bar: bool,
+    key_hints: bool,
+    font_size: u8,
+) -> Result<(), ServerFnError> {
+    use liroxnotes_backend::user_config::{save_editor_options, user_config_path, EditorOptions};
+    authenticated_paths()?;
+    let path = user_config_path().ok_or_else(|| internal_error("no config directory"))?;
+    let options = EditorOptions {
+        vim,
+        action_bar,
+        key_hints,
+        font_size,
+    };
+    save_editor_options(&path, options).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidData {
+            client_error(
+                400,
+                "config.toml is not valid TOML; fix it before saving settings",
+            )
+        } else {
+            internal_error("could not write config.toml")
+        }
+    })
+}
+
 #[server]
 pub async fn pull_workspace_server_function() -> Result<bool, ServerFnError> {
     let (_, config) = authenticated_workspace()?;

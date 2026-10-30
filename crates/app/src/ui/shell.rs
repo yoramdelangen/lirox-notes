@@ -121,6 +121,38 @@ fn WorkspaceShellContent(
                         crate::command::CommandSource::Keyboard,
                     );
                 }
+                // Keys pressed while focus sits outside the shell (e.g. on
+                // <body> after the focused button was removed) still go
+                // through the keymap; the shell's own handler covers the rest.
+                let inside_shell = event
+                    .target()
+                    .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                    .is_some_and(|element| {
+                        element.closest("#workspace-shell").ok().flatten().is_some()
+                    });
+                if inside_shell {
+                    return;
+                }
+                let Some(InputEvent::Key(stroke)) = keyboard::normalize_dom_key(
+                    &event.key(),
+                    event.ctrl_key(),
+                    event.alt_key(),
+                    event.shift_key(),
+                    event.meta_key(),
+                ) else {
+                    return;
+                };
+                let mut state = context.state;
+                let result = {
+                    let mut state = state.write();
+                    let bindings = state.config.keymaps.bindings.clone();
+                    let scopes = state.active_input_scopes();
+                    crate::input::resolve(&bindings, &mut state.input, stroke, &scopes)
+                };
+                if let crate::input::ResolveResult::Matched(invocation) = result {
+                    event.prevent_default();
+                    context.dispatcher.dispatch(&mut state.write(), invocation);
+                }
             })
             .map(std::rc::Rc::new)
         }

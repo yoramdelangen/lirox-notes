@@ -31,14 +31,56 @@ fn normalize_key(
         dioxus::html::Key::Backspace => Key::Backspace,
         _ => return None,
     };
+    normalize_dom_key_parts(
+        key,
+        browser_modifiers.contains(dioxus::html::Modifiers::CONTROL),
+        browser_modifiers.contains(dioxus::html::Modifiers::ALT),
+        browser_modifiers.contains(dioxus::html::Modifiers::SHIFT),
+        browser_modifiers.contains(dioxus::html::Modifiers::META),
+    )
+}
+
+/// Normalizes a raw DOM `KeyboardEvent.key` value with its modifiers.
+pub fn normalize_dom_key(
+    key: &str,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    meta: bool,
+) -> Option<InputEvent> {
+    let key = match key {
+        "Enter" => Key::Enter,
+        "ArrowUp" => Key::ArrowUp,
+        "ArrowDown" => Key::ArrowDown,
+        "Escape" => Key::Escape,
+        "Tab" => Key::Tab,
+        "Backspace" => Key::Backspace,
+        " " => Key::Space,
+        other => {
+            let mut chars = other.chars();
+            let character = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            Key::Char(character)
+        }
+    };
+    normalize_dom_key_parts(key, ctrl, alt, shift, meta)
+}
+
+/// A printable character already reflects Shift (`?`, `T`), so Shift is only
+/// kept for named keys such as `<S-tab>`.
+fn normalize_dom_key_parts(
+    key: Key,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+    meta: bool,
+) -> Option<InputEvent> {
+    let shift = shift && !matches!(key, Key::Char(_));
     Some(InputEvent::Key(KeyStroke::new(
         key,
-        Modifiers::new(
-            browser_modifiers.contains(dioxus::html::Modifiers::CONTROL),
-            browser_modifiers.contains(dioxus::html::Modifiers::ALT),
-            browser_modifiers.contains(dioxus::html::Modifiers::SHIFT),
-            browser_modifiers.contains(dioxus::html::Modifiers::META),
-        ),
+        Modifiers::new(ctrl, alt, shift, meta),
     )))
 }
 

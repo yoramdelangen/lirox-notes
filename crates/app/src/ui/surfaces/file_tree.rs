@@ -218,13 +218,10 @@ fn WorkspacesPopover() -> Element {
                                                 class: if workspace.active { "lx-row is-current" } else { "lx-row" },
                                                 aria_current: if workspace.active { "true" },
                                                 onclick: move |_| {
-                                                    let mut state = context.state;
-                                                    state.write().ui.popover = None;
-                                                    if !workspace.active {
-                                                        context.dispatcher.dispatch_auth_command(
-                                                            &mut state.write(),
-                                                            AuthCommand::SwitchWorkspace(workspace.slug.clone()),
-                                                        );
+                                                    if workspace.active {
+                                                        run(&context, "ui.toggle_popover", text("workspaces"));
+                                                    } else {
+                                                        run(&context, "workspace.switch", text(workspace.slug.clone()));
                                                     }
                                                 },
                                                 span { class: "lx-guide", "{guide}" }
@@ -514,7 +511,7 @@ fn LogoutRow() -> Element {
         button {
             r#type: "button",
             class: "lx-setting",
-            onclick: move |_| crate::auth::dispatch_auth(context.state, context.dispatcher.clone(), AuthCommand::Logout),
+            onclick: move |_| run(&context, "auth.logout", CommandArgs::None),
             span { class: "lx-setting-mark", " → " }
             span { class: "lx-setting-label", "Log out" }
         }
@@ -573,7 +570,7 @@ fn UserBar(popover: Option<Popover>) -> Element {
                         r#type: "button",
                         role: "menuitem",
                         class: "lx-row",
-                        onclick: move |_| crate::auth::dispatch_auth(logout.state, logout.dispatcher.clone(), AuthCommand::Logout),
+                        onclick: move |_| run(&logout, "auth.logout", CommandArgs::None),
                         "Log out"
                     }
                 }

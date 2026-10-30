@@ -3,10 +3,10 @@ use liroxnotes_shared::WorkspaceView;
 
 use crate::{
     app::{ActionMenu, Dispatcher},
-    command::{CommandArgs, Direction, SurfaceId},
+    command::{CommandArgs, SurfaceId},
     input::InputMode,
     ui::{
-        actions::{run, run_from, text},
+        actions::{run, text},
         model::{action_menu_items, action_menu_title, current_outline_index, outline},
     },
     AppContext,
@@ -292,22 +292,9 @@ fn ActionDropdown(menu: ActionMenu, index: usize) -> Element {
                 let _ = event.data().set_focus(true).await;
             },
             onkeydown: move |event: KeyboardEvent| {
-                event.stop_propagation();
-                let key = event.data().key().to_string();
-                let (id, args) = match key.as_str() {
-                    "j" | "ArrowDown" => ("ui.action_menu_move", CommandArgs::Direction(Direction::Down)),
-                    "k" | "ArrowUp" => ("ui.action_menu_move", CommandArgs::Direction(Direction::Up)),
-                    "Enter" => ("ui.action_menu_accept", CommandArgs::None),
-                    "Escape" | "q" => ("overlay.close_top", CommandArgs::None),
-                    digit => match digit.parse::<u32>() {
-                        Ok(n) if (1..=items.len() as u32).contains(&n) => {
-                            ("ui.action_menu_accept", CommandArgs::Count(n - 1))
-                        }
-                        _ => return,
-                    },
-                };
-                event.prevent_default();
-                run_from(&keys, id, args, crate::command::CommandSource::Keyboard);
+                if !crate::ui::actions::handle_key(&keys, "menu", &event) {
+                    event.stop_propagation();
+                }
             },
             div { class: "lx-legend", "{action_menu_title(menu)}" }
             for (position, item) in items.iter().enumerate() {
@@ -478,22 +465,17 @@ fn mount_editor(
         "lirox-editor-command",
         "__liroxEditorCommandListener",
         Box::new(move |event: web_sys::Event| {
-            let Some(id) = detail(&event, "id").and_then(|value| value.as_string()) else {
+            let Some(command) = detail(&event, "command").and_then(|value| value.as_string())
+            else {
                 return;
             };
-            let (command, args) = match id.as_str() {
-                "palette" => ("ui.open_palette", CommandArgs::None),
-                "cheat" => ("ui.toggle_cheat_sheet", CommandArgs::None),
-                menu => match menu.strip_prefix("menu:") {
-                    Some(menu) => ("ui.open_action_menu", text(menu)),
-                    None => return,
-                },
-            };
+            let arg = detail(&event, "arg").and_then(|value| value.as_string());
+            let args = crate::config::toml_config::command_args(arg);
             let mut state = state;
             dispatcher.dispatch(
                 &mut state.write(),
                 CommandInvocation {
-                    id: CommandId::new(command),
+                    id: CommandId::new(&command),
                     args,
                     source: CommandSource::Keyboard,
                 },
@@ -514,6 +496,7 @@ fn mount_editor(
         return;
     };
     let _ = mount.call0(&api);
+    crate::platform::web::editor::set_vim_mappings(&state.peek().config.keymaps.vim);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

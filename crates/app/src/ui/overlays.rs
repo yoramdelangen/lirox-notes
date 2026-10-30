@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 
 use crate::{
     app::{ApplicationEvent, StatusEvent},
-    command::{CommandArgs, CommandSource, Direction},
+    command::CommandArgs,
     ui::{
-        actions::{run, run_from, text},
+        actions::{run, text},
         model::palette_items,
     },
     AppContext,
@@ -56,20 +56,7 @@ pub fn Palette() -> Element {
                     },
                     oninput: move |event: FormEvent| run(&input, "ui.palette_query", text(event.value())),
                     onkeydown: move |event: KeyboardEvent| {
-                        let key = event.data().key().to_string();
-                        let ctrl = event.data().modifiers().ctrl();
-                        let (id, args) = match key.as_str() {
-                            "ArrowDown" => ("ui.palette_move", CommandArgs::Direction(Direction::Down)),
-                            "n" if ctrl => ("ui.palette_move", CommandArgs::Direction(Direction::Down)),
-                            "ArrowUp" => ("ui.palette_move", CommandArgs::Direction(Direction::Up)),
-                            "p" if ctrl => ("ui.palette_move", CommandArgs::Direction(Direction::Up)),
-                            "Enter" => ("ui.palette_accept", CommandArgs::None),
-                            "Escape" => ("overlay.close_top", CommandArgs::None),
-                            _ => return,
-                        };
-                        event.prevent_default();
-                        event.stop_propagation();
-                        run_from(&keys, id, args, CommandSource::Keyboard);
+                        crate::ui::actions::handle_key(&keys, "palette", &event);
                     },
                 }
                 span { class: "lx-hint", "{count} / {total}" }
@@ -98,53 +85,19 @@ pub fn Palette() -> Element {
     }
 }
 
-const CHEAT_SHEET: &[(&str, &[(&str, &str)])] = &[
-    (
-        "NORMAL",
-        &[
-            ("move", "h j k l"),
-            ("word fwd / back", "w  b"),
-            ("line start / end", "0  $"),
-            ("top / bottom", "gg  G"),
-            ("insert / append", "i  a  A"),
-            ("open line below / above", "o  O"),
-            ("delete char / line", "x  dd"),
-            ("visual select", "v"),
-            ("yank / paste", "y  p"),
-            ("undo / redo", "u  ^r"),
-            ("save", ":w"),
-        ],
-    ),
-    (
-        "LEADER  (space + key)",
-        &[
-            ("heading menu", "␣ h"),
-            ("lists menu", "␣ l"),
-            ("task / bold / italic", "␣ t  b  i"),
-            ("link / image / table", "␣ k  m  T"),
-            ("format / more", "␣ f  ."),
-            ("find file", "␣ ␣"),
-        ],
-    ),
-    (
-        "ANYWHERE",
-        &[
-            ("find file / command", "⌘K"),
-            ("file tree", "⌘\\"),
-            ("this sheet", "?  ⌘/"),
-            ("bold / italic / code", "⌘B  ⌘I  ⌘E"),
-            ("toggle action bar", "⌘."),
-            ("settings", "⌘,"),
-        ],
-    ),
-    (
-        "FILE TREE",
-        &[
-            ("move", "j  k"),
-            ("open / fold", "↵  h  l"),
-            ("back to the note", "q  esc"),
-        ],
-    ),
+/// Vim's own motions and edits; not part of the configurable keymap.
+const VIM_BUILT_IN: &[(&str, &str)] = &[
+    ("move", "h j k l"),
+    ("word fwd / back", "w  b"),
+    ("line start / end", "0  $"),
+    ("top / bottom", "gg  G"),
+    ("insert / append", "i  a  A"),
+    ("open line below / above", "o  O"),
+    ("delete char / line", "x  dd"),
+    ("visual select", "v"),
+    ("yank / paste", "y  p"),
+    ("undo / redo", "u  ^r"),
+    ("save", ":w"),
 ];
 
 #[component]
@@ -153,6 +106,7 @@ pub fn CheatSheet() -> Element {
     if !context.state.read().ui.cheat_sheet {
         return rsx! {};
     }
+    let sheet = crate::ui::model::keymap_sheet(&context.state.read().config.keymaps);
     let backdrop = context.clone();
     let close = context.clone();
     let keys = context.clone();
@@ -173,12 +127,7 @@ pub fn CheatSheet() -> Element {
                 let _ = event.data().set_focus(true).await;
             },
             onkeydown: move |event: KeyboardEvent| {
-                let key = event.data().key().to_string();
-                if matches!(key.as_str(), "Escape" | "?" | "q") {
-                    event.prevent_default();
-                    event.stop_propagation();
-                    run_from(&keys, "overlay.close_top", CommandArgs::None, CommandSource::Keyboard);
-                }
+                crate::ui::actions::handle_key(&keys, "cheat-sheet", &event);
             },
             div { class: "lx-legend", "Keys" }
             button {
@@ -189,10 +138,19 @@ pub fn CheatSheet() -> Element {
                 "esc ✕"
             }
             div { class: "lx-cheat-body",
-                for (title, items) in CHEAT_SHEET.iter() {
+                div { class: "lx-cheat-group",
+                    h3 { "VIM (built in)" }
+                    for (label, keys) in VIM_BUILT_IN.iter() {
+                        div { key: "{label}", class: "lx-cheat-item",
+                            span { "{label}" }
+                            kbd { "{keys}" }
+                        }
+                    }
+                }
+                for (title, items) in sheet {
                     div { key: "{title}", class: "lx-cheat-group",
                         h3 { "{title}" }
-                        for (label, keys) in items.iter() {
+                        for (label, keys) in items {
                             div { key: "{label}", class: "lx-cheat-item",
                                 span { "{label}" }
                                 kbd { "{keys}" }
@@ -200,6 +158,7 @@ pub fn CheatSheet() -> Element {
                         }
                     }
                 }
+                div { class: "lx-hint", "Remap in ~/.config/lirox-notes/config.toml" }
             }
         }
     }

@@ -7,6 +7,7 @@ use std::{
 };
 
 pub mod auth;
+pub mod user_config;
 pub mod workspace;
 pub use workspace::{
     changed_count, commit_note, configure_git_remote, configured_profile,

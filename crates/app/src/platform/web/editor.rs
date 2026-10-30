@@ -49,3 +49,27 @@ pub fn set_vim_mode(enabled: bool) {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = enabled;
 }
+
+/// Installs `[keymap.vim]` mappings in the editor's Vim normal mode.
+pub fn set_vim_mappings(mappings: &[crate::config::toml_config::VimMapping]) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use js_sys::{Array, Object, Reflect};
+        use wasm_bindgen::JsValue;
+        let list = Array::new();
+        for mapping in mappings {
+            let entry = Object::new();
+            let _ = Reflect::set(&entry, &"keys".into(), &mapping.keys.as_str().into());
+            let _ = Reflect::set(&entry, &"command".into(), &mapping.command.as_str().into());
+            let arg = mapping
+                .arg
+                .as_deref()
+                .map_or(JsValue::NULL, JsValue::from_str);
+            let _ = Reflect::set(&entry, &"arg".into(), &arg);
+            list.push(&entry);
+        }
+        call("setVimMappings", &[list.into()]);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = mappings;
+}

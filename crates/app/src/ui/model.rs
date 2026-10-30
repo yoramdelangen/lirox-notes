@@ -267,6 +267,99 @@ pub fn palette_items(query: &str, notes: &[String], vim_enabled: bool) -> Vec<Pa
         .collect()
 }
 
+/// The keys sheet, built from the active keymap: one group per table, with
+/// keys that run the same command listed together.
+pub fn keymap_sheet(keymaps: &crate::config::KeymapConfig) -> Vec<(String, Vec<(String, String)>)> {
+    use crate::command::SurfaceId;
+    use crate::config::toml_config::format_keys;
+    use crate::input::{InputMode, InputScope, SurfaceKind};
+
+    let label = |command: &str, args: &CommandArgs| match args {
+        CommandArgs::Text(arg) => format!("{command} {arg}"),
+        CommandArgs::Direction(direction) => format!("{command} {direction:?}").to_lowercase(),
+        _ => command.to_string(),
+    };
+    let tables: [(&str, InputScope, Option<InputMode>); 9] = [
+        ("ANYWHERE", InputScope::Global, None),
+        ("NORMAL", InputScope::Global, Some(InputMode::Normal)),
+        (
+            "EDITOR",
+            InputScope::Surface(SurfaceKind::Editor),
+            Some(InputMode::Normal),
+        ),
+        (
+            "EDITOR · INSERT",
+            InputScope::Surface(SurfaceKind::Editor),
+            Some(InputMode::Insert),
+        ),
+        (
+            "FILE TREE",
+            InputScope::Surface(SurfaceKind::FileTree),
+            Some(InputMode::Normal),
+        ),
+        ("PANES", InputScope::Workspace, Some(InputMode::Normal)),
+        (
+            "MENU",
+            InputScope::SurfaceInstance(SurfaceId::new("menu")),
+            None,
+        ),
+        (
+            "FIND",
+            InputScope::SurfaceInstance(SurfaceId::new("palette")),
+            None,
+        ),
+        (
+            "KEYS SHEET",
+            InputScope::SurfaceInstance(SurfaceId::new("cheat-sheet")),
+            None,
+        ),
+    ];
+    let mut groups = Vec::new();
+    let push = |rows: &mut Vec<(String, String)>, command: String, keys: String| match rows
+        .iter_mut()
+        .find(|(existing, _)| *existing == command)
+    {
+        Some((_, existing)) => {
+            existing.push_str("  ");
+            existing.push_str(&keys);
+        }
+        None => rows.push((command, keys)),
+    };
+    let mut vim_rows = Vec::new();
+    for mapping in &keymaps.vim {
+        let command = match &mapping.arg {
+            Some(arg) => format!("{} {arg}", mapping.command),
+            None => mapping.command.clone(),
+        };
+        push(
+            &mut vim_rows,
+            command,
+            mapping.keys.replace("<Space>", "␣ "),
+        );
+    }
+    if !vim_rows.is_empty() {
+        groups.push(("VIM LEADER".to_string(), vim_rows));
+    }
+    for (title, scope, mode) in tables {
+        let mut rows = Vec::new();
+        for binding in keymaps
+            .bindings
+            .iter()
+            .filter(|binding| binding.scope == scope && binding.mode == mode)
+        {
+            push(
+                &mut rows,
+                label(binding.command.as_str(), &binding.args),
+                format_keys(&binding.sequence, &keymaps.leader),
+            );
+        }
+        if !rows.is_empty() {
+            groups.push((title.to_string(), rows));
+        }
+    }
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +452,22 @@ mod tests {
         assert_eq!(items[0].prefix, "personal/projects/lirox-notes/");
         assert_eq!(items[0].label, "README.md");
         assert_eq!(items[0].command, "file_tree.open_path");
+    }
+
+    #[test]
+    fn keys_sheet_lists_configured_bindings_together() {
+        let sheet = keymap_sheet(&crate::config::defaults().keymaps);
+        let anywhere = &sheet
+            .iter()
+            .find(|(title, _)| title == "ANYWHERE")
+            .unwrap()
+            .1;
+        let palette = anywhere
+            .iter()
+            .find(|(command, _)| command == "ui.open_palette")
+            .unwrap();
+        assert_eq!(palette.1, "^K  ⌘K");
+        assert!(sheet.iter().any(|(title, _)| title == "VIM LEADER"));
     }
 
     #[test]

@@ -1,24 +1,22 @@
-use crate::command::{CommandArgs, CommandId};
-use crate::input::{InputMode, InputScope, KeySequence, KeyStroke};
+use crate::input::KeyStroke;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeymapConfig {
     pub leader: KeyStroke,
+    /// The leader as written in the config, e.g. `space`.
+    pub leader_name: String,
     pub bindings: Vec<crate::input::KeyBinding>,
+    /// Keys the editor handles inside Vim normal mode.
+    pub vim: Vec<super::toml_config::VimMapping>,
 }
 
 impl KeymapConfig {
     pub fn new(leader: KeyStroke, bindings: Vec<crate::input::KeyBinding>) -> Self {
-        Self { leader, bindings }
+        Self {
+            leader,
+            leader_name: "space".into(),
+            bindings,
+            vim: Vec::new(),
+        }
     }
-}
-
-pub(crate) fn binding(
-    scope: InputScope,
-    mode: Option<InputMode>,
-    sequence: KeySequence,
-    command: &str,
-    args: CommandArgs,
-) -> crate::input::KeyBinding {
-    crate::input::KeyBinding::new(scope, mode, sequence, CommandId::new(command), args)
 }

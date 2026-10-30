@@ -1,0 +1,117 @@
+# Built-in keymap. ~/.config/lirox-notes/config.toml uses the same format and
+# is merged on top: an entry replaces the binding for the same keys, and
+# `"<unbind>" = [...]` removes keys from a table.
+#
+# Keys: plain characters ("j", "gg", "?"), or <leader>, <esc>, <cr>, <tab>,
+# <bs>, <space>, <up>, <down>, with modifiers <C-x> (Ctrl), <D-x> (⌘),
+# <A-x> (Alt), <S-tab> (Shift). Values are a command id, or
+# { command = "...", arg = "..." }.
+#
+# Tables (mode in brackets; [keymap.<table>.<mode>] picks another mode):
+#   global     anywhere, any mode, also while typing for <C-…>/<D-…> chords
+#   normal     anywhere, normal mode
+#   workspace  pane switching (normal)
+#   editor     the note editor (normal)
+#   file_tree  the file tree (normal)
+#   menu       action-bar dropdowns
+#   palette    the ⌘K find box
+#   cheat_sheet the keys overlay
+#   vim        editor keys handled inside Vim normal mode
+
+[keymap]
+leader = "space"
+
+[keymap.global]
+"<esc>" = "overlay.close_top"
+"<D-k>" = "ui.open_palette"
+"<C-k>" = "ui.open_palette"
+"<D-/>" = "ui.toggle_cheat_sheet"
+"<C-/>" = "ui.toggle_cheat_sheet"
+"<D-.>" = "ui.toggle_action_bar"
+"<C-.>" = "ui.toggle_action_bar"
+"<D-\\>" = "workspace.focus_file_tree"
+"<C-\\>" = "workspace.focus_file_tree"
+"<D-,>" = "ui.show_settings"
+"<C-,>" = "ui.show_settings"
+"<D-b>" = { command = "editor.action", arg = "bold" }
+"<C-b>" = { command = "editor.action", arg = "bold" }
+"<D-i>" = { command = "editor.action", arg = "italic" }
+"<C-i>" = { command = "editor.action", arg = "italic" }
+"<D-e>" = { command = "editor.action", arg = "code" }
+"<C-e>" = { command = "editor.action", arg = "code" }
+
+[keymap.normal]
+"<leader>e" = "workspace.toggle_file_tree"
+"<leader>z" = "workspace.toggle_focus_mode"
+"<leader>s" = "editor.save"
+"?" = "ui.toggle_cheat_sheet"
+
+[keymap.workspace]
+"<C-w>h" = "workspace.focus_previous_surface"
+"<C-w>l" = "workspace.focus_next_surface"
+"<tab>" = "workspace.focus_next_surface"
+"<S-tab>" = "workspace.focus_previous_surface"
+
+[keymap.editor]
+i = "editor.enter_insert_mode"
+
+[keymap.editor.insert]
+"<esc>" = "editor.enter_normal_mode"
+
+[keymap.file_tree]
+j = "file_tree.move_down"
+k = "file_tree.move_up"
+"<down>" = "file_tree.move_down"
+"<up>" = "file_tree.move_up"
+"<cr>" = "file_tree.open_selected"
+h = "file_tree.collapse"
+l = "file_tree.expand"
+q = "workspace.focus_next_surface"
+
+[keymap.menu]
+j = { command = "ui.action_menu_move", arg = "down" }
+k = { command = "ui.action_menu_move", arg = "up" }
+"<down>" = { command = "ui.action_menu_move", arg = "down" }
+"<up>" = { command = "ui.action_menu_move", arg = "up" }
+"<cr>" = "ui.action_menu_accept"
+"<esc>" = "overlay.close_top"
+q = "overlay.close_top"
+1 = { command = "ui.action_menu_accept", arg = "1" }
+2 = { command = "ui.action_menu_accept", arg = "2" }
+3 = { command = "ui.action_menu_accept", arg = "3" }
+4 = { command = "ui.action_menu_accept", arg = "4" }
+5 = { command = "ui.action_menu_accept", arg = "5" }
+6 = { command = "ui.action_menu_accept", arg = "6" }
+
+[keymap.palette]
+"<down>" = { command = "ui.palette_move", arg = "down" }
+"<up>" = { command = "ui.palette_move", arg = "up" }
+"<C-n>" = { command = "ui.palette_move", arg = "down" }
+"<C-p>" = { command = "ui.palette_move", arg = "up" }
+"<cr>" = "ui.palette_accept"
+"<esc>" = "overlay.close_top"
+
+[keymap.cheat_sheet]
+"<esc>" = "overlay.close_top"
+"?" = "overlay.close_top"
+q = "overlay.close_top"
+
+[keymap.vim]
+"<leader>h" = { command = "ui.open_action_menu", arg = "heading" }
+"<leader>l" = { command = "ui.open_action_menu", arg = "lists" }
+"<leader>f" = { command = "ui.open_action_menu", arg = "format" }
+"<leader>." = { command = "ui.open_action_menu", arg = "more" }
+"<leader>t" = { command = "editor.action", arg = "task" }
+"<leader>b" = { command = "editor.action", arg = "bold" }
+"<leader>i" = { command = "editor.action", arg = "italic" }
+"<leader>k" = { command = "editor.action", arg = "link" }
+"<leader>m" = { command = "editor.action", arg = "image" }
+"<leader>T" = { command = "editor.action", arg = "table" }
+"<leader><leader>" = "ui.open_palette"
+"?" = "ui.toggle_cheat_sheet"
+
+[editor]
+vim = true
+action_bar = true
+key_hints = true
+font_size = 15

@@ -35,6 +35,7 @@ type LiroxNotesEditorApi = {
 	setVimModeEnabled: (enabled: boolean) => void;
 	updateLiroxNotesEditor: (root: EditorRoot, nextDoc?: string) => EditorView | undefined;
 	run: (action: string) => void;
+	setVimMappings: (mappings: VimMapping[]) => void;
 	gotoLine: (line: number) => void;
 	focus: () => void;
 };
@@ -396,32 +397,37 @@ Vim.defineEx("write", "w", (cm) => {
 	cm.getWrapperElement().dispatchEvent(new CustomEvent("lirox-editor-save", { bubbles: true }));
 });
 
+type VimMapping = { keys: string; command: string; arg?: string | null };
+
+// Editor actions run here directly; everything else goes to the host as a
+// command, so `[keymap.vim]` in the app config decides what each key does.
 Vim.defineAction("liroxCommand", (cm, args) => {
-	const id = (args as { id?: string }).id ?? "";
-	if (id.startsWith("action:")) {
-		run(id.slice("action:".length));
+	const { command = "", arg } = args as { command?: string; arg?: string | null };
+	if (command === "editor.action" && arg) {
+		run(arg);
 		return;
 	}
-	cm.getWrapperElement().dispatchEvent(new CustomEvent("lirox-editor-command", { bubbles: true, detail: { id } }));
+	cm.getWrapperElement().dispatchEvent(
+		new CustomEvent("lirox-editor-command", { bubbles: true, detail: { command, arg: arg ?? null } })
+	);
 });
 
-const LEADER: [string, string][] = [
-	["h", "menu:heading"],
-	["l", "menu:lists"],
-	["f", "menu:format"],
-	[".", "menu:more"],
-	["t", "action:task"],
-	["b", "action:bold"],
-	["i", "action:italic"],
-	["k", "action:link"],
-	["m", "action:image"],
-	["T", "action:table"],
-	["<Space>", "palette"]
-];
-for (const [key, id] of LEADER) {
-	Vim.mapCommand(`<Space>${key}`, "action", "liroxCommand", { id }, { context: "normal" });
-}
-Vim.mapCommand("?", "action", "liroxCommand", { id: "cheat" }, { context: "normal" });
+let vimMappings: VimMapping[] = [];
+
+/** Replaces the host-defined Vim normal-mode mappings. */
+export const setVimMappings = (mappings: VimMapping[]) => {
+	for (const { keys } of vimMappings) {
+		try {
+			Vim.unmap(keys, "normal");
+		} catch {
+			// Already gone.
+		}
+	}
+	vimMappings = mappings;
+	for (const { keys, command, arg } of mappings) {
+		Vim.mapCommand(keys, "action", "liroxCommand", { command, arg }, { context: "normal" });
+	}
+};
 
 const readEditorMode = (view: EditorView) => {
 	if (!vimModeEnabled) return "plain";
@@ -600,6 +606,7 @@ if (!editorGlobal.LiroxNotesEditor) {
 		setVimModeEnabled,
 		updateLiroxNotesEditor,
 		run,
+		setVimMappings,
 		gotoLine,
 		focus
 	};

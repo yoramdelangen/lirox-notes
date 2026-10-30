@@ -92,6 +92,8 @@ pub struct UiState {
     pub cursor: (usize, usize),
     /// Folder paths folded in the file tree.
     pub collapsed: std::collections::BTreeSet<String>,
+    /// Whether the user's config.toml has been asked for this session.
+    pub config_requested: bool,
 }
 
 impl Default for UiState {
@@ -111,6 +113,7 @@ impl Default for UiState {
             sticky_heading: String::new(),
             cursor: (1, 1),
             collapsed: Default::default(),
+            config_requested: false,
         }
     }
 }
