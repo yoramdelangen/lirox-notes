@@ -182,7 +182,7 @@ fn WorkspaceSetupForm(auth: AuthState) -> Element {
                                 },
                             );
                         },
-                        p { "Uses your system Git user and public key." }
+                        p { "Authenticates with the server's SSH key or Git token." }
                         label { class: "lx-field",
                             span { class: "lx-field-label", "Repository URL" }
                             input {
