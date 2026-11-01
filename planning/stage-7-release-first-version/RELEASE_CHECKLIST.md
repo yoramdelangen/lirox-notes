@@ -22,8 +22,10 @@ tarballs and publishes the release.
 2. **Environment `release-pr`** (Settings → Environments): deployment branches
    limited to `main`, no reviewers. Add secrets `RELEASE_APP_ID` and
    `RELEASE_APP_PRIVATE_KEY`.
-3. **Environment `release`**: you as required reviewer, deployment tags
-   limited to `v*`.
+3. **Environment `release`**: you as required reviewer, deployment branches
+   limited to `main` (the release jobs run from the push to `main`, so a
+   tag-only policy would block every release; tag integrity comes from the
+   `v*` ruleset below).
 4. **Branch protection / ruleset for `main`**: require a pull request, require
    the CI checks (`rust`, `deny`, `image`), block force pushes and deletion.
 5. **Tag ruleset for `v*`**: restrict creation to the release GitHub App,
