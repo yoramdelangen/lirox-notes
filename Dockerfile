@@ -5,7 +5,7 @@
 #   artifact – just /server and /public, for `--output type=local`
 #   runtime  – distroless/static:nonroot image (default)
 
-FROM docker.io/library/rust:1.91-alpine@sha256:45c1c35cd364b8055e9e86f8ecd3e8c874b2dcb658d8a4f94b5d111aa0d651a2 AS builder
+FROM docker.io/library/rust:1.98-alpine@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f AS builder
 
 RUN apk add --no-cache musl-dev perl make file pkgconf openssl-dev openssl-libs-static binaryen esbuild
 RUN rustup target add wasm32-unknown-unknown
