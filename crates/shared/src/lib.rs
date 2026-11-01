@@ -19,6 +19,27 @@ pub struct GatewayConfigResponse {
     pub name: String,
 }
 
+/// Where the server's passkey domains come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DomainSource {
+    /// `LIROX_RP_ID` / `LIROX_RP_ORIGIN`; cannot be changed in the app.
+    Environment,
+    /// Chosen during onboarding.
+    Stored,
+    /// Legacy development origins of an install that predates the domain step.
+    Default,
+    /// Not configured yet: onboarding asks for them first.
+    None,
+}
+
+/// The domains (origins) passkeys work on. Public information.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DomainsResponse {
+    pub rp_id: Option<String>,
+    pub origins: Vec<String>,
+    pub source: DomainSource,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootstrapResponse {
     pub installed: bool,
@@ -29,6 +50,7 @@ pub struct BootstrapResponse {
     pub display_name: Option<String>,
     pub workspace_root: String,
     pub workspace: Option<GatewayConfigResponse>,
+    pub domains: DomainsResponse,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
