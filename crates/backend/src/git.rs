@@ -2,12 +2,20 @@
 //! SSH host-key verification. The server never shells out to `git`.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use git2::{ConfigLevel, ErrorCode, Repository, StatusOptions};
+use git2::{
+    build::{CheckoutBuilder, RepoBuilder},
+    cert::Cert,
+    CertificateCheckStatus, ConfigLevel, Cred, CredentialType, ErrorCode, FetchOptions,
+    PushOptions, RemoteCallbacks, Repository, StatusOptions,
+};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use std::{
+    cell::{Cell, RefCell},
     env, fs, io,
     path::{Path, PathBuf},
+    sync::Once,
+    time::{Duration, Instant},
 };
 
 /// Git credential configuration, read from the environment.
@@ -137,7 +145,7 @@ pub fn credential_candidates(
             candidates
         }
         Transport::Https => match &env.token {
-            Some(token) if env.token_hosts.iter().any(|allowed| *allowed == host) => {
+            Some(token) if env.token_hosts.contains(&host) => {
                 vec![Credential::Token {
                     username: env.username.clone(),
                     token: token.clone(),
@@ -407,6 +415,266 @@ pub fn unpushed_count(path: &Path, branch: &str) -> io::Result<usize> {
             .map_err(io_error)?;
     }
     Ok(walk.count())
+}
+
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn configure_timeouts() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: called once, before any network operation starts.
+        unsafe {
+            let _ = git2::opts::set_server_connect_timeout_in_milliseconds(15_000);
+            let _ = git2::opts::set_server_timeout_in_milliseconds(60_000);
+        }
+    });
+}
+
+/// State shared by the callbacks of one network operation.
+struct Session<'a> {
+    url: String,
+    env: &'a GitEnv,
+    attempt: Cell<usize>,
+    deadline: Instant,
+    timed_out: Cell<bool>,
+    rejected: RefCell<Option<String>>,
+    /// libgit2 replaces callback error messages; keep ours to report it.
+    host_key_error: RefCell<Option<String>>,
+}
+
+impl<'a> Session<'a> {
+    fn new(url: &str, env: &'a GitEnv) -> Self {
+        configure_timeouts();
+        Session {
+            url: url.to_string(),
+            env,
+            attempt: Cell::new(0),
+            deadline: Instant::now() + NETWORK_TIMEOUT,
+            timed_out: Cell::new(false),
+            rejected: RefCell::new(None),
+            host_key_error: RefCell::new(None),
+        }
+    }
+
+    fn in_time(&self) -> bool {
+        let in_time = Instant::now() < self.deadline;
+        if !in_time {
+            self.timed_out.set(true);
+        }
+        in_time
+    }
+
+    fn credential(
+        &self,
+        url_username: Option<&str>,
+        allowed: CredentialType,
+    ) -> Result<Cred, git2::Error> {
+        if allowed.contains(CredentialType::USERNAME) {
+            return Cred::username(url_username.unwrap_or("git"));
+        }
+        let candidates =
+            credential_candidates(&self.url, url_username, self.env, |path| path.is_file());
+        loop {
+            let attempt = self.attempt.get();
+            self.attempt.set(attempt + 1);
+            let Some(candidate) = next_credential(&candidates, attempt) else {
+                return Err(git2::Error::from_str(&format!(
+                    "authentication failed for {}; check LIROX_GIT_SSH_KEY or LIROX_GIT_TOKEN",
+                    self.url
+                )));
+            };
+            match candidate {
+                Credential::SshKey {
+                    username,
+                    private_key,
+                } if allowed.contains(CredentialType::SSH_KEY) => {
+                    return Cred::ssh_key(username, None, private_key, None)
+                }
+                Credential::SshAgent { username } if allowed.contains(CredentialType::SSH_KEY) => {
+                    return Cred::ssh_key_from_agent(username)
+                }
+                Credential::Token { username, token }
+                    if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) =>
+                {
+                    return Cred::userpass_plaintext(username, token)
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn certificate(
+        &self,
+        cert: &Cert<'_>,
+        host: &str,
+    ) -> Result<CertificateCheckStatus, git2::Error> {
+        let Some(hostkey) = cert.as_hostkey() else {
+            // TLS: libgit2 already validated the chain against the CA store.
+            return Ok(CertificateCheckStatus::CertificatePassthrough);
+        };
+        let (Some(key), Some(key_type)) = (hostkey.hostkey(), hostkey.hostkey_type()) else {
+            return Err(git2::Error::from_str(&format!(
+                "SSH host key for {host} could not be read"
+            )));
+        };
+        let port = remote_endpoint(&self.url).map_or(22, |(_, _, port)| port);
+        let known_hosts = self
+            .env
+            .known_hosts
+            .as_ref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .unwrap_or_default();
+        let message = match check_host_key(&known_hosts, host, port, key_type.name(), key) {
+            HostKeyCheck::Match => return Ok(CertificateCheckStatus::CertificateOk),
+            HostKeyCheck::Unknown => {
+                format!("unknown SSH host key for {host}; add it to known_hosts")
+            }
+            HostKeyCheck::Mismatch => format!("SSH host key for {host} does not match known_hosts"),
+        };
+        *self.host_key_error.borrow_mut() = Some(message.clone());
+        Err(git2::Error::from_str(&message))
+    }
+
+    fn callbacks(&self) -> RemoteCallbacks<'_> {
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks
+            .credentials(|_, username, allowed| self.credential(username, allowed))
+            .certificate_check(|cert, host| self.certificate(cert, host))
+            .transfer_progress(|_| self.in_time())
+            .sideband_progress(|_| self.in_time())
+            .push_update_reference(|reference, status| {
+                if let Some(status) = status {
+                    *self.rejected.borrow_mut() = Some(format!("{reference}: {status}"));
+                }
+                Ok(())
+            });
+        callbacks
+    }
+
+    fn fetch_options(&self) -> FetchOptions<'_> {
+        let mut options = FetchOptions::new();
+        options.remote_callbacks(self.callbacks());
+        options
+    }
+
+    fn error(&self, operation: &str, error: git2::Error) -> io::Error {
+        if self.timed_out.get() {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("Git {operation} timed out after 60 seconds"),
+            )
+        } else if let Some(message) = self.host_key_error.borrow_mut().take() {
+            io::Error::other(message)
+        } else {
+            io_error(error)
+        }
+    }
+}
+
+fn clear_destination(destination: &Path, existed: bool) {
+    if !existed {
+        let _ = fs::remove_dir_all(destination);
+    } else if let Ok(entries) = fs::read_dir(destination) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(path)
+            } else {
+                fs::remove_file(path)
+            };
+        }
+    }
+}
+
+/// Clones `url` at `branch`, falling back to the remote's default branch when
+/// `branch` does not exist there.
+pub fn clone(url: &str, branch: &str, destination: &Path, env: &GitEnv) -> io::Result<()> {
+    let existed = destination.exists();
+    let attempt = |branch: Option<&str>| {
+        let session = Session::new(url, env);
+        let mut builder = RepoBuilder::new();
+        builder.fetch_options(session.fetch_options());
+        if let Some(branch) = branch {
+            builder.branch(branch);
+        }
+        let result = builder
+            .clone(url, destination)
+            .map(|_| ())
+            .map_err(|error| (error.code(), session.error("clone", error)));
+        if result.is_err() {
+            clear_destination(destination, existed);
+        }
+        result
+    };
+    match attempt(Some(branch)) {
+        Err((ErrorCode::NotFound, _)) => attempt(None).map_err(|(_, error)| error),
+        result => result.map_err(|(_, error)| error),
+    }
+}
+
+/// Pushes HEAD to `origin/<branch>`; rejected updates are errors.
+pub fn push(path: &Path, branch: &str, env: &GitEnv) -> io::Result<()> {
+    let repository = open(path)?;
+    let head = repository.head().map_err(io_error)?;
+    let head = head
+        .name()
+        .map_err(|_| io::Error::other("HEAD has no name"))?
+        .to_string();
+    let mut remote = repository.find_remote("origin").map_err(io_error)?;
+    let session = Session::new(remote.url().unwrap_or_default(), env);
+    let mut options = PushOptions::new();
+    options.remote_callbacks(session.callbacks());
+    remote
+        .push(&[format!("{head}:refs/heads/{branch}")], Some(&mut options))
+        .map_err(|error| session.error("push", error))?;
+    if let Some(rejected) = session.rejected.borrow_mut().take() {
+        return Err(io::Error::other(format!("push rejected: {rejected}")));
+    }
+    Ok(())
+}
+
+/// Fetches `origin/<branch>` and fast-forwards HEAD; diverged history is an
+/// error.
+pub fn pull_ff_only(path: &Path, branch: &str, env: &GitEnv) -> io::Result<()> {
+    let repository = open(path)?;
+    let tracking = format!("refs/remotes/origin/{branch}");
+    {
+        let mut remote = repository.find_remote("origin").map_err(io_error)?;
+        let session = Session::new(remote.url().unwrap_or_default(), env);
+        remote
+            .fetch(
+                &[format!("+refs/heads/{branch}:{tracking}")],
+                Some(&mut session.fetch_options()),
+                None,
+            )
+            .map_err(|error| session.error("fetch", error))?;
+    }
+    let fetched = repository.find_reference(&tracking).map_err(io_error)?;
+    let target = repository
+        .reference_to_annotated_commit(&fetched)
+        .map_err(io_error)?;
+    let (analysis, _) = repository.merge_analysis(&[&target]).map_err(io_error)?;
+    if analysis.is_up_to_date() {
+        return Ok(());
+    }
+    if !analysis.is_fast_forward() {
+        return Err(io::Error::other(format!(
+            "Not possible to fast-forward; local and origin/{branch} have diverged"
+        )));
+    }
+    let commit = repository
+        .find_object(target.id(), None)
+        .map_err(io_error)?;
+    repository
+        .checkout_tree(&commit, Some(CheckoutBuilder::new().safe()))
+        .map_err(io_error)?;
+    let mut head = repository.head().map_err(io_error)?;
+    head.set_target(
+        target.id(),
+        &format!("pull: fast-forward to origin/{branch}"),
+    )
+    .map_err(io_error)?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -5,8 +5,6 @@ use std::{
     env, fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    process::{Command, Output, Stdio},
-    time::{Duration, Instant},
 };
 use uuid::Uuid;
 
@@ -204,78 +202,8 @@ fn validate_repository_path(value: &str) -> std::io::Result<PathBuf> {
     }
 }
 
-fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(workspace)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env(
-            "GIT_SSH_COMMAND",
-            "ssh -o BatchMode=yes -o ConnectTimeout=15",
-        )
-        .output()?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(std::io::Error::other(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ))
-    }
-}
-
 fn clone_git(repo_url: &str, branch: &str, destination: &Path) -> std::io::Result<()> {
-    let output = git_clone_command(
-        ["clone", "--branch", branch, "--single-branch", repo_url],
-        destination,
-    )?;
-    if output.status.success() {
-        Ok(())
-    } else if String::from_utf8_lossy(&output.stderr).contains("Remote branch") {
-        let fallback = git_clone_command(["clone", repo_url], destination)?;
-        if fallback.status.success() {
-            Ok(())
-        } else {
-            Err(std::io::Error::other(
-                String::from_utf8_lossy(&fallback.stderr).trim().to_string(),
-            ))
-        }
-    } else {
-        Err(std::io::Error::other(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ))
-    }
-}
-
-fn git_clone_command<const N: usize>(
-    args: [&str; N],
-    destination: &Path,
-) -> std::io::Result<Output> {
-    let mut child = Command::new("git")
-        .args(args)
-        .arg(destination)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env(
-            "GIT_SSH_COMMAND",
-            "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=5 -o ServerAliveCountMax=3",
-        )
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        if child.try_wait()?.is_some() {
-            return child.wait_with_output();
-        }
-        if Instant::now() >= deadline {
-            child.kill()?;
-            let _ = child.wait_with_output();
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Git clone timed out after 60 seconds",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    git::clone(repo_url, branch, destination, &git::GitEnv::from_env())
 }
 
 pub fn inspect_repository(repo_url: &str, branch: &str) -> std::io::Result<RepositoryMetadata> {
@@ -614,9 +542,10 @@ pub fn push_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
         return Ok(false);
     }
 
-    run_git(
+    git::push(
         &config.workspace_path,
-        &["push", "origin", &format!("HEAD:{}", config.branch)],
+        &config.branch,
+        &git::GitEnv::from_env(),
     )?;
     Ok(true)
 }
@@ -626,9 +555,10 @@ pub fn pull_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
         return Ok(false);
     }
 
-    run_git(
+    git::pull_ff_only(
         &config.workspace_path,
-        &["pull", "--ff-only", "origin", &config.branch],
+        &config.branch,
+        &git::GitEnv::from_env(),
     )?;
     Ok(true)
 }
