@@ -419,11 +419,10 @@ mod tests {
             chord.0[0],
             KeyStroke::new(Key::Char('w'), Modifiers::new(true, false, false, false))
         );
-        assert_eq!(
+        assert!(
             parse_keys("<S-tab>", &space()).unwrap().0[0]
                 .modifiers
-                .shift,
-            true
+                .shift
         );
         assert_eq!(
             parse_keys("<D-\\>", &space()).unwrap().0[0].key,

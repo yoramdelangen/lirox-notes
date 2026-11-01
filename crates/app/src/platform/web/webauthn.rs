@@ -128,8 +128,14 @@ mod tests {
             loopback_to_localhost("http:", "[::1]", "", "/"),
             Some("http://localhost/".into())
         );
-        assert_eq!(loopback_to_localhost("http:", "localhost", "8989", "/"), None);
-        assert_eq!(loopback_to_localhost("http:", "192.168.1.5", "8989", "/"), None);
+        assert_eq!(
+            loopback_to_localhost("http:", "localhost", "8989", "/"),
+            None
+        );
+        assert_eq!(
+            loopback_to_localhost("http:", "192.168.1.5", "8989", "/"),
+            None
+        );
     }
 
     #[test]
