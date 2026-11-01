@@ -120,6 +120,8 @@ pub fn App() -> Element {
 #[allow(unused_mut)]
 fn initial_application_state() -> ApplicationState {
     let mut state = ApplicationState::empty();
+    #[cfg(all(target_arch = "wasm32", debug_assertions))]
+    crate::platform::web::webauthn::redirect_loopback_to_localhost();
     #[cfg(target_arch = "wasm32")]
     if let Some(theme) = crate::platform::web::storage::load_theme() {
         state.theme = theme;

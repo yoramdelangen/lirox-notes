@@ -33,6 +33,12 @@ registration/login challenge records remain short-lived and single-use; a
 successful login rotates the persisted session. Logout removes the stored
 session and clears the cookie.
 
+Passkeys over plain HTTP only work on `http://localhost`: browsers expose
+WebAuthn only in secure contexts, and IP addresses are never valid RP IDs.
+Debug builds (`dx serve`) therefore redirect `127.0.0.1`/`[::1]` visits to
+`localhost`; release builds do not. LAN access needs HTTPS and a hostname
+configured through `LIROX_RP_ID`/`LIROX_RP_ORIGIN`.
+
 Runtime paths use `LIROX_WORKSPACE_DIR` and `LIROX_CONFIG_FILE` when set. In
 debug builds their defaults are `.lirox-runtime/workspace` and
 `.lirox-runtime/config`. In release builds the config uses
