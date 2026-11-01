@@ -1,0 +1,33 @@
+# Example deployment. Passkeys need HTTPS unless you open http://localhost,
+# so set LIROX_RP_ID / LIROX_RP_ORIGIN to the URL you actually use.
+services:
+  liroxnotes:
+    image: ghcr.io/yoramdelangen/lirox-notes:latest
+    ports:
+      - "8080:8080"
+    environment:
+      LIROX_RP_ID: localhost
+      LIROX_RP_ORIGIN: http://localhost:8080
+      # SSH remotes: a deploy key and pinned host keys (see README).
+      # LIROX_GIT_SSH_KEY: /run/secrets/git_key
+      # LIROX_GIT_KNOWN_HOSTS: /run/secrets/known_hosts
+      # HTTPS remotes: a fine-grained token, only sent to these hosts.
+      # LIROX_GIT_TOKEN: ${LIROX_GIT_TOKEN}
+      # LIROX_GIT_TOKEN_HOSTS: github.com
+    volumes:
+      - config:/config
+      - data:/data
+    # secrets:
+    #   - git_key
+    #   - known_hosts
+    restart: unless-stopped
+
+volumes:
+  config:
+  data:
+
+# secrets:
+#   git_key:
+#     file: ./secrets/git_key
+#   known_hosts:
+#     file: ./secrets/known_hosts

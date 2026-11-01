@@ -70,3 +70,14 @@ dev port="8989" platform="web":
             dx serve --port {{port}} --platform server --package liroxnotes-app \
             --features server --open false
     fi
+
+# Build the distroless server image (docker or podman).
+image tag="lirox-notes:dev" engine="docker":
+    {{engine}} build -t {{tag}} .
+
+# Run the image on http://localhost:{{port}} with named volumes.
+image-run tag="lirox-notes:dev" port="8080" engine="docker":
+    {{engine}} run --rm -p {{port}}:8080 \
+        -v lirox-config:/config -v lirox-data:/data \
+        -e LIROX_RP_ID=localhost -e LIROX_RP_ORIGIN=http://localhost:{{port}} \
+        {{tag}}

@@ -1,0 +1,10 @@
+target/
+dist/
+node_modules/
+packages/editor/node_modules/
+.git/
+.worktrees/
+.superpowers/
+.lirox-runtime/
+.lirox-workspace/
+.DS_Store

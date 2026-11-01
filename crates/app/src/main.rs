@@ -4,6 +4,13 @@ fn main() {
         dioxus::fullstack::set_server_url(server_url);
     }
 
+    #[cfg(all(feature = "server", not(debug_assertions)))]
+    if std::env::var_os("LIROX_RP_ORIGIN").is_none() {
+        eprintln!(
+            "warning: LIROX_RP_ORIGIN is not set; passkeys only work at http://localhost:<port>"
+        );
+    }
+
     #[cfg(feature = "server")]
     dioxus::LaunchBuilder::server().launch(liroxnotes_app::App);
 
