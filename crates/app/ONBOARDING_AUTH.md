@@ -58,3 +58,13 @@ retryable until workspace persistence completes.
 
 The complete typed function contract, validation, and user-safe errors are
 documented in [`../gateway/API.md`](../gateway/API.md).
+
+Git runs in-process (libgit2); the server never spawns `git`. Remote
+credentials come from the environment only: `LIROX_GIT_SSH_KEY` (or a running
+ssh-agent / `~/.ssh/id_ed25519` / `~/.ssh/id_rsa` outside containers) for SSH,
+and `LIROX_GIT_TOKEN` for HTTPS, offered only to hosts in
+`LIROX_GIT_TOKEN_HOSTS` (default `github.com`). SSH host keys must be pinned in
+`LIROX_GIT_KNOWN_HOSTS` (default `~/.ssh/known_hosts`); unknown or changed host
+keys are refused. Clone and fetch are aborted after 60 seconds, and every
+network connect/read times out (15 s / 60 s), which also bounds push. Errors
+reaching the client stay generic (see `crates/gateway/API.md`).
