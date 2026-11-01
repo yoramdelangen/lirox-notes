@@ -9,7 +9,14 @@ wire format and generated endpoint paths, which are not a compatibility API.
 
 Passkey registration/login verify a challenge on the server, rotate the stored
 session, and set the `lirox_session` cookie as `HttpOnly`, `SameSite=Lax`, and
-`Path=/`; `Secure` is set when the configured relying-party origin uses HTTPS.
+`Path=/`; `Secure` is set when the first configured domain uses HTTPS.
+
+The relying party (passkey domains) comes from `LIROX_RP_ORIGIN` (with
+optional `LIROX_RP_ID`, defaulting to the first origin's host) when set, else
+from the domains stored during onboarding (`<config dir>/domains`), else — only
+for an install that already has a passkey — the legacy development origins
+`http://localhost:8989` and `http://localhost:3010`. Without any of these the
+passkey functions fail with a 500 until onboarding stores domains.
 Logout deletes the stored session and clears the cookie. Protected functions
 authorize from that request cookie; they do not accept a user ID or auth flag.
 
@@ -25,7 +32,8 @@ are async and return `Result<result, ServerFnError>`.
 
 | Function | Auth | Arguments | Result / behavior |
 |---|---:|---|---|
-| `bootstrap_server_function` | No | — | `BootstrapState`; installation, passkey, onboarding, session and workspace summary. Never returns the server workspace path. |
+| `bootstrap_server_function` | No | — | `BootstrapState`; installation, passkey, onboarding, session and workspace summary, plus `domains: DomainsResponse { rp_id: Option<String>, origins: Vec<String>, source }` with `source` one of `Environment`, `Stored`, `Default`, `None` (`None` = onboarding must ask for domains first). Never returns the server workspace path. |
+| `configure_domains_server_function` | No | `origins: Vec<String>` | `()`; validates, normalises (`scheme://host[:port]`, deduplicated) and stores the passkey domains. The first origin's host becomes the RP ID; further origins must be that host or a subdomain. `https` is required except for `localhost`/`*.localhost`; IP addresses are rejected. Only allowed while no passkey exists, never when `LIROX_RP_ORIGIN` is set, and only when the request's `Origin` header is one of the origins. Every rejection is a 400 with a user-safe message (e.g. "`http://notes.example.com` must use https (plain http only works for localhost)", "domains can only be set before the first passkey is created", "the address you are using must be one of the domains"). |
 | `passkey_registration_options_server_function` | No | — | JSON object with `challenge_id` and WebAuthn `publicKey` creation options. Registration closes after onboarding completes. |
 | `passkey_registration_verify_server_function` | No | `challenge_id: String`, `credential: JSON` | `bool`; consumes a valid registration challenge, persists the credential/session, and sets the session cookie. |
 | `passkey_login_options_server_function` | No | — | JSON object with `challenge_id` and WebAuthn `publicKey` request options. |

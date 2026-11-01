@@ -380,6 +380,23 @@ fn repository_summary(
     }
 }
 
+/// Stores the passkey domains during onboarding (before any passkey exists).
+/// The requesting page's `Origin` must be one of them.
+#[server]
+pub async fn configure_domains_server_function(origins: Vec<String>) -> Result<(), ServerFnError> {
+    let request_origin = FullstackContext::current()
+        .and_then(|context| context.parts_mut().headers.get("origin").cloned())
+        .and_then(|value| value.to_str().ok().map(str::to_owned));
+    backend_auth::configure_domains(
+        &runtime_paths(),
+        &origins,
+        request_origin.as_deref(),
+        liroxnotes_backend::domains::environment_domains(),
+    )
+    .map(|_| ())
+    .map_err(|error| client_error(400, &error.to_string()))
+}
+
 #[server]
 pub async fn passkey_registration_options_server_function(
 ) -> Result<serde_json::Value, ServerFnError> {
@@ -571,6 +588,7 @@ fn client_bootstrap_state(
                 slug: workspace.slug,
                 name: workspace.name,
             }),
+        domains: response.domains,
     }
 }
 
@@ -610,6 +628,11 @@ mod tests {
             display_name: Some("User".into()),
             workspace_root: "/private/workspace".into(),
             workspace: None,
+            domains: liroxnotes_shared::DomainsResponse {
+                rp_id: None,
+                origins: Vec::new(),
+                source: liroxnotes_shared::DomainSource::None,
+            },
         });
 
         assert!(!serde_json::to_value(state)

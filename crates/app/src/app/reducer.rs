@@ -20,6 +20,7 @@ pub enum Effect {
     Bootstrap,
     LoadWorkspace,
     LoadWorkspaceNote(String),
+    ConfigureDomains(Vec<String>),
     RegisterPasskey,
     SetupInstallation(String),
     Login,
@@ -157,6 +158,12 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
                 vec![]
             }
         }
+        AuthEvent::ConfigureDomains(origins) => {
+            auth.setup.domains = origins.clone();
+            auth.operation = AuthOperation::ConfiguringDomains;
+            auth.failure = None;
+            vec![Effect::ConfigureDomains(origins)]
+        }
         AuthEvent::RegisterPasskey => {
             auth.operation = AuthOperation::Registering;
             vec![Effect::RegisterPasskey]
@@ -231,7 +238,10 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             vec![Effect::Bootstrap]
         }
         AuthEvent::OperationFailed(message) => {
-            let keep_setup_open = auth.operation == AuthOperation::InspectingRepository;
+            let keep_setup_open = matches!(
+                auth.operation,
+                AuthOperation::InspectingRepository | AuthOperation::ConfiguringDomains
+            );
             auth.failure = Some(message);
             auth.operation = AuthOperation::None;
             if !keep_setup_open {

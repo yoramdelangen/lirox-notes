@@ -258,6 +258,7 @@ fn WorkspacesPopover() -> Element {
                                                 branch: workspace.branch.clone(),
                                                 path: workspace.path.clone(),
                                                 remote: true,
+                                                domains: Vec::new(),
                                             };
                                             let mut state = context.state;
                                             state.write().ui.popover = None;

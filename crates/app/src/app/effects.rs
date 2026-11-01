@@ -162,6 +162,16 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                 theme,
             ))))
         }
+        Effect::ConfigureDomains(origins) => {
+            server::configure_domains_server_function(origins)
+                .await
+                .map_err(server_error_message)?;
+            Ok(Some(ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(
+                server::bootstrap_server_function()
+                    .await
+                    .map_err(server_error_message)?,
+            ))))
+        }
         Effect::RegisterPasskey => {
             let options = server::passkey_registration_options_server_function()
                 .await

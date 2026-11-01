@@ -160,14 +160,28 @@ pub fn save_domains(paths: &RuntimePaths, config: &DomainConfig) -> io::Result<(
     result
 }
 
-/// `LIROX_RP_ID` and `LIROX_RP_ORIGIN`, when both are set.
+/// `LIROX_RP_ID` and `LIROX_RP_ORIGIN` from the environment, when
+/// `LIROX_RP_ORIGIN` is set.
 pub fn environment_domains() -> Option<(String, String)> {
     let value = |name| {
         std::env::var(name)
             .ok()
-            .filter(|value| !value.trim().is_empty())
+            .filter(|value: &String| !value.trim().is_empty())
     };
-    Some((value("LIROX_RP_ID")?, value("LIROX_RP_ORIGIN")?))
+    environment_pair(value("LIROX_RP_ID"), value("LIROX_RP_ORIGIN"))
+}
+
+/// The RP ID defaults to the host of the first origin.
+fn environment_pair(rp_id: Option<String>, origins: Option<String>) -> Option<(String, String)> {
+    let origins = origins?;
+    let rp_id = match rp_id {
+        Some(rp_id) => rp_id,
+        None => Url::parse(origins.split(',').next()?.trim())
+            .ok()?
+            .host_str()?
+            .to_string(),
+    };
+    Some((rp_id, origins))
 }
 
 /// Picks the domains in effect: the environment, then the stored domains, then
@@ -305,6 +319,29 @@ mod tests {
 
         assert_eq!(load_domains(&paths).unwrap(), Some(config));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn environment_rp_id_defaults_to_the_first_origin_host() {
+        assert_eq!(
+            environment_pair(
+                None,
+                Some("https://Notes.example.com:8443, https://x.example.com".into())
+            ),
+            Some((
+                "notes.example.com".into(),
+                "https://Notes.example.com:8443, https://x.example.com".into()
+            ))
+        );
+        assert_eq!(
+            environment_pair(
+                Some("example.com".into()),
+                Some("https://notes.example.com".into())
+            ),
+            Some(("example.com".into(), "https://notes.example.com".into()))
+        );
+        assert_eq!(environment_pair(Some("example.com".into()), None), None);
+        assert_eq!(environment_pair(None, Some("not a url".into())), None);
     }
 
     #[test]
