@@ -20,8 +20,8 @@ tarballs and publishes the release.
    *Pull requests: read and write*; install it on this repository only.
    Generate a private key.
 2. **Environment `release-pr`** (Settings → Environments): deployment branches
-   limited to `main`, no reviewers. Add secrets `RELEASE_APP_ID` and
-   `RELEASE_APP_PRIVATE_KEY`.
+   limited to `main`, no reviewers. Add secrets `RELEASE_APP_CLIENT_ID` (the
+   App's *Client ID*) and `RELEASE_APP_PRIVATE_KEY`.
 3. **Environment `release`**: you as required reviewer, deployment branches
    limited to `main` (the release jobs run from the push to `main`, so a
    tag-only policy would block every release; tag integrity comes from the
