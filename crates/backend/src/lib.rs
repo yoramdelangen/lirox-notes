@@ -7,6 +7,7 @@ use std::{
 };
 
 pub mod auth;
+pub mod git;
 pub mod user_config;
 pub mod workspace;
 pub use workspace::{
