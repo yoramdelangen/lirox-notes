@@ -2,6 +2,7 @@
 name = "liroxnotes-backend"
 edition.workspace = true
 version.workspace = true
+publish = false
 
 [dependencies]
 base64 = "0.22"

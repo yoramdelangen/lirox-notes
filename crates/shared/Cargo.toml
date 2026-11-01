@@ -2,6 +2,7 @@
 name = "liroxnotes-shared"
 edition.workspace = true
 version.workspace = true
+publish = false
 
 [lib]
 path = "src/lib.rs"
