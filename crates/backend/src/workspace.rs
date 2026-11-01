@@ -11,7 +11,8 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    repository_name_from_url, safe_note_path, slugify, workspace_slug_from_repo_url, GatewayConfig,
+    git, repository_name_from_url, safe_note_path, slugify, workspace_slug_from_repo_url,
+    GatewayConfig,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,8 +54,7 @@ pub fn existing_workspaces(
     repositories.sort();
     let mut workspaces = Vec::new();
     for repository in repositories {
-        let branch =
-            run_git(&repository, &["branch", "--show-current"]).unwrap_or_else(|_| "main".into());
+        let branch = git::current_branch(&repository).unwrap_or_else(|_| "main".into());
         let repository_name = repository
             .strip_prefix(root)
             .unwrap_or(&repository)
@@ -123,7 +123,7 @@ pub fn create_workspace(
                 "repository not found",
             ));
         }
-        let repo_url = run_git(&repository, &["remote", "get-url", "origin"]).unwrap_or_default();
+        let repo_url = git::origin_url(&repository).unwrap_or_default();
         (repo_url, repository, subpath)
     } else {
         let slug = slugify(&setup.slug)
@@ -204,7 +204,7 @@ fn validate_repository_path(value: &str) -> std::io::Result<PathBuf> {
     }
 }
 
-pub fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
+fn run_git(workspace: &Path, args: &[&str]) -> std::io::Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(workspace)
@@ -518,8 +518,8 @@ fn persist_repository_document(
 pub fn ensure_workspace(workspace: &Path) -> std::io::Result<()> {
     fs::create_dir_all(workspace)?;
 
-    if run_git(workspace, &["rev-parse", "--is-inside-work-tree"]).is_err() {
-        run_git(workspace, &["init"])?;
+    if !git::is_inside_repository(workspace) {
+        git::init(workspace)?;
     }
 
     Ok(())
@@ -530,11 +530,11 @@ pub fn ensure_workspace_for_config(config: &GatewayConfig) -> std::io::Result<()
         return ensure_workspace(&config.workspace_path);
     }
 
-    if let Ok(root) = run_git(&config.workspace_path, &["rev-parse", "--show-toplevel"]) {
+    if let Ok(root) = git::repository_root(&config.workspace_path) {
         let root = fs::canonicalize(root)?;
         let workspace = fs::canonicalize(&config.workspace_path)?;
         if root == workspace
-            || run_git(&config.workspace_path, &["remote", "get-url", "origin"])
+            || git::origin_url(&config.workspace_path)
                 .is_ok_and(|origin| origin == config.repo_url.trim())
         {
             return Ok(());
@@ -587,48 +587,18 @@ pub fn read_notes(root: &Path, dir: &Path, notes: &mut Vec<WorkspaceNote>) -> st
 }
 
 pub fn changed_count(workspace: &Path) -> usize {
-    run_git(workspace, &["status", "--porcelain"])
-        .map(|status| status.lines().count())
-        .unwrap_or(0)
+    git::changed_count(workspace).unwrap_or(0)
 }
 
 pub fn current_branch(workspace: &Path, config: &GatewayConfig) -> String {
-    run_git(workspace, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .unwrap_or_else(|_| config.branch.clone())
+    git::current_branch(workspace).unwrap_or_else(|_| config.branch.clone())
 }
 
 pub fn unpushed_commit_count(config: &GatewayConfig) -> usize {
     if config.repo_url.trim().is_empty() {
         return 0;
     }
-
-    if run_git(
-        &config.workspace_path,
-        &[
-            "rev-parse",
-            "--verify",
-            &format!("origin/{}", config.branch),
-        ],
-    )
-    .is_err()
-    {
-        return run_git(&config.workspace_path, &["rev-list", "--count", "HEAD"])
-            .ok()
-            .and_then(|count| count.parse().ok())
-            .unwrap_or(0);
-    }
-
-    run_git(
-        &config.workspace_path,
-        &[
-            "rev-list",
-            "--count",
-            &format!("origin/{}..HEAD", config.branch),
-        ],
-    )
-    .ok()
-    .and_then(|count| count.parse().ok())
-    .unwrap_or(0)
+    git::unpushed_count(&config.workspace_path, &config.branch).unwrap_or(0)
 }
 
 pub fn commit_note(workspace: &Path, path: &str) -> std::io::Result<bool> {
@@ -636,42 +606,7 @@ pub fn commit_note(workspace: &Path, path: &str) -> std::io::Result<bool> {
 }
 
 fn commit_note_paths(workspace: &Path, paths: &[PathBuf]) -> std::io::Result<bool> {
-    let path_strings: Vec<String> = paths
-        .iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect();
-    let path_args: Vec<&str> = path_strings.iter().map(String::as_str).collect();
-    let mut status_args = vec!["status", "--porcelain", "--"];
-    status_args.extend(path_args.iter().copied());
-    let status = run_git(workspace, &status_args)?;
-    if status.is_empty() {
-        return Ok(false);
-    }
-
-    if run_git(workspace, &["config", "--local", "user.name"])
-        .unwrap_or_default()
-        .is_empty()
-    {
-        run_git(workspace, &["config", "user.name", "LiroxNotes"])?;
-    }
-    if run_git(workspace, &["config", "--local", "user.email"])
-        .unwrap_or_default()
-        .is_empty()
-    {
-        run_git(
-            workspace,
-            &["config", "user.email", "liroxnotes@example.local"],
-        )?;
-    }
-
-    let mut add_args = vec!["add", "--"];
-    add_args.extend(path_args.iter().copied());
-    run_git(workspace, &add_args)?;
-    run_git(
-        workspace,
-        &["commit", "-m", &format!("Update {}", path_strings[0])],
-    )?;
-    Ok(true)
+    git::commit_paths(workspace, paths)
 }
 
 pub fn push_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
@@ -782,20 +717,15 @@ pub fn configure_git_remote(config: &GatewayConfig) -> std::io::Result<()> {
     if config.repo_url.trim().is_empty() {
         return Ok(());
     }
+    git::set_origin(&config.workspace_path, &config.repo_url)
+}
 
-    if run_git(&config.workspace_path, &["remote", "get-url", "origin"]).is_ok() {
-        run_git(
-            &config.workspace_path,
-            &["remote", "set-url", "origin", &config.repo_url],
-        )?;
-    } else {
-        run_git(
-            &config.workspace_path,
-            &["remote", "add", "origin", &config.repo_url],
-        )?;
+/// Removes `origin`; a workspace without one is already disconnected.
+pub fn disconnect_git_remote(config: &GatewayConfig) -> std::io::Result<()> {
+    if git::origin_url(&config.workspace_path).is_err() {
+        return Ok(());
     }
-
-    Ok(())
+    git::remove_origin(&config.workspace_path)
 }
 
 pub fn workspace_view_for_config(
@@ -840,9 +770,7 @@ pub fn workspace_view_for_config(
 }
 
 pub fn repository_root(config: &GatewayConfig) -> PathBuf {
-    run_git(&config.workspace_path, &["rev-parse", "--show-toplevel"])
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| config.workspace_path.clone())
+    git::repository_root(&config.workspace_path).unwrap_or_else(|_| config.workspace_path.clone())
 }
 
 /// The directory holding this workspace's notes: the git root joined with the

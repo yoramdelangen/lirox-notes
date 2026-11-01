@@ -2,10 +2,11 @@
 //! SSH host-key verification. The server never shells out to `git`.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use git2::{ConfigLevel, ErrorCode, Repository, StatusOptions};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use std::{
-    env,
+    env, fs, io,
     path::{Path, PathBuf},
 };
 
@@ -46,9 +47,17 @@ impl GitEnv {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Credential {
-    SshKey { username: String, private_key: PathBuf },
-    SshAgent { username: String },
-    Token { username: String, token: String },
+    SshKey {
+        username: String,
+        private_key: PathBuf,
+    },
+    SshAgent {
+        username: String,
+    },
+    Token {
+        username: String,
+        token: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,7 +90,11 @@ fn remote_endpoint(url: &str) -> Option<(Transport, String, u16)> {
         }
         _ => (host_port, default_port),
     };
-    Some((transport, host.trim_matches(['[', ']']).to_ascii_lowercase(), port))
+    Some((
+        transport,
+        host.trim_matches(['[', ']']).to_ascii_lowercase(),
+        port,
+    ))
 }
 
 /// Credentials to offer for `url`, in order. The list is finite so a
@@ -200,7 +213,9 @@ pub fn check_host_key(
             continue;
         }
         let same_key = entry_type == key_type
-            && STANDARD.decode(entry_key).is_ok_and(|decoded| decoded == key);
+            && STANDARD
+                .decode(entry_key)
+                .is_ok_and(|decoded| decoded == key);
         match marker {
             Some("@revoked") if same_key => return HostKeyCheck::Mismatch,
             Some(_) => {}
@@ -210,6 +225,188 @@ pub fn check_host_key(
         }
     }
     result
+}
+
+const DEFAULT_NAME: &str = "LiroxNotes";
+const DEFAULT_EMAIL: &str = "liroxnotes@example.local";
+
+fn io_error(error: git2::Error) -> io::Error {
+    io::Error::other(error.message().to_string())
+}
+
+fn open(path: &Path) -> io::Result<Repository> {
+    Repository::discover(path).map_err(io_error)
+}
+
+fn workdir(repository: &Repository) -> io::Result<PathBuf> {
+    repository
+        .workdir()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| io::Error::other("repository has no working directory"))
+}
+
+/// Whether `path` is inside a Git working tree (searching parent directories).
+pub fn is_inside_repository(path: &Path) -> bool {
+    open(path).is_ok_and(|repository| !repository.is_bare())
+}
+
+pub fn init(path: &Path) -> io::Result<()> {
+    Repository::init(path).map(|_| ()).map_err(io_error)
+}
+
+pub fn repository_root(path: &Path) -> io::Result<PathBuf> {
+    let root = workdir(&open(path)?)?;
+    Ok(root.components().collect())
+}
+
+pub fn current_branch(path: &Path) -> io::Result<String> {
+    let repository = open(path)?;
+    let branch = match repository.head() {
+        Ok(head) => Ok(head.shorthand().unwrap_or("HEAD").to_string()),
+        // Unborn branch: HEAD still names its symbolic target.
+        Err(error) if error.code() == ErrorCode::UnbornBranch => {
+            let head = repository.find_reference("HEAD").map_err(io_error)?;
+            let target = head
+                .symbolic_target()
+                .ok()
+                .flatten()
+                .ok_or_else(|| io::Error::other("HEAD is not a branch"))?;
+            Ok(target.trim_start_matches("refs/heads/").to_string())
+        }
+        Err(error) => Err(io_error(error)),
+    };
+    branch
+}
+
+pub fn origin_url(path: &Path) -> io::Result<String> {
+    let repository = open(path)?;
+    let remote = repository.find_remote("origin").map_err(io_error)?;
+    remote
+        .url()
+        .map(str::to_string)
+        .map_err(|_| io::Error::other("origin has no URL"))
+}
+
+pub fn set_origin(path: &Path, url: &str) -> io::Result<()> {
+    let repository = open(path)?;
+    if repository.find_remote("origin").is_ok() {
+        repository.remote_set_url("origin", url).map_err(io_error)
+    } else {
+        repository
+            .remote("origin", url)
+            .map(|_| ())
+            .map_err(io_error)
+    }
+}
+
+pub fn remove_origin(path: &Path) -> io::Result<()> {
+    open(path)?.remote_delete("origin").map_err(io_error)
+}
+
+/// Number of entries `git status --porcelain` would print.
+pub fn changed_count(path: &Path) -> io::Result<usize> {
+    let repository = open(path)?;
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(false)
+        .include_ignored(false);
+    let count = repository
+        .statuses(Some(&mut options))
+        .map_err(io_error)?
+        .len();
+    Ok(count)
+}
+
+fn ensure_identity(repository: &Repository) -> io::Result<()> {
+    let config = repository.config().map_err(io_error)?;
+    let mut local = config.open_level(ConfigLevel::Local).map_err(io_error)?;
+    for (key, default) in [("user.name", DEFAULT_NAME), ("user.email", DEFAULT_EMAIL)] {
+        if local.get_string(key).map_or(true, |value| value.is_empty()) {
+            local.set_str(key, default).map_err(io_error)?;
+        }
+    }
+    Ok(())
+}
+
+/// Stages and commits `paths` (relative to `path`, which may be a
+/// subdirectory of the working tree), including deletions. Returns `false`
+/// when none of them changed.
+pub fn commit_paths(path: &Path, paths: &[PathBuf]) -> io::Result<bool> {
+    let Some(first) = paths.first() else {
+        return Ok(false);
+    };
+    let repository = open(path)?;
+    let root = fs::canonicalize(workdir(&repository)?)?;
+    let prefix = fs::canonicalize(path)?
+        .strip_prefix(&root)
+        .map(Path::to_path_buf)
+        .map_err(|_| io::Error::other("workspace is outside the repository"))?;
+    let relative: Vec<PathBuf> = paths.iter().map(|path| prefix.join(path)).collect();
+
+    let mut options = StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .disable_pathspec_match(true);
+    for path in &relative {
+        options.pathspec(path);
+    }
+    if repository
+        .statuses(Some(&mut options))
+        .map_err(io_error)?
+        .is_empty()
+    {
+        return Ok(false);
+    }
+
+    ensure_identity(&repository)?;
+    let mut index = repository.index().map_err(io_error)?;
+    for path in &relative {
+        if root.join(path).exists() {
+            index.add_path(path).map_err(io_error)?;
+        } else if index.get_path(path, 0).is_some() {
+            index.remove_path(path).map_err(io_error)?;
+        }
+    }
+    index.write().map_err(io_error)?;
+    let tree = repository
+        .find_tree(index.write_tree().map_err(io_error)?)
+        .map_err(io_error)?;
+    let signature = repository.signature().map_err(io_error)?;
+    let parent = repository
+        .head()
+        .ok()
+        .and_then(|head| head.peel_to_commit().ok());
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    repository
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            &format!("Update {}", first.to_string_lossy()),
+            &tree,
+            &parents,
+        )
+        .map_err(io_error)?;
+    Ok(true)
+}
+
+/// Commits on HEAD that `origin/<branch>` does not have; every commit when
+/// there is no tracking ref yet.
+pub fn unpushed_count(path: &Path, branch: &str) -> io::Result<usize> {
+    let repository = open(path)?;
+    let Ok(head) = repository.head() else {
+        return Ok(0);
+    };
+    let mut walk = repository.revwalk().map_err(io_error)?;
+    walk.push(head.peel_to_commit().map_err(io_error)?.id())
+        .map_err(io_error)?;
+    if let Ok(tracking) = repository.find_reference(&format!("refs/remotes/origin/{branch}")) {
+        walk.hide(tracking.peel_to_commit().map_err(io_error)?.id())
+            .map_err(io_error)?;
+    }
+    Ok(walk.count())
 }
 
 #[cfg(test)]
@@ -268,7 +465,12 @@ mod tests {
             ..env()
         };
         assert_eq!(
-            credential_candidates("ssh://deploy@example.com:2222/r.git", Some("deploy"), &env, |_| false),
+            credential_candidates(
+                "ssh://deploy@example.com:2222/r.git",
+                Some("deploy"),
+                &env,
+                |_| false
+            ),
             vec![Credential::SshAgent {
                 username: "deploy".into()
             }]
@@ -293,9 +495,18 @@ mod tests {
             credential_candidates("https://GitHub.com/o/r.git", None, &env, |_| false),
             token
         );
-        assert!(credential_candidates("https://evil.example/o/r.git", None, &env, |_| false).is_empty());
-        assert!(credential_candidates("https://github.com.evil.example/r.git", None, &env, |_| false).is_empty());
-        assert!(credential_candidates("http://github.com/o/r.git", None, &env, |_| false).is_empty());
+        assert!(
+            credential_candidates("https://evil.example/o/r.git", None, &env, |_| false).is_empty()
+        );
+        assert!(
+            credential_candidates("https://github.com.evil.example/r.git", None, &env, |_| {
+                false
+            })
+            .is_empty()
+        );
+        assert!(
+            credential_candidates("http://github.com/o/r.git", None, &env, |_| false).is_empty()
+        );
     }
 
     #[test]
@@ -340,7 +551,13 @@ mod tests {
             HostKeyCheck::Unknown
         );
         assert_eq!(
-            check_host_key(&line("[github.com]:22", KEY), "github.com", 22, "ssh-ed25519", KEY),
+            check_host_key(
+                &line("[github.com]:22", KEY),
+                "github.com",
+                22,
+                "ssh-ed25519",
+                KEY
+            ),
             HostKeyCheck::Match
         );
     }
@@ -382,7 +599,13 @@ mod tests {
     #[test]
     fn missing_host_is_unknown() {
         assert_eq!(
-            check_host_key(&line("gitlab.com", KEY), "github.com", 22, "ssh-ed25519", KEY),
+            check_host_key(
+                &line("gitlab.com", KEY),
+                "github.com",
+                22,
+                "ssh-ed25519",
+                KEY
+            ),
             HostKeyCheck::Unknown
         );
         assert_eq!(
@@ -393,7 +616,11 @@ mod tests {
 
     #[test]
     fn revoked_key_is_mismatch() {
-        let known = format!("@revoked {}{}", line("github.com", KEY), line("github.com", KEY));
+        let known = format!(
+            "@revoked {}{}",
+            line("github.com", KEY),
+            line("github.com", KEY)
+        );
         assert_eq!(
             check_host_key(&known, "github.com", 22, "ssh-ed25519", KEY),
             HostKeyCheck::Mismatch

@@ -12,11 +12,11 @@ pub mod user_config;
 pub mod workspace;
 pub use workspace::{
     changed_count, commit_note, configure_git_remote, configured_profile,
-    create_configured_workspace, create_workspace, delete_note_file, ensure_workspace,
-    ensure_workspace_for_config, existing_workspaces, inspect_repository, load_repository_config,
-    notes_root, pull_workspace, push_workspace, read_note_body, save_note_body,
-    save_workspace_theme, unpushed_commit_count, workspace_view_for_config, ExistingWorkspace,
-    RepositoryConfig, RepositoryMetadata, RepositoryWorkspace, WorkspaceSetup,
+    create_configured_workspace, create_workspace, delete_note_file, disconnect_git_remote,
+    ensure_workspace, ensure_workspace_for_config, existing_workspaces, inspect_repository,
+    load_repository_config, notes_root, pull_workspace, push_workspace, read_note_body,
+    save_note_body, save_workspace_theme, unpushed_commit_count, workspace_view_for_config,
+    ExistingWorkspace, RepositoryConfig, RepositoryMetadata, RepositoryWorkspace, WorkspaceSetup,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

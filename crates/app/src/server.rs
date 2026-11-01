@@ -361,10 +361,7 @@ pub async fn connect_repository_server_function(
 pub async fn disconnect_repository_server_function(
 ) -> Result<liroxnotes_shared::RepositorySummary, ServerFnError> {
     let (paths, mut config) = authenticated_workspace()?;
-    let _ = liroxnotes_backend::workspace::run_git(
-        &config.workspace_path,
-        &["remote", "remove", "origin"],
-    );
+    let _ = liroxnotes_backend::disconnect_git_remote(&config);
     config.repo_url.clear();
     liroxnotes_backend::save_config(&paths.config_file, &config)
         .map_err(|_| internal_error("could not save repository configuration"))?;
