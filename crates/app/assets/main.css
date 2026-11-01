@@ -361,6 +361,10 @@ button {
     font-size: 11px;
 }
 
+.lx-onb-step {
+    margin-left: auto;
+}
+
 .lx-onb-top button {
     padding: 0;
     border: 0;

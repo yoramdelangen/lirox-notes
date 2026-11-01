@@ -18,10 +18,8 @@ fn OnboardingFrame(
             div { class: "lx-onb-top",
                 if let Some(on_back) = on_back {
                     button { r#type: "button", onclick: move |_| on_back.call(()), "‹ back" }
-                } else {
-                    span { "lirox" }
                 }
-                span { "{step}" }
+                span { class: "lx-onb-step", "{step}" }
             }
             div { class: "lx-onb-body",
                 if greeting {
