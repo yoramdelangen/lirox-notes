@@ -217,13 +217,14 @@ pub fn check_host_key(
         let (Some(entry_type), Some(entry_key)) = (fields.next(), fields.next()) else {
             continue;
         };
-        if !host_pattern_matches(first, &host, port) {
+        // Entries of another key type say nothing about this key (OpenSSH
+        // treats the offered type as unknown, not as a changed key).
+        if entry_type != key_type || !host_pattern_matches(first, &host, port) {
             continue;
         }
-        let same_key = entry_type == key_type
-            && STANDARD
-                .decode(entry_key)
-                .is_ok_and(|decoded| decoded == key);
+        let same_key = STANDARD
+            .decode(entry_key)
+            .is_ok_and(|decoded| decoded == key);
         match marker {
             Some("@revoked") if same_key => return HostKeyCheck::Mismatch,
             Some(_) => {}
@@ -526,9 +527,10 @@ impl<'a> Session<'a> {
             .unwrap_or_default();
         let message = match check_host_key(&known_hosts, host, port, key_type.name(), key) {
             HostKeyCheck::Match => return Ok(CertificateCheckStatus::CertificateOk),
-            HostKeyCheck::Unknown => {
-                format!("unknown SSH host key for {host}; add it to known_hosts")
-            }
+            HostKeyCheck::Unknown => format!(
+                "unknown SSH host key ({}) for {host}; add it to known_hosts",
+                key_type.name()
+            ),
             HostKeyCheck::Mismatch => format!("SSH host key for {host} does not match known_hosts"),
         };
         *self.host_key_error.borrow_mut() = Some(message.clone());
@@ -858,9 +860,16 @@ mod tests {
             check_host_key(&known, "github.com", 22, "ssh-ed25519", b"other"),
             HostKeyCheck::Mismatch
         );
+    }
+
+    #[test]
+    fn other_key_type_is_unknown_not_mismatch() {
+        // Like OpenSSH: a host pinned only with ed25519 that offers an ECDSA
+        // key has no key of that type on record, which is not a key change.
+        let known = line("github.com", KEY);
         assert_eq!(
-            check_host_key(&known, "github.com", 22, "ssh-rsa", KEY),
-            HostKeyCheck::Mismatch
+            check_host_key(&known, "github.com", 22, "ecdsa-sha2-nistp256", KEY),
+            HostKeyCheck::Unknown
         );
     }
 
