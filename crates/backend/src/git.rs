@@ -467,14 +467,16 @@ impl<'a> Session<'a> {
 
     fn credential(
         &self,
+        url: &str,
         url_username: Option<&str>,
         allowed: CredentialType,
     ) -> Result<Cred, git2::Error> {
         if allowed.contains(CredentialType::USERNAME) {
             return Cred::username(url_username.unwrap_or("git"));
         }
-        let candidates =
-            credential_candidates(&self.url, url_username, self.env, |path| path.is_file());
+        // `url` is the URL libgit2 is authenticating against, which differs
+        // from the configured remote after a redirect.
+        let candidates = credential_candidates(url, url_username, self.env, |path| path.is_file());
         loop {
             let attempt = self.attempt.get();
             self.attempt.set(attempt + 1);
@@ -540,7 +542,7 @@ impl<'a> Session<'a> {
     fn callbacks(&self) -> RemoteCallbacks<'_> {
         let mut callbacks = RemoteCallbacks::new();
         callbacks
-            .credentials(|_, username, allowed| self.credential(username, allowed))
+            .credentials(|url, username, allowed| self.credential(url, username, allowed))
             .certificate_check(|cert, host| self.certificate(cert, host))
             .transfer_progress(|_| self.in_time())
             .sideband_progress(|_| self.in_time())
@@ -777,6 +779,32 @@ mod tests {
         assert!(
             credential_candidates("http://github.com/o/r.git", None, &env, |_| false).is_empty()
         );
+    }
+
+    #[test]
+    fn token_is_not_sent_to_a_redirect_target_outside_token_hosts() {
+        // libgit2 follows an initial redirect and asks for credentials with
+        // the redirected URL; the configured remote URL must not decide.
+        let env = GitEnv {
+            token: Some("t".into()),
+            ..env()
+        };
+        let session = Session::new("https://github.com/o/r.git", &env);
+        assert!(session
+            .credential(
+                "https://evil.example/o/r.git",
+                None,
+                CredentialType::USER_PASS_PLAINTEXT
+            )
+            .is_err());
+        let session = Session::new("https://github.com/o/r.git", &env);
+        assert!(session
+            .credential(
+                "https://github.com/o/r.git",
+                None,
+                CredentialType::USER_PASS_PLAINTEXT
+            )
+            .is_ok());
     }
 
     #[test]
