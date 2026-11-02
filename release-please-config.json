@@ -17,8 +17,7 @@
           "path": "Cargo.lock",
           "jsonpath": "$.package[?(@.name.value=='liroxnotes-app' || @.name.value=='liroxnotes-backend' || @.name.value=='liroxnotes-shared')].version"
         }
-      ],
-      "release-as": "0.1.0"
+      ]
     }
   }
 }
