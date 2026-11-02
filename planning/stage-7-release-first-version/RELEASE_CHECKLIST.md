@@ -15,32 +15,27 @@ tarballs and publishes the release.
 
 ### One-time GitHub setup
 
-1. **GitHub App for releases** (Settings → Developer settings → GitHub Apps →
-   New): no webhook; repository permissions *Contents: read and write* and
-   *Pull requests: read and write*; install it on this repository only.
-   Generate a private key.
-2. **Environment `release-pr`** (Settings → Environments): deployment branches
-   limited to `main`, no reviewers. Add secrets `RELEASE_APP_CLIENT_ID` (the
-   App's *Client ID*) and `RELEASE_APP_PRIVATE_KEY`.
-3. **Environment `release`**: you as required reviewer, deployment branches
-   limited to `main` (the release jobs run from the push to `main`, so a
-   tag-only policy would block every release; tag integrity comes from the
-   `v*` ruleset below).
-4. **Branch protection / ruleset for `main`**: require a pull request, require
-   the CI checks (`rust`, `deny`, `image`), block force pushes and deletion.
-5. **Tag ruleset for `v*`**: restrict creation to the release GitHub App,
-   block updates and deletion.
-6. **Immutable releases** (Settings → General → Releases): enable.
-7. **Actions settings**: workflow permissions *read repository contents*;
-   allow GitHub Actions to create pull requests is *not* needed (the App
-   creates them).
-8. **After the first release**: set the `lirox-notes` package to *Public*
+1. **Actions settings**: default workflow permissions *read repository
+   contents*, and *Allow GitHub Actions to create and approve pull requests*
+   enabled (release-please opens its PR with `GITHUB_TOKEN`).
+2. **Environment `release`**: you as required reviewer, deployment branches
+   limited to `main` (the release jobs run from the push to `main`).
+3. **Ruleset for `main`**: block force pushes and deletion. Do not require
+   status checks: release PRs made with `GITHUB_TOKEN` do not trigger CI.
+4. **Tag ruleset for `v*`**: block updates and deletion.
+5. **Immutable releases** (Settings → General → Releases): enable.
+6. **After the first release**: set the `lirox-notes` package to *Public*
    (Packages → Package settings) and confirm `podman pull
    ghcr.io/yoramdelangen/lirox-notes:latest` works without logging in.
 
+Optional hardening: create a GitHub App (Contents + Pull requests write,
+installed on this repository only) and pass its token to release-please, so
+CI also runs on release PRs and the `v*` ruleset can restrict tag creation to
+the App.
+
 ### Per release
 
-1. Review and merge the release-please PR (CI must be green).
+1. Review and merge the release-please PR.
 2. Approve the `release` environment in the Release workflow run.
 3. Check the published release: two tarballs, `SHA256SUMS`, `sbom.spdx.json`.
 4. Verify: `gh attestation verify oci://ghcr.io/yoramdelangen/lirox-notes:X.Y.Z -R yoramdelangen/lirox-notes`.
