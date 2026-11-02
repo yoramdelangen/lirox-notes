@@ -1,6 +1,6 @@
 # Hosted Frontend & Server Selection (scheduled)
 
-Status: **scheduled, not started.** Tracked in GitHub issues (see
+Status: **scheduled, not started.** Tracked in https://github.com/yoramdelangen/lirox-notes/issues/9 and https://github.com/yoramdelangen/lirox-notes/issues/10 (see
 "Follow-ups" in `planning/stage-7-release-first-version/KNOWN_ISSUES.md`).
 
 ## Intent
