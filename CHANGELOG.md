@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/yoramdelangen/lirox-notes/compare/v0.1.0...v0.1.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* include the domain step's gap utility in the compiled CSS ([e969a7c](https://github.com/yoramdelangen/lirox-notes/commit/e969a7c59c68537079c5d5773c53dad6bccc24de))
+
 ## [0.1.0](https://github.com/yoramdelangen/lirox-notes/compare/v0.1.0...v0.1.0) (2026-11-02)
 
 
