@@ -63,11 +63,9 @@ dev port="8989" platform="web":
     key_bound=1
 
     if [ "{{platform}}" = "web" ]; then
-        env LIROX_RP_ORIGIN="${LIROX_RP_ORIGIN:-http://localhost:{{port}}}" \
-            dx serve --port {{port}} --platform web --package liroxnotes-app --open true
+        dx serve --port {{port}} --platform web --package liroxnotes-app --open true
     else
-        env LIROX_RP_ORIGIN="${LIROX_RP_ORIGIN:-http://localhost:{{port}}}" \
-            dx serve --port {{port}} --platform server --package liroxnotes-app \
+        dx serve --port {{port}} --platform server --package liroxnotes-app \
             --features server --open false
     fi
 
@@ -79,5 +77,4 @@ image tag="lirox-notes:dev" engine="docker":
 image-run tag="lirox-notes:dev" port="8080" engine="docker":
     {{engine}} run --rm -p {{port}}:8080 \
         -v lirox-config:/config -v lirox-data:/data \
-        -e LIROX_RP_ID=localhost -e LIROX_RP_ORIGIN=http://localhost:{{port}} \
         {{tag}}

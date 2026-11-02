@@ -31,6 +31,7 @@ impl Dispatcher {
 
     pub fn dispatch_auth_command(&self, state: &mut ApplicationState, command: AuthCommand) {
         let event = match command {
+            AuthCommand::ConfigureDomains(origins) => AuthEvent::ConfigureDomains(origins),
             AuthCommand::RegisterPasskey => AuthEvent::RegisterPasskey,
             AuthCommand::Login => AuthEvent::Login,
             AuthCommand::AutoLogin => AuthEvent::AutoLogin,

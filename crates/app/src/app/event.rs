@@ -23,6 +23,7 @@ pub enum ThemeEvent {
 pub enum AuthEvent {
     BootstrapRequested,
     BootstrapLoaded(BootstrapState),
+    ConfigureDomains(Vec<String>),
     RegisterPasskey,
     Login,
     AutoLogin,
@@ -77,6 +78,7 @@ pub enum StatusEvent {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum AuthCommand {
+    ConfigureDomains(Vec<String>),
     RegisterPasskey,
     Login,
     AutoLogin,

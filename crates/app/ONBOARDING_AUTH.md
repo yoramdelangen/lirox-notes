@@ -69,3 +69,12 @@ keys are refused. Clone and fetch are aborted after 60 seconds of transfer,
 and every network connect/read times out (15 s / 60 s); push is bounded only
 by those connect/read timeouts. Errors
 reaching the client stay generic (see `crates/gateway/API.md`).
+
+Before the first passkey, onboarding asks for the domains (origins) the app is
+opened on, prefilled with the browser's own origin. They are stored in
+`<config dir>/domains`; the first origin's host is the passkey RP ID and
+further origins must be that host or a subdomain. They can only be set while no
+passkey exists and when the request comes from one of them, and
+`LIROX_RP_ORIGIN` / `LIROX_RP_ID` override them (the step is skipped then).
+Unrelated domains and changing domains after onboarding are scheduled in
+`docs/superpowers/specs/2026-11-02-hosted-frontend-design.md`.

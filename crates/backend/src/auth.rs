@@ -254,6 +254,8 @@ pub enum AuthError {
     VerificationFailed,
     Storage(String),
     Configuration(String),
+    /// No domains are stored or set in the environment yet.
+    DomainsNotConfigured,
 }
 
 impl std::fmt::Display for AuthError {
@@ -267,6 +269,7 @@ impl std::fmt::Display for AuthError {
             Self::VerificationFailed => "passkey verification failed",
             Self::Storage(_) => "auth storage failed",
             Self::Configuration(_) => "invalid WebAuthn configuration",
+            Self::DomainsNotConfigured => "domains are not configured",
         })
     }
 }
@@ -297,15 +300,25 @@ impl AuthService {
         }
     }
 
+    /// The service for the domains in effect (environment, then stored
+    /// domains); see [`crate::domains::resolve_domains`].
     pub fn from_env(paths: RuntimePaths) -> Result<Self, AuthError> {
-        let rp_id = std::env::var("LIROX_RP_ID").unwrap_or_else(|_| "localhost".into());
-        let origins = std::env::var("LIROX_RP_ORIGIN")
-            .unwrap_or_else(|_| "http://localhost:8989,http://localhost:3010".into());
-        let origins = parse_rp_origins(&origins)?;
-        let webauthn = webauthn_for_origins(&rp_id, &origins)?;
+        Self::from_domains(paths, crate::domains::environment_domains())
+    }
+
+    pub fn from_domains(
+        paths: RuntimePaths,
+        environment: Option<(String, String)>,
+    ) -> Result<Self, AuthError> {
+        let (domains, _) = effective_domains(&paths, environment)?;
+        let domains = domains.ok_or(AuthError::DomainsNotConfigured)?;
+        let origins = domains
+            .urls()
+            .map_err(|error| AuthError::Configuration(error.to_string()))?;
+        let webauthn = webauthn_for_origins(&domains.rp_id, &origins)?;
         let session_ttl = parse_session_ttl(std::env::var("LIROX_SESSION_TTL_SECONDS").ok())?;
         let mut service = Self::new(AuthStore::new(paths), webauthn, session_ttl);
-        service.secure_cookies = origins[0].scheme() == "https";
+        service.secure_cookies = domains.secure();
         Ok(service)
     }
 
@@ -795,11 +808,78 @@ fn unix_seconds() -> u64 {
         .as_secs()
 }
 
+/// Stores the domains chosen during onboarding. Only allowed before the first
+/// passkey exists, never when the environment sets them, and only when the
+/// requesting page's origin is one of them (the passkey is created there).
+pub fn configure_domains(
+    paths: &RuntimePaths,
+    inputs: &[String],
+    request_origin: Option<&str>,
+    environment: Option<(String, String)>,
+) -> Result<crate::domains::DomainConfig, crate::domains::DomainError> {
+    let refuse = |message: &str| Err(crate::domains::DomainError::new(message));
+    if environment.is_some() {
+        return refuse("domains are set by LIROX_RP_ID / LIROX_RP_ORIGIN on the server");
+    }
+    let passkey_exists = AuthStore::new(paths.clone())
+        .load_account()
+        .map_err(|_| crate::domains::DomainError::new("authentication storage unavailable"))?
+        .is_some_and(|account| !account.credentials.is_empty());
+    if passkey_exists {
+        return refuse("domains can only be set before the first passkey is created");
+    }
+    let domains = crate::domains::normalize_domains(inputs)?;
+    let request_origin = request_origin.map(|origin| origin.trim_end_matches('/'));
+    if !request_origin.is_some_and(|origin| domains.origins.iter().any(|known| known == origin)) {
+        return refuse("the address you are using must be one of the domains");
+    }
+    crate::domains::save_domains(paths, &domains)
+        .map_err(|_| crate::domains::DomainError::new("could not save domains"))?;
+    Ok(domains)
+}
+
+/// The domains in effect and where they come from.
+pub fn effective_domains(
+    paths: &RuntimePaths,
+    environment: Option<(String, String)>,
+) -> Result<
+    (
+        Option<crate::domains::DomainConfig>,
+        crate::domains::DomainSource,
+    ),
+    AuthError,
+> {
+    let storage = |error: io::Error| AuthError::Storage(error.to_string());
+    let passkey_exists = AuthStore::new(paths.clone())
+        .load_account()
+        .map_err(storage)?
+        .is_some_and(|account| !account.credentials.is_empty());
+    let stored = crate::domains::load_domains(paths).map_err(storage)?;
+    crate::domains::resolve_domains(environment, stored, passkey_exists)
+        .map_err(|error| AuthError::Configuration(error.to_string()))
+}
+
 pub fn bootstrap_response(
     paths: &RuntimePaths,
     authenticated: bool,
     user: Option<String>,
 ) -> io::Result<BootstrapResponse> {
+    bootstrap_response_with(
+        paths,
+        authenticated,
+        user,
+        crate::domains::environment_domains(),
+    )
+}
+
+fn bootstrap_response_with(
+    paths: &RuntimePaths,
+    authenticated: bool,
+    user: Option<String>,
+    environment: Option<(String, String)>,
+) -> io::Result<BootstrapResponse> {
+    let (domains, source) = effective_domains(paths, environment)
+        .map_err(|error| io::Error::other(error.to_string()))?;
     let installed = is_installed(paths)?;
     let passkey_exists = AuthStore::new(paths.clone())
         .load_account()?
@@ -824,16 +904,19 @@ pub fn bootstrap_response(
                 slug: config.workspace_slug,
                 name: config.workspace_name,
             }),
+        domains: liroxnotes_shared::DomainsResponse {
+            rp_id: domains.as_ref().map(|domains| domains.rp_id.clone()),
+            origins: domains.map(|domains| domains.origins).unwrap_or_default(),
+            source: match source {
+                crate::domains::DomainSource::Environment => {
+                    liroxnotes_shared::DomainSource::Environment
+                }
+                crate::domains::DomainSource::Stored => liroxnotes_shared::DomainSource::Stored,
+                crate::domains::DomainSource::Default => liroxnotes_shared::DomainSource::Default,
+                crate::domains::DomainSource::None => liroxnotes_shared::DomainSource::None,
+            },
+        },
     })
-}
-
-fn parse_rp_origins(value: &str) -> Result<Vec<Url>, AuthError> {
-    value
-        .split(',')
-        .map(|origin| {
-            Url::parse(origin.trim()).map_err(|error| AuthError::Configuration(error.to_string()))
-        })
-        .collect()
 }
 
 fn webauthn_for_origins(rp_id: &str, origins: &[Url]) -> Result<Webauthn, AuthError> {
@@ -879,8 +962,140 @@ mod tests {
     }
 
     #[test]
+    fn service_uses_stored_domains() {
+        let root = std::env::temp_dir().join(format!("lirox-auth-domains-{}", Uuid::new_v4()));
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        let domains = crate::domains::normalize_domains(&[
+            "https://notes.example.com".to_string(),
+            "https://notes.example.com:6789".to_string(),
+        ])
+        .unwrap();
+        crate::domains::save_domains(&paths, &domains).unwrap();
+
+        let service = AuthService::from_domains(paths, None).unwrap();
+
+        assert_eq!(
+            service.webauthn.get_allowed_origins(),
+            domains.urls().unwrap()
+        );
+        assert!(service.secure_cookies());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bootstrap_reports_the_domains_in_effect() {
+        let root = std::env::temp_dir().join(format!("lirox-auth-bootdomains-{}", Uuid::new_v4()));
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+        let fresh = bootstrap_response_with(&paths, false, None, None).unwrap();
+        assert_eq!(fresh.domains.source, liroxnotes_shared::DomainSource::None);
+        assert!(fresh.domains.origins.is_empty());
+
+        let domains =
+            crate::domains::normalize_domains(&["http://localhost:8989".to_string()]).unwrap();
+        crate::domains::save_domains(&paths, &domains).unwrap();
+        let stored = bootstrap_response_with(&paths, false, None, None).unwrap();
+        assert_eq!(
+            stored.domains.source,
+            liroxnotes_shared::DomainSource::Stored
+        );
+        assert_eq!(stored.domains.rp_id.as_deref(), Some("localhost"));
+        assert_eq!(stored.domains.origins, vec!["http://localhost:8989"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn domain_paths(name: &str) -> RuntimePaths {
+        let root = std::env::temp_dir().join(format!("lirox-{name}-{}", Uuid::new_v4()));
+        RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        }
+    }
+
+    #[test]
+    fn domains_can_be_configured_before_the_first_passkey() {
+        let paths = domain_paths("configure");
+        let domains = configure_domains(
+            &paths,
+            &[
+                "https://notes.example.com".into(),
+                "https://notes.example.com:6789".into(),
+            ],
+            Some("https://notes.example.com:6789"),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(domains.rp_id, "notes.example.com");
+        assert_eq!(crate::domains::load_domains(&paths).unwrap(), Some(domains));
+        let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
+    }
+
+    #[test]
+    fn configuring_domains_requires_the_requesting_origin_in_the_list() {
+        let paths = domain_paths("configure-origin");
+        for origin in [Some("https://evil.example"), None] {
+            let error =
+                configure_domains(&paths, &["https://notes.example.com".into()], origin, None)
+                    .unwrap_err();
+            assert!(error.to_string().contains("address"), "{error}");
+        }
+        assert_eq!(crate::domains::load_domains(&paths).unwrap(), None);
+    }
+
+    #[test]
+    fn domains_are_locked_after_the_first_passkey_and_by_the_environment() {
+        let paths = domain_paths("configure-locked");
+        let error = configure_domains(
+            &paths,
+            &["http://localhost:8989".into()],
+            Some("http://localhost:8989"),
+            Some(("localhost".into(), "http://localhost:8080".into())),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("LIROX_RP"), "{error}");
+
+        let store = AuthStore::new(paths.clone());
+        store
+            .save_account(&AccountRecord::with_credential(credential("one")))
+            .unwrap();
+        let error = configure_domains(
+            &paths,
+            &["http://localhost:8989".into()],
+            Some("http://localhost:8989"),
+            None,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("passkey"), "{error}");
+        let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
+    }
+
+    #[test]
+    fn service_is_unavailable_until_domains_are_configured() {
+        let root = std::env::temp_dir().join(format!("lirox-auth-nodomains-{}", Uuid::new_v4()));
+        let paths = RuntimePaths {
+            config_file: root.join("config"),
+            default_workspace: root.join("workspace"),
+        };
+
+        assert!(matches!(
+            AuthService::from_domains(paths, None),
+            Err(AuthError::DomainsNotConfigured)
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn webauthn_accepts_multiple_comma_separated_origins() {
-        let origins = parse_rp_origins("http://localhost:8989,http://localhost:3010").unwrap();
+        let origins = vec![
+            Url::parse("http://localhost:8989").unwrap(),
+            Url::parse("http://localhost:3010").unwrap(),
+        ];
         let webauthn = webauthn_for_origins("localhost", &origins).unwrap();
 
         assert_eq!(webauthn.get_allowed_origins(), origins);
