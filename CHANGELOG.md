@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/yoramdelangen/lirox-notes/compare/v0.1.1...v0.2.0) (2026-11-02)
+
+
+### Features
+
+* **editor:** start the cursor after the first line's heading marker ([d9a7074](https://github.com/yoramdelangen/lirox-notes/commit/d9a7074fd2344b04750b8fa52dd3ce209e583953))
+
 ## [0.1.1](https://github.com/yoramdelangen/lirox-notes/compare/v0.1.0...v0.1.1) (2026-11-02)
 
 
