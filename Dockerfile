@@ -51,12 +51,10 @@ COPY --from=builder --chown=65532:65532 /out/public /app/public
 COPY --from=builder --chown=65532:65532 /out/config /config
 COPY --from=builder --chown=65532:65532 /out/data /data
 
-# Passkeys work at http://localhost:8080 out of the box; override both for
-# any other URL (HTTPS required for anything but localhost).
+# Passkey domains are chosen in the first onboarding step and stored in
+# /config; LIROX_RP_ID / LIROX_RP_ORIGIN override them when set.
 ENV IP=0.0.0.0 \
     PORT=8080 \
-    LIROX_RP_ID=localhost \
-    LIROX_RP_ORIGIN=http://localhost:8080 \
     LIROX_CONFIG_FILE=/config/config \
     LIROX_APP_CONFIG=/config/config.toml \
     LIROX_WORKSPACE_DIR=/data/workspace

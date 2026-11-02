@@ -23,6 +23,8 @@ pub struct BootstrapState {
     pub user: Option<String>,
     pub display_name: Option<String>,
     pub workspace: Option<WorkspaceSummary>,
+    /// The domains passkeys work on; `source == None` until onboarding sets them.
+    pub domains: liroxnotes_shared::DomainsResponse,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -60,6 +62,11 @@ impl BootstrapState {
             user: None,
             display_name: None,
             workspace: None,
+            domains: liroxnotes_shared::DomainsResponse {
+                rp_id: Some("localhost".into()),
+                origins: vec!["http://localhost:8989".into()],
+                source: liroxnotes_shared::DomainSource::Stored,
+            },
         }
     }
 }
@@ -67,6 +74,7 @@ impl BootstrapState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     Loading,
+    ConfigureDomains,
     RegisterPasskey,
     WorkspaceSetup,
     CreatingWorkspace,
@@ -83,6 +91,7 @@ pub enum AuthOperation {
     LoggingOut,
     CreatingWorkspace,
     InspectingRepository,
+    ConfiguringDomains,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -98,6 +107,8 @@ pub struct SetupFields {
     pub branch: String,
     pub path: String,
     pub remote: bool,
+    /// Origins entered on the domain step; prefilled with the browser's.
+    pub domains: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -141,6 +152,7 @@ impl Default for SetupFields {
             branch: "main".into(),
             path: String::new(),
             remote: false,
+            domains: Vec::new(),
         }
     }
 }
@@ -174,7 +186,11 @@ impl Default for AuthState {
 
 pub fn screen_for(bootstrap: &BootstrapState) -> Screen {
     if bootstrap.onboarding == OnboardingStatus::NotStarted {
-        return Screen::RegisterPasskey;
+        return if bootstrap.domains.source == liroxnotes_shared::DomainSource::None {
+            Screen::ConfigureDomains
+        } else {
+            Screen::RegisterPasskey
+        };
     }
     if bootstrap.onboarding == OnboardingStatus::WorkspaceRequired {
         return if bootstrap.authenticated {
@@ -188,6 +204,14 @@ pub fn screen_for(bootstrap: &BootstrapState) -> Screen {
     } else {
         Screen::Login
     }
+}
+
+/// Whether `origin` (the page's) is in `domains`, ignoring case, surrounding
+/// whitespace and a trailing slash.
+pub fn includes_origin(domains: &[String], origin: &str) -> bool {
+    let normalize = |value: &str| value.trim().trim_end_matches('/').to_ascii_lowercase();
+    let origin = normalize(origin);
+    domains.iter().any(|domain| normalize(domain) == origin)
 }
 
 pub fn slug_from_name(value: &str) -> String {
@@ -233,6 +257,62 @@ pub(crate) fn dispatch_auth(
 mod tests {
     use super::*;
     use crate::app::{ApplicationEvent, AuthEvent};
+
+    #[test]
+    fn unconfigured_domains_are_asked_before_the_passkey() {
+        let mut bootstrap = BootstrapState::not_started();
+        bootstrap.domains.source = liroxnotes_shared::DomainSource::None;
+        assert_eq!(screen_for(&bootstrap), Screen::ConfigureDomains);
+
+        for source in [
+            liroxnotes_shared::DomainSource::Stored,
+            liroxnotes_shared::DomainSource::Environment,
+        ] {
+            bootstrap.domains.source = source;
+            assert_eq!(screen_for(&bootstrap), Screen::RegisterPasskey);
+        }
+    }
+
+    #[test]
+    fn the_current_origin_must_be_among_the_domains() {
+        let domains = vec![" https://Notes.example.com/ ".to_string()];
+        assert!(includes_origin(&domains, "https://notes.example.com"));
+        assert!(!includes_origin(&domains, "https://notes.example.com:6789"));
+        assert!(!includes_origin(&[], "http://localhost:8989"));
+    }
+
+    #[test]
+    fn a_rejected_domain_list_keeps_the_domain_step_open() {
+        let mut state = crate::app::ApplicationState::empty();
+        let mut bootstrap = BootstrapState::not_started();
+        bootstrap.domains.source = liroxnotes_shared::DomainSource::None;
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(bootstrap)),
+        );
+        let effects = crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::ConfigureDomains(vec![
+                "http://localhost:8989".into()
+            ])),
+        );
+        assert_eq!(
+            effects,
+            vec![crate::app::Effect::ConfigureDomains(vec![
+                "http://localhost:8989".into()
+            ])]
+        );
+        assert_eq!(state.auth.operation, AuthOperation::ConfiguringDomains);
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::OperationFailed("bad domain".into())),
+        );
+
+        assert_eq!(state.auth.screen, Screen::ConfigureDomains);
+        assert_eq!(state.auth.failure.as_deref(), Some("bad domain"));
+        assert_eq!(state.auth.operation, AuthOperation::None);
+    }
 
     #[test]
     fn bootstrap_state_selects_the_correct_screen() {

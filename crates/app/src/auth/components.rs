@@ -1,4 +1,6 @@
-use super::{dispatch_auth, slug_from_name, AuthOperation, AuthState, Screen, SetupStep};
+use super::{
+    dispatch_auth, includes_origin, slug_from_name, AuthOperation, AuthState, Screen, SetupStep,
+};
 use crate::{app::AuthCommand, AppContext};
 use dioxus::prelude::*;
 
@@ -43,6 +45,102 @@ fn step_label(step: SetupStep) -> &'static str {
         | SetupStep::ConnectRepository
         | SetupStep::ExistingWorkspace => "2/3",
         SetupStep::Finish => "3/3",
+    }
+}
+
+/// The origin of the page, e.g. `https://notes.example.com:6789`.
+fn current_origin() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|window| window.location().origin().ok())
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    String::new()
+}
+
+/// First onboarding step: where LiroxNotes is opened, which decides where the
+/// passkey works. Prefilled with the browser's own address.
+#[component]
+fn DomainsForm(auth: AuthState) -> Element {
+    let context = use_context::<AppContext>();
+    let state = context.state;
+    let dispatcher = context.dispatcher.clone();
+    let current = use_hook(current_origin);
+    let initial = auth.setup.domains.clone();
+    let prefill = current.clone();
+    let mut domains = use_signal(move || {
+        if initial.is_empty() {
+            vec![prefill]
+        } else {
+            initial
+        }
+    });
+    let busy = auth.operation != AuthOperation::None;
+    let includes_current = current.is_empty() || includes_origin(&domains(), &current);
+    let rows = domains().len();
+    rsx! {
+        OnboardingFrame { title: "Lirox Notes", legend: "Onboarding ─ Domains",
+            form {
+                class: "flex flex-col gap-[14px]",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    dispatch_auth(state, dispatcher.clone(), AuthCommand::ConfigureDomains(domains()));
+                },
+                p { "Where will you open LiroxNotes? Your passkey only works on these addresses." }
+                for (index, origin) in domains().into_iter().enumerate() {
+                    div { key: "{index}", class: "flex gap-2",
+                        input {
+                            class: "lx-input flex-1",
+                            style: "font-size: 12.5px",
+                            required: true,
+                            autofocus: index == 0,
+                            autocomplete: "off",
+                            spellcheck: "false",
+                            aria_label: "Domain {index + 1}",
+                            placeholder: "https://notes.example.com",
+                            value: "{origin}",
+                            oninput: move |event: FormEvent| domains.write()[index] = event.value(),
+                        }
+                        button {
+                            class: "lx-btn",
+                            r#type: "button",
+                            disabled: busy || rows == 1,
+                            aria_label: "Remove domain {index + 1}",
+                            onclick: move |_| {
+                                domains.write().remove(index);
+                            },
+                            "×"
+                        }
+                    }
+                }
+                button {
+                    class: "lx-btn",
+                    r#type: "button",
+                    disabled: busy,
+                    onclick: move |_| domains.write().push(String::new()),
+                    "+ add domain"
+                }
+                if !includes_current {
+                    div { class: "lx-error", role: "alert",
+                        "! keep {current} in the list: your passkey is created on this address"
+                    }
+                }
+                if let Some(error) = auth.failure.as_deref() {
+                    div { class: "lx-error", role: "alert", "! {error}" }
+                }
+                button {
+                    class: "lx-btn-primary",
+                    r#type: "submit",
+                    disabled: busy || !includes_current,
+                    if auth.operation == AuthOperation::ConfiguringDomains { "saving…" } else { "Continue" }
+                }
+                div { class: "lx-hint",
+                    "Use https:// for anything but localhost. Extra domains must be the first one's host or its subdomains."
+                }
+            }
+        }
     }
 }
 
@@ -376,6 +474,7 @@ pub fn AuthShell() -> Element {
                 div { class: "lx-loading", aria_live: "polite", "checking secure access" }
             }
         },
+        Screen::ConfigureDomains => rsx! { DomainsForm { auth: auth.clone() } },
         Screen::RegisterPasskey => {
             let passkey_exists = auth
                 .bootstrap

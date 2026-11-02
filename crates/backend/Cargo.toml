@@ -17,6 +17,7 @@ uuid.workspace = true
 webauthn-rs.workspace = true
 git2.workspace = true
 openssl = { version = "0.10", optional = true }
+url = "2"
 
 [features]
 # Statically link libgit2, libssh2 and OpenSSL (release/container builds).

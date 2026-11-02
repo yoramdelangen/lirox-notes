@@ -51,15 +51,19 @@ podman run -d --name liroxnotes -p 8080:8080 \
 setup with secrets. Build the image yourself with `just image` (and run it with
 `just image-run`).
 
-Passkeys only work over HTTPS, or over plain HTTP at `http://localhost`. Behind
-a reverse proxy, set `LIROX_RP_ID` to the host name and `LIROX_RP_ORIGIN` to
-the exact URL users open (for example `notes.example.com` and
-`https://notes.example.com`).
+The first onboarding screen asks where you open LiroxNotes, prefilled with the
+address in your browser (port included), and stores it in `/config`. Your
+passkey only works on those domains. Passkeys need HTTPS, except on
+`http://localhost`; behind a tunnel or reverse proxy, open the public
+`https://` URL for onboarding. Extra domains must be the first domain's host
+(another port) or one of its subdomains. To pin the domains from the outside
+instead, set `LIROX_RP_ORIGIN` (and optionally `LIROX_RP_ID`); onboarding then
+skips the domain step.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LIROX_RP_ID` | `localhost` | WebAuthn relying-party ID (the host name users open). |
-| `LIROX_RP_ORIGIN` | `http://localhost:8080` | Allowed origin(s), comma-separated; must match the URL exactly, port included. |
+| `LIROX_RP_ORIGIN` | — | Overrides the onboarding domains: allowed origin(s), comma-separated, exact including port. |
+| `LIROX_RP_ID` | first origin's host | Overrides the passkey domain (RP ID). |
 | `LIROX_SESSION_TTL_SECONDS` | 30 days | Session lifetime. |
 | `IP` / `PORT` | `0.0.0.0` / `8080` | Listen address. |
 | `LIROX_CONFIG_FILE` | `/config/config` | Application config (workspaces). |
@@ -71,12 +75,7 @@ the exact URL users open (for example `notes.example.com` and
 | `LIROX_GIT_USERNAME` | `x-access-token` | Username sent with the token. |
 | `LIROX_GIT_TOKEN_HOSTS` | `github.com` | Hosts (comma-separated) that may receive the token. |
 
-The image defaults the two `LIROX_RP_*` variables to `http://localhost:8080`.
-The bare release binary falls back to the development origins
-(`http://localhost:8989`, `http://localhost:3010`) and logs a warning at
-startup when `LIROX_RP_ORIGIN` is unset.
-
-Volumes: `/config` holds the app config, sessions and passkeys; `/data` holds
+Volumes: `/config` holds the app config, domains, sessions and passkeys; `/data` holds
 the cloned repositories. Both are owned by uid/gid 65532.
 
 ### Git credentials
