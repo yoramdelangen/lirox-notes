@@ -8,7 +8,7 @@ use git2::{
     CertificateCheckStatus, ConfigLevel, Cred, CredentialType, ErrorCode, FetchOptions,
     PushOptions, RemoteCallbacks, Repository, StatusOptions,
 };
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 use std::{
     cell::{Cell, RefCell},
@@ -685,7 +685,7 @@ pub fn pull_ff_only(path: &Path, branch: &str, env: &GitEnv) -> io::Result<()> {
 mod tests {
     use super::*;
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha1::Sha1;
     use std::path::{Path, PathBuf};
 
