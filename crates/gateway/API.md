@@ -64,7 +64,17 @@ are async and return `Result<result, ServerFnError>`.
 
 Protected workspace functions return an authentication error before reading or
 mutating workspace data. Invalid note paths are rejected before filesystem
-access. Invalid setup, repository, contrast, or challenge inputs return a
+access.
+
+A valid note path (for `save_document`, `read_workspace_file`,
+`delete_workspace_file`) is relative, ends in `.md`, and is made of plain
+`/`-separated segments: no empty, `.` or `..` segments, no segment starting
+with `.` (so `.git/` and config files are unreachable), no backslashes and no
+control characters. It is resolved inside the active workspace's folder, and
+the request is refused if the note or any folder on its path is a symlink.
+`read_workspace_file` and `delete_workspace_file` refuse with 400 "invalid
+note path"; `save_document` refuses with 400 "could not save note". The
+workspace view and tree skip hidden entries and symlinks. Invalid setup, repository, contrast, or challenge inputs return a
 client-safe error; storage and configuration failures return a generic server
 error. Challenge records remain short-lived, single-use, and persisted in the
 existing format.

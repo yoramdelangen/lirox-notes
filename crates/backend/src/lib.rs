@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     env, fs,
     io::Write,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 
@@ -351,22 +351,21 @@ fn mark_onboarding_complete_unlocked(paths: &RuntimePaths) -> std::io::Result<()
     writeln!(file, "onboarding_complete=true")
 }
 
+/// A relative `.md` path whose segments are all plain names: no `..`, `.`,
+/// hidden (`.git`, `.lirox.toml`) or empty segments, backslashes or control
+/// characters. This is lexical only; `workspace::resolve_note_path` also
+/// refuses symlinks on disk.
 pub fn safe_note_path(path: &str) -> Option<PathBuf> {
-    if path.is_empty() || !path.ends_with(".md") {
-        return None;
-    }
-
-    let path = Path::new(path);
-    if path.is_absolute() {
+    if !path.ends_with(".md") || path.contains('\\') || path.chars().any(char::is_control) {
         return None;
     }
 
     let mut clean = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => clean.push(part),
-            _ => return None,
+    for segment in path.split('/') {
+        if segment.is_empty() || segment.starts_with('.') {
+            return None;
         }
+        clean.push(segment);
     }
 
     Some(clean)
