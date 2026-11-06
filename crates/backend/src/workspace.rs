@@ -619,6 +619,41 @@ pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::
     commit_note_paths(&notes, &changed_paths)
 }
 
+/// Writes a new note, refusing to overwrite a note or to sit next to a
+/// folder of the same name. The file name must be a slug (`my-note.md`);
+/// folders on the way may have any safe name.
+pub fn create_note(config: &GatewayConfig, path: &str, body: String) -> std::io::Result<bool> {
+    let (_, relative, absolute) = note_location(config, path)?;
+    let name = relative
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !is_slug(name.trim_end_matches(".md")) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "note names use lowercase letters, numbers and dashes",
+        ));
+    }
+    if fs::symlink_metadata(&absolute).is_ok() || absolute.with_extension("").exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("`{path}` already exists"),
+        ));
+    }
+    save_note_body(config, path, body)
+}
+
+/// `[a-z0-9]+(-[a-z0-9]+)*`
+fn is_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
 pub fn delete_note_file(config: &GatewayConfig, path: &str) -> std::io::Result<bool> {
     let (notes, relative, absolute) = note_location(config, path)?;
     if !absolute.is_file() {
