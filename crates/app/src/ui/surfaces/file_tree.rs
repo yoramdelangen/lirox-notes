@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use liroxnotes_shared::WorkspaceView;
 
 use crate::{
-    app::{AuthCommand, Popover, SidebarTab},
+    app::{draft_path, AuthCommand, NoteDraft, Popover, SidebarTab},
     command::{CommandArgs, SurfaceId},
     input::InputMode,
     theme::{active_preset_id, theme_presets},
@@ -33,8 +33,12 @@ pub fn FileTreeSurface(
     // Take keyboard focus when the tree becomes the active surface (⌘\), so
     // j/k/h/l reach the shell's keymap instead of the editor.
     let mut element = use_signal(|| None::<std::rc::Rc<MountedData>>);
-    let tree_active =
-        use_memo(move || state.read().workspace.focus.active_surface == SurfaceId::FILE_TREE);
+    // While the new-note row is open its input holds focus; the tree takes it
+    // back when the row closes.
+    let tree_active = use_memo(move || {
+        let state = state.read();
+        state.workspace.focus.active_surface == SurfaceId::FILE_TREE && state.ui.new_note.is_none()
+    });
     use_effect(move || {
         if tree_active() {
             if let Some(element) = element() {
@@ -78,6 +82,7 @@ fn SidebarHeader(view: WorkspaceView, in_sheet: bool, popover: Option<Popover>) 
     let close = context.clone();
     let workspaces = context.clone();
     let git = context.clone();
+    let new_note = context.clone();
     let changed = view.changed_notes;
 
     rsx! {
@@ -102,6 +107,14 @@ fn SidebarHeader(view: WorkspaceView, in_sheet: bool, popover: Option<Popover>) 
                 span { class: "lx-tool-caret", "▾" }
             }
             div { style: "flex: 1" }
+            button {
+                class: "lx-icon-btn",
+                r#type: "button",
+                aria_label: "New note",
+                title: "New note (a)",
+                onclick: move |_| run(&new_note, "file_tree.new_note", text("")),
+                "+"
+            }
             button {
                 r#type: "button",
                 class: if popover == Some(Popover::Git) { "lx-chip lx-chip-git is-open" } else { "lx-chip lx-chip-git" },
@@ -297,7 +310,7 @@ fn FileTreeList(
     on_select_note: Option<EventHandler<String>>,
 ) -> Element {
     let context = use_context::<AppContext>();
-    let (rows, current, cursor) = {
+    let (rows, current, cursor, draft) = {
         let state = context.state.read();
         let rows = tree_rows(&view.tree, &state.ui.collapsed);
         let cursor = (!state.ui.touch
@@ -310,14 +323,34 @@ fn FileTreeList(
                     .map(str::to_string)
             })
             .flatten();
-        (rows, state.domain.selected_note.clone(), cursor)
+        (
+            rows,
+            state.domain.selected_note.clone(),
+            cursor,
+            state.ui.new_note.clone(),
+        )
     };
     let _ = active;
+    // The draft row goes right below the row it was made from, one level
+    // deeper; a root draft goes first.
+    let anchor = draft.as_ref().map(|draft| {
+        draft
+            .child_of
+            .clone()
+            .unwrap_or_else(|| draft.folder.clone())
+    });
+    let at_root = anchor.as_deref() == Some("")
+        || anchor
+            .as_ref()
+            .is_some_and(|anchor| !rows.iter().any(|row| &row.path == anchor));
 
     rsx! {
         div { class: "lx-tree", role: "tree",
             div { class: "lx-tree-root", "~/{view.slug}" }
-            if rows.is_empty() {
+            if let Some(draft) = draft.clone().filter(|_| at_root) {
+                NoteDraftRow { draft, tree: view.tree.clone(), guide: "├─ ".to_string() }
+            }
+            if rows.is_empty() && draft.is_none() {
                 div { class: "lx-hint", style: "padding: 4px 16px", "no notes yet" }
             }
             for row in rows {
@@ -332,6 +365,10 @@ fn FileTreeList(
                         (false, false) => "lx-tree-row",
                     };
                     let path = row.path.clone();
+                    let draft_here = draft
+                        .clone()
+                        .filter(|_| !at_root && anchor.as_deref() == Some(row.path.as_str()));
+                    let draft_guide = format!("{}└─ ", " ".repeat(row.guide.chars().count()));
                     rsx! {
                         button {
                             key: "{row.path}",
@@ -361,7 +398,78 @@ fn FileTreeList(
                                 span { class: "lx-file", "{row.name}" }
                             }
                         }
+                        if let Some(draft) = draft_here {
+                            NoteDraftRow { draft, tree: view.tree.clone(), guide: draft_guide }
+                        }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// The inline row for naming a new note: the title input, the file name it
+/// becomes, and why it cannot be created.
+#[component]
+fn NoteDraftRow(
+    draft: NoteDraft,
+    tree: Vec<liroxnotes_shared::TreeEntry>,
+    guide: String,
+) -> Element {
+    let context = use_context::<AppContext>();
+    let input = context.clone();
+    let keys = context.clone();
+    let blur = context.clone();
+    let preview = draft_path(&draft, &tree).ok();
+    let pending = draft.pending;
+    let class = if pending {
+        "lx-tree-row is-draft is-pending"
+    } else {
+        "lx-tree-row is-draft"
+    };
+
+    rsx! {
+        div { class, role: "treeitem",
+            span { class: "lx-guide", "{guide}" }
+            div { class: "lx-draft",
+                input {
+                    r#type: "text",
+                    class: "lx-draft-input",
+                    aria_label: "New note title",
+                    aria_describedby: "lx-draft-message",
+                    aria_invalid: "{draft.error.is_some()}",
+                    placeholder: "Note title",
+                    autocomplete: "off",
+                    spellcheck: "false",
+                    readonly: pending,
+                    value: "{draft.title}",
+                    onmounted: move |event| async move {
+                        let _ = event.data().set_focus(true).await;
+                    },
+                    oninput: move |event| run(&input, "file_tree.new_note_input", text(event.value())),
+                    onkeydown: move |event| match event.key() {
+                        Key::Enter => {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            run(&keys, "file_tree.confirm_new_note", CommandArgs::None);
+                        }
+                        Key::Escape => {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            run(&keys, "file_tree.cancel_new_note", CommandArgs::None);
+                        }
+                        _ => {}
+                    },
+                    onblur: move |_| {
+                        if !pending {
+                            run(&blur, "file_tree.cancel_new_note", CommandArgs::None);
+                        }
+                    },
+                }
+                if let Some(error) = draft.error.clone() {
+                    div { id: "lx-draft-message", class: "lx-error", role: "alert", "{error}" }
+                } else if let Some(path) = preview {
+                    div { id: "lx-draft-message", class: "lx-tree-hint", "→ {path}" }
                 }
             }
         }

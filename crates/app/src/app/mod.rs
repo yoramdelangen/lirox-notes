@@ -14,7 +14,7 @@ pub(crate) use effects::{
 pub use event::{
     ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, ThemeEvent, WorkspaceEvent,
 };
-pub use new_note::NoteDraft;
+pub use new_note::{draft_path, NoteDraft};
 pub(crate) use reducer::effective_vim;
 pub use reducer::{apply_event, Effect};
 pub use state::{
@@ -735,5 +735,52 @@ mod tests {
         assert!(
             matches!(result, ResolveResult::Matched(invocation) if invocation.id.as_str() == "file_tree.new_note")
         );
+    }
+
+    #[test]
+    fn a_draft_expands_every_ancestor_folder() {
+        use liroxnotes_shared::{TreeEntry, TreeKind};
+        let mut state = workspace_with_tree();
+        let tree = &mut state.auth.workspace.as_mut().unwrap().tree;
+        for (kind, path, depth) in [
+            (TreeKind::Folder, "a", 0),
+            (TreeKind::Folder, "a/b", 1),
+            (TreeKind::File, "a/b/c.md", 2),
+        ] {
+            tree.push(TreeEntry {
+                kind,
+                label: path.rsplit('/').next().unwrap().into(),
+                path: path.into(),
+                depth,
+                active: false,
+            });
+        }
+        state.ui.collapsed.insert("a".into());
+        state.ui.collapsed.insert("a/b".into());
+        state.ui.collapsed.insert("other".into());
+
+        dispatch(
+            &mut state,
+            command_with("file_tree.new_note", CommandArgs::Text("a/b/c.md".into())),
+        );
+
+        assert!(!state.ui.collapsed.contains("a"));
+        assert!(!state.ui.collapsed.contains("a/b"));
+        assert!(state.ui.collapsed.contains("other"));
+    }
+
+    #[test]
+    fn palette_new_note_keeps_focus_in_the_tree() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("ui.open_palette"));
+        dispatch(
+            &mut state,
+            command_with("ui.palette_query", CommandArgs::Text(">new note".into())),
+        );
+
+        let effects = dispatch(&mut state, command("ui.palette_accept"));
+
+        assert!(state.ui.new_note.is_some());
+        assert!(!effects.contains(&Effect::EditorFocus));
     }
 }

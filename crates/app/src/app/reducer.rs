@@ -538,7 +538,8 @@ fn reduce_command(state: &mut ApplicationState, invocation: CommandInvocation) -
                     source: crate::command::CommandSource::CommandPalette,
                 },
             );
-            if !effects.contains(&Effect::EditorFocus) {
+            // A new-note row keeps focus for its title input.
+            if state.ui.new_note.is_none() && !effects.contains(&Effect::EditorFocus) {
                 effects.push(Effect::EditorFocus);
             }
             effects
@@ -972,7 +973,12 @@ fn open_note_draft(state: &mut ApplicationState, draft: super::NoteDraft) -> Vec
     state.ui.palette = None;
     state.workspace.focus.active_surface = crate::command::SurfaceId::FILE_TREE;
     state.input.mode = InputMode::Normal;
-    state.ui.collapsed.remove(&draft.folder);
+    // Expand the folder and every folder above it so the row is visible.
+    let mut folder = draft.folder.as_str();
+    while !folder.is_empty() {
+        state.ui.collapsed.remove(folder);
+        folder = folder.rsplit_once('/').map_or("", |(parent, _)| parent);
+    }
     state.ui.new_note = Some(draft);
     Vec::new()
 }
