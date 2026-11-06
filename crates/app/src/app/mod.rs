@@ -1,6 +1,7 @@
 mod dispatcher;
 mod effects;
 mod event;
+mod new_note;
 mod reducer;
 mod state;
 
@@ -13,6 +14,7 @@ pub(crate) use effects::{
 pub use event::{
     ApplicationEvent, AuthCommand, AuthEvent, StatusEvent, ThemeEvent, WorkspaceEvent,
 };
+pub use new_note::NoteDraft;
 pub(crate) use reducer::effective_vim;
 pub use reducer::{apply_event, Effect};
 pub use state::{
