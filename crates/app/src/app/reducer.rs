@@ -797,6 +797,19 @@ fn reduce_command(state: &mut ApplicationState, invocation: CommandInvocation) -
             state.ui.new_note = None;
             Vec::new()
         }
+        // Leaving the input (another window, a click elsewhere) keeps a
+        // started title; only an empty draft goes away.
+        "file_tree.blur_new_note" => {
+            if state
+                .ui
+                .new_note
+                .as_ref()
+                .is_some_and(|draft| !draft.pending && draft.title.trim().is_empty())
+            {
+                state.ui.new_note = None;
+            }
+            Vec::new()
+        }
         "editor.save" => save_document(state),
         _ => {
             state.status.message = Some(format!("Unknown command: {id}"));

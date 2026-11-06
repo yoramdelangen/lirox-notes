@@ -783,4 +783,26 @@ mod tests {
         assert!(state.ui.new_note.is_some());
         assert!(!effects.contains(&Effect::EditorFocus));
     }
+
+    #[test]
+    fn blur_keeps_a_draft_with_a_title() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.new_note"));
+        typed(&mut state, "Half typed");
+
+        dispatch(&mut state, command("file_tree.blur_new_note"));
+
+        assert_eq!(state.ui.new_note.as_ref().unwrap().title, "Half typed");
+    }
+
+    #[test]
+    fn blur_drops_an_empty_draft() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.new_note"));
+        typed(&mut state, "   ");
+
+        dispatch(&mut state, command("file_tree.blur_new_note"));
+
+        assert_eq!(state.ui.new_note, None);
+    }
 }

@@ -111,25 +111,54 @@ pub fn is_editable_control(_event: &KeyboardEvent) -> bool {
 /// Typing in an editable control is left alone, except for Escape and
 /// ⌘/Ctrl chords, which stay available as application shortcuts.
 pub fn should_intercept(event: &KeyboardEvent) -> bool {
-    !is_editable_control(event)
-        || normalize_keyboard_event(event).is_some_and(|event| {
-            matches!(
-                event,
-                InputEvent::Key(KeyStroke {
-                    key: Key::Escape,
-                    ..
-                }) | InputEvent::Key(KeyStroke {
-                    modifiers: Modifiers { ctrl: true, .. } | Modifiers { meta: true, .. },
-                    ..
-                })
-            )
-        })
+    normalize_keyboard_event(event).is_some_and(|input| match input {
+        InputEvent::Key(stroke) => routes_to_keymap(&stroke, is_editable_control(event)),
+    })
+}
+
+/// Whether a key goes to the keymap: always, unless the user is typing in a
+/// text field, where only Escape and ⌘/Ctrl chords do.
+pub fn routes_to_keymap(stroke: &KeyStroke, typing: bool) -> bool {
+    !typing
+        || stroke.key == Key::Escape
+        || matches!(
+            stroke.modifiers,
+            Modifiers { ctrl: true, .. } | Modifiers { meta: true, .. }
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use dioxus::html::{Key as BrowserKey, Modifiers as BrowserModifiers};
+
+    #[test]
+    fn typing_in_a_text_field_only_routes_escape_and_chords() {
+        let plain = |key| KeyStroke::new(key, Modifiers::NONE);
+        for key in [
+            Key::Char('a'),
+            Key::Char('j'),
+            Key::Char('q'),
+            Key::Char(' '),
+            Key::Char('?'),
+        ] {
+            assert!(!routes_to_keymap(&plain(key.clone()), true), "{key:?}");
+            assert!(routes_to_keymap(&plain(key), false));
+        }
+        assert!(routes_to_keymap(&plain(Key::Escape), true));
+        let chord = |ctrl, meta| {
+            KeyStroke::new(
+                Key::Char('k'),
+                Modifiers {
+                    ctrl,
+                    meta,
+                    ..Modifiers::NONE
+                },
+            )
+        };
+        assert!(routes_to_keymap(&chord(true, false), true));
+        assert!(routes_to_keymap(&chord(false, true), true));
+    }
 
     #[test]
     fn normalizes_plain_character() {

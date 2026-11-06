@@ -460,11 +460,7 @@ fn NoteDraftRow(
                         }
                         _ => {}
                     },
-                    onblur: move |_| {
-                        if !pending {
-                            run(&blur, "file_tree.cancel_new_note", CommandArgs::None);
-                        }
-                    },
+                    onblur: move |_| run(&blur, "file_tree.blur_new_note", CommandArgs::None),
                 }
                 if let Some(error) = draft.error.clone() {
                     div { id: "lx-draft-message", class: "lx-error", role: "alert", "{error}" }
