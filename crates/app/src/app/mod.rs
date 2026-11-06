@@ -535,4 +535,205 @@ mod tests {
             .iter()
             .any(|effect| matches!(effect, Effect::SaveEditorOptions { .. })));
     }
+
+    fn select_in_tree(state: &mut ApplicationState, path: &str) {
+        state.workspace.focus.active_surface = SurfaceId::FILE_TREE;
+        if let Some(surface) = state.workspace.surface_mut(SurfaceId::FILE_TREE) {
+            surface.select(path.to_string());
+        }
+    }
+
+    fn typed(state: &mut ApplicationState, title: &str) {
+        dispatch(
+            state,
+            command_with("file_tree.new_note_input", CommandArgs::Text(title.into())),
+        );
+    }
+
+    #[test]
+    fn new_note_on_a_folder_opens_a_draft_there() {
+        let mut state = workspace_with_tree();
+        state.ui.collapsed.insert("work".into());
+        select_in_tree(&mut state, "work");
+
+        assert!(dispatch(&mut state, command("file_tree.new_note")).is_empty());
+
+        assert_eq!(state.ui.new_note.as_ref().unwrap().folder, "work");
+        assert!(state.workspace.layout.contains(SurfaceId::FILE_TREE));
+        assert!(!state.ui.collapsed.contains("work"));
+    }
+
+    #[test]
+    fn confirming_a_draft_creates_the_slugified_note() {
+        let mut state = workspace_with_tree();
+        select_in_tree(&mut state, "work");
+        dispatch(&mut state, command("file_tree.new_note"));
+        typed(&mut state, "Meeting notes Q4");
+
+        let effects = dispatch(&mut state, command("file_tree.confirm_new_note"));
+
+        assert_eq!(
+            effects,
+            vec![Effect::CreateNote {
+                path: "work/meeting-notes-q4.md".into(),
+                content: "# Meeting notes Q4\n".into(),
+            }]
+        );
+        assert!(state.ui.new_note.as_ref().unwrap().pending);
+    }
+
+    #[test]
+    fn child_note_on_a_file_targets_its_folder() {
+        let mut state = workspace_with_tree();
+        dispatch(
+            &mut state,
+            command_with("file_tree.new_note", CommandArgs::Text("b.md".into())),
+        );
+        typed(&mut state, "Plan");
+
+        let effects = dispatch(&mut state, command("file_tree.confirm_new_note"));
+
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::CreateNote { path, .. }] if path == "b/plan.md"
+        ));
+    }
+
+    #[test]
+    fn collision_keeps_the_draft_open() {
+        let mut state = workspace_with_tree();
+        dispatch(
+            &mut state,
+            command_with("file_tree.new_note", CommandArgs::Text(String::new())),
+        );
+        typed(&mut state, "B");
+
+        assert!(dispatch(&mut state, command("file_tree.confirm_new_note")).is_empty());
+
+        let draft = state.ui.new_note.as_ref().unwrap();
+        assert_eq!(draft.error.as_deref(), Some("`b.md` already exists"));
+        assert_eq!(draft.title, "B");
+        assert!(!draft.pending);
+    }
+
+    #[test]
+    fn second_confirm_while_pending_is_ignored() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.new_note"));
+        typed(&mut state, "Fresh");
+
+        assert_eq!(
+            dispatch(&mut state, command("file_tree.confirm_new_note")).len(),
+            1
+        );
+        assert!(dispatch(&mut state, command("file_tree.confirm_new_note")).is_empty());
+    }
+
+    #[test]
+    fn server_refusal_returns_the_draft() {
+        let mut state = workspace_with_tree();
+        dispatch(
+            &mut state,
+            command_with("file_tree.new_note", CommandArgs::Text("b.md".into())),
+        );
+        typed(&mut state, "Plan");
+        dispatch(&mut state, command("file_tree.confirm_new_note"));
+
+        apply_event(
+            &mut state,
+            ApplicationEvent::NoteCreateFailed("`b/plan.md` already exists".into()),
+        );
+
+        let draft = state.ui.new_note.as_ref().unwrap();
+        assert!(!draft.pending);
+        assert_eq!(draft.error.as_deref(), Some("`b/plan.md` already exists"));
+        assert_eq!(draft.title, "Plan");
+    }
+
+    #[test]
+    fn created_note_opens_in_the_editor() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.new_note"));
+        let note = liroxnotes_shared::NoteSummary {
+            path: "work/x.md".into(),
+            title: "X".into(),
+            labels: Vec::new(),
+            links: Vec::new(),
+            active: true,
+        };
+        let mut view = liroxnotes_shared::WorkspaceView::empty();
+        view.selected_note = note.clone();
+        view.selected_note_body = "# X\n".into();
+        view.notes = vec![note];
+
+        let effects = apply_event(&mut state, ApplicationEvent::NoteCreated(Box::new(view)));
+
+        assert_eq!(state.ui.new_note, None);
+        assert_eq!(state.domain.selected_note.as_deref(), Some("work/x.md"));
+        assert_eq!(state.workspace.focus.active_surface, SurfaceId::EDITOR);
+        assert!(effects.contains(&Effect::EditorFocus));
+    }
+
+    #[test]
+    fn escape_cancels_only_the_draft() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.new_note"));
+
+        dispatch(&mut state, command("overlay.close_top"));
+
+        assert_eq!(state.ui.new_note, None);
+        assert!(state.workspace.layout.contains(SurfaceId::FILE_TREE));
+    }
+
+    #[test]
+    fn cancel_command_drops_the_draft() {
+        let mut state = workspace_with_tree();
+        dispatch(&mut state, command("file_tree.new_note"));
+
+        dispatch(&mut state, command("file_tree.cancel_new_note"));
+
+        assert_eq!(state.ui.new_note, None);
+    }
+
+    #[test]
+    fn editor_create_note_opens_a_root_draft() {
+        let mut state = workspace_with_tree();
+        select_in_tree(&mut state, "work");
+
+        assert!(dispatch(&mut state, command("editor.create_note")).is_empty());
+
+        let draft = state.ui.new_note.as_ref().unwrap();
+        assert_eq!(draft.folder, "");
+        assert_eq!(draft.child_of, None);
+    }
+
+    #[test]
+    fn palette_new_note_creates_a_sibling() {
+        let mut state = workspace_with_tree();
+        select_in_tree(&mut state, "work/a.md");
+
+        dispatch(&mut state, command("file_tree.new_sibling_note"));
+
+        let draft = state.ui.new_note.as_ref().unwrap();
+        assert_eq!(draft.folder, "work");
+        assert_eq!(draft.child_of, None);
+    }
+
+    #[test]
+    fn a_is_bound_in_the_file_tree() {
+        let mut state = workspace_with_tree();
+        select_in_tree(&mut state, "work");
+        let scopes = state.active_input_scopes();
+
+        let result = resolve(
+            &state.config.keymaps.bindings,
+            &mut state.input,
+            KeyStroke::new(Key::Char('a'), Modifiers::NONE),
+            &scopes,
+        );
+
+        assert!(
+            matches!(result, ResolveResult::Matched(invocation) if invocation.id.as_str() == "file_tree.new_note")
+        );
+    }
 }

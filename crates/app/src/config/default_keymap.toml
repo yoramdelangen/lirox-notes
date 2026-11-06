@@ -66,6 +66,7 @@ k = "file_tree.move_up"
 "<cr>" = "file_tree.open_selected"
 h = "file_tree.collapse"
 l = "file_tree.expand"
+a = "file_tree.new_note"
 q = "workspace.focus_next_surface"
 
 [keymap.menu]

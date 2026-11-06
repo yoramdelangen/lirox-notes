@@ -234,6 +234,11 @@ pub fn palette_items(query: &str, notes: &[String], vim_enabled: bool) -> Vec<Pa
                 "ui.toggle_popover",
                 CommandArgs::Text("git".into()),
             ),
+            (
+                "new note".into(),
+                "file_tree.new_sibling_note",
+                CommandArgs::None,
+            ),
             ("settings".into(), "ui.show_settings", CommandArgs::None),
             ("outline".into(), "ui.toggle_outline", CommandArgs::None),
         ]);
@@ -479,5 +484,13 @@ mod tests {
         assert!(palette_items(">", &[], false)
             .iter()
             .any(|item| item.label == "vim mode: on"));
+    }
+
+    #[test]
+    fn palette_lists_new_note() {
+        let items = palette_items(">new", &[], false);
+        assert!(items
+            .iter()
+            .any(|item| item.command == "file_tree.new_sibling_note"));
     }
 }

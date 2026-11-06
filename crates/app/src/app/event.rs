@@ -10,6 +10,10 @@ pub enum ApplicationEvent {
     Theme(ThemeEvent),
     Status(StatusEvent),
     Auth(AuthEvent),
+    /// The file tree's new note was written; the view selects it.
+    NoteCreated(Box<WorkspaceView>),
+    /// The server refused the new note; the message is shown inline.
+    NoteCreateFailed(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

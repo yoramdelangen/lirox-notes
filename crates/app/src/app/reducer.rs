@@ -13,6 +13,11 @@ use liroxnotes_shared::{TreeKind, WorkspaceTheme};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     OpenCommandPalette,
+    /// Writes a new note; never overwrites.
+    CreateNote {
+        path: String,
+        content: String,
+    },
     SaveDocument {
         path: String,
         content: String,
@@ -77,6 +82,21 @@ pub fn apply_event(state: &mut ApplicationState, event: ApplicationEvent) -> Vec
         ApplicationEvent::Theme(event) => apply_theme_event(state, event),
         ApplicationEvent::ConfigLoaded(source) => return apply_user_config(state, &source),
         ApplicationEvent::Auth(event) => return apply_auth_event(state, event),
+        ApplicationEvent::NoteCreated(view) => {
+            let mut effects = apply_auth_event(state, AuthEvent::WorkspaceLoaded(view));
+            state.ui.new_note = None;
+            state.workspace.focus.active_surface = crate::command::SurfaceId::EDITOR;
+            effects.push(Effect::EditorFocus);
+            return effects;
+        }
+        ApplicationEvent::NoteCreateFailed(message) => {
+            if let Some(draft) = state.ui.new_note.as_mut() {
+                draft.pending = false;
+                draft.error = Some(message);
+            } else {
+                state.status.message = Some(message);
+            }
+        }
     }
     Vec::new()
 }
@@ -747,7 +767,35 @@ fn reduce_command(state: &mut ApplicationState, invocation: CommandInvocation) -
             move_selection(state, direction(&invocation.args, id))
         }
         "file_tree.open_selected" => open_selected(state),
-        "editor.create_note" => create_note(state),
+        "file_tree.new_note" => {
+            let anchor = match &invocation.args {
+                CommandArgs::Text(path) => Some(path.clone()),
+                _ => tree_cursor(state),
+            };
+            let tree = workspace_tree(state);
+            open_note_draft(state, super::new_note::draft_for(&tree, anchor.as_deref()))
+        }
+        "file_tree.new_sibling_note" => {
+            let anchor = tree_cursor(state);
+            open_note_draft(state, super::new_note::sibling_draft(anchor.as_deref()))
+        }
+        "editor.create_note" => open_note_draft(state, super::NoteDraft::default()),
+        "file_tree.new_note_input" => {
+            if let (Some(draft), CommandArgs::Text(title)) =
+                (state.ui.new_note.as_mut(), &invocation.args)
+            {
+                if !draft.pending {
+                    draft.title = title.clone();
+                    draft.error = None;
+                }
+            }
+            Vec::new()
+        }
+        "file_tree.confirm_new_note" => confirm_note_draft(state),
+        "file_tree.cancel_new_note" => {
+            state.ui.new_note = None;
+            Vec::new()
+        }
         "editor.save" => save_document(state),
         _ => {
             state.status.message = Some(format!("Unknown command: {id}"));
@@ -907,20 +955,47 @@ fn save_document(state: &mut ApplicationState) -> Vec<Effect> {
         .collect()
 }
 
-fn create_note(state: &mut ApplicationState) -> Vec<Effect> {
-    let path = "new-note.md".to_string();
-    state.domain.notes.push(crate::domain::Note {
-        path: path.clone(),
-        title: "New Note".into(),
-        body: String::new(),
-    });
-    state.domain.selected_note = Some(path.clone());
-    state.domain.document.clear();
-    state.status.message = Some("New note created".into());
-    vec![Effect::SaveDocument {
-        path,
-        content: String::new(),
-    }]
+fn workspace_tree(state: &ApplicationState) -> Vec<liroxnotes_shared::TreeEntry> {
+    state
+        .auth
+        .workspace
+        .as_ref()
+        .map(|view| view.tree.clone())
+        .unwrap_or_default()
+}
+
+/// Shows the file tree with an inline row for naming a new note.
+fn open_note_draft(state: &mut ApplicationState, draft: super::NoteDraft) -> Vec<Effect> {
+    show_sidebar(state);
+    state.ui.sidebar_tab = SidebarTab::Files;
+    state.ui.popover = None;
+    state.ui.palette = None;
+    state.workspace.focus.active_surface = crate::command::SurfaceId::FILE_TREE;
+    state.input.mode = InputMode::Normal;
+    state.ui.collapsed.remove(&draft.folder);
+    state.ui.new_note = Some(draft);
+    Vec::new()
+}
+
+fn confirm_note_draft(state: &mut ApplicationState) -> Vec<Effect> {
+    let tree = workspace_tree(state);
+    let Some(draft) = state.ui.new_note.as_mut().filter(|draft| !draft.pending) else {
+        return Vec::new();
+    };
+    match super::new_note::draft_path(draft, &tree) {
+        Ok(path) => {
+            draft.pending = true;
+            draft.error = None;
+            vec![Effect::CreateNote {
+                path,
+                content: super::new_note::note_body(&draft.title),
+            }]
+        }
+        Err(error) => {
+            draft.error = Some(error);
+            Vec::new()
+        }
+    }
 }
 
 #[cfg(test)]

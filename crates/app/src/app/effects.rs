@@ -31,7 +31,9 @@ pub(crate) async fn execute_effect(
 
 #[cfg(any(target_arch = "wasm32", feature = "desktop", test))]
 pub(crate) fn auth_error_event(effect: &Effect, message: String) -> ApplicationEvent {
-    if matches!(effect, Effect::SaveWorkspaceTheme { .. }) {
+    if matches!(effect, Effect::CreateNote { .. }) && !message.starts_with("server returned 401") {
+        ApplicationEvent::NoteCreateFailed(message)
+    } else if matches!(effect, Effect::SaveWorkspaceTheme { .. }) {
         ApplicationEvent::Theme(ThemeEvent::SaveFailed(message))
     } else if matches!(
         effect,
@@ -77,6 +79,11 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                     .map_err(server_error_message)?,
             )),
         ))),
+        Effect::CreateNote { path, content } => Ok(Some(ApplicationEvent::NoteCreated(Box::new(
+            server::create_note_server_function(path, content)
+                .await
+                .map_err(refusal_message)?,
+        )))),
         Effect::SaveDocument { path, content } => Ok(Some(ApplicationEvent::Auth(
             AuthEvent::WorkspaceLoaded(Box::new(
                 server::save_document_server_function(path, content)
@@ -280,6 +287,19 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
             )),
         ))),
         _ => Ok(None),
+    }
+}
+
+/// A refused request's own message (400/409), else the generic one.
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
+fn refusal_message(error: dioxus::prelude::ServerFnError) -> String {
+    match error {
+        dioxus::prelude::ServerFnError::ServerError {
+            code: 400 | 409,
+            message,
+            ..
+        } => message,
+        error => server_error_message(error),
     }
 }
 
