@@ -20,6 +20,10 @@ pub use workspace::{
     ExistingWorkspace, RepositoryConfig, RepositoryMetadata, RepositoryWorkspace, WorkspaceSetup,
 };
 
+/// Set by the desktop app to the per-launch secret its window presents as
+/// the `lirox_desktop` cookie; requests carrying it skip passkey sign-in.
+pub const DESKTOP_TOKEN_ENV: &str = "LIROX_DESKTOP_TOKEN";
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimePaths {
     pub config_file: PathBuf,
@@ -311,20 +315,27 @@ fn mark_installed_unlocked(paths: &RuntimePaths, workspace_root: &Path) -> std::
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let completed = match fs::read_to_string(&path) {
-        Ok(contents) => contents
-            .lines()
-            .any(|line| line.trim() == "onboarding_complete=true"),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error),
     };
-    if completed {
+    if contents
+        .lines()
+        .any(|line| line.trim() == "onboarding_complete=true")
+    {
         return Ok(());
     }
+    // The display name is saved before the workspace exists; keep it.
+    let user_name = contents
+        .lines()
+        .find(|line| line.trim_start().starts_with("user_name="))
+        .map(|line| format!("{}\n", line.trim()))
+        .unwrap_or_default();
     fs::write(
         path,
         format!(
-            "installed=true\nworkspace_root={}\n",
+            "installed=true\nworkspace_root={}\n{user_name}",
             workspace_root.display()
         ),
     )
