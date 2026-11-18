@@ -13,9 +13,7 @@ use liroxnotes_backend::{auth as backend_auth, auth::AuthStore, runtime_paths};
 #[server]
 pub async fn bootstrap_server_function() -> Result<crate::auth::BootstrapState, ServerFnError> {
     let paths = runtime_paths();
-    let cookie = dioxus::fullstack::FullstackContext::current()
-        .and_then(|context| context.parts_mut().headers.get("cookie").cloned())
-        .and_then(|value| value.to_str().ok().map(str::to_owned));
+    let cookie = request_cookie();
     let session = cookie
         .as_deref()
         .and_then(session_token_from_cookie)
@@ -24,10 +22,26 @@ pub async fn bootstrap_server_function() -> Result<crate::auth::BootstrapState, 
         .map_err(|_| ServerFnError::new("authentication storage unavailable"))?
         .flatten();
 
+    // The desktop app has no passkey step: its window is the only user, so
+    // the installation counts as done and onboarding resumes at the workspace.
+    let desktop = cookie.as_deref().is_some_and(is_desktop_session);
+    if desktop
+        && !liroxnotes_backend::is_installed(&paths)
+            .map_err(|_| ServerFnError::new("could not load application setup"))?
+    {
+        liroxnotes_backend::mark_installed(
+            &paths,
+            &liroxnotes_backend::default_workspace_root(&paths),
+        )
+        .map_err(|_| ServerFnError::new("could not save installation"))?;
+    }
+
     let response = backend_auth::bootstrap_response(
         &paths,
-        session.is_some(),
-        session.map(|session| session.user),
+        session.is_some() || desktop,
+        session
+            .map(|session| session.user)
+            .or_else(|| desktop.then(|| "local".to_string())),
     )
     .map_err(|_| ServerFnError::new("could not load application setup"))?;
     Ok(client_bootstrap_state(response))
@@ -467,10 +481,12 @@ pub async fn setup_installation_server_function(
     user_name: Option<String>,
 ) -> Result<(), ServerFnError> {
     let paths = authenticated_paths()?;
-    if AuthStore::new(paths.clone())
-        .load_account()
-        .map_err(|_| internal_error("authentication storage unavailable"))?
-        .is_none()
+    let desktop = request_cookie().as_deref().is_some_and(is_desktop_session);
+    if !desktop
+        && AuthStore::new(paths.clone())
+            .load_account()
+            .map_err(|_| internal_error("authentication storage unavailable"))?
+            .is_none()
     {
         return Err(client_error(400, "passkey registration required"));
     }
@@ -486,9 +502,10 @@ pub async fn setup_installation_server_function(
 #[cfg(feature = "server")]
 fn authenticated_paths() -> Result<liroxnotes_backend::RuntimePaths, ServerFnError> {
     let paths = runtime_paths();
-    let cookie = FullstackContext::current()
-        .and_then(|context| context.parts_mut().headers.get("cookie").cloned())
-        .and_then(|value| value.to_str().ok().map(str::to_owned));
+    let cookie = request_cookie();
+    if cookie.as_deref().is_some_and(is_desktop_session) {
+        return Ok(paths);
+    }
     let session = cookie
         .as_deref()
         .and_then(session_token_from_cookie)
@@ -592,17 +609,62 @@ fn client_bootstrap_state(
     }
 }
 
+#[cfg(feature = "server")]
+fn request_cookie() -> Option<String> {
+    FullstackContext::current()
+        .and_then(|context| context.parts_mut().headers.get("cookie").cloned())
+        .and_then(|value| value.to_str().ok().map(str::to_owned))
+}
+
+#[cfg(feature = "server")]
+fn is_desktop_session(cookie: &str) -> bool {
+    std::env::var(liroxnotes_backend::DESKTOP_TOKEN_ENV)
+        .is_ok_and(|token| desktop_cookie_matches(cookie, &token))
+}
+
 #[cfg(any(feature = "server", test))]
-fn session_token_from_cookie(cookie: &str) -> Option<&str> {
+fn cookie_value<'a>(cookie: &'a str, wanted: &str) -> Option<&'a str> {
     cookie.split(';').find_map(|part| {
         let (name, value) = part.trim().split_once('=')?;
-        (name == "lirox_session" && !value.is_empty()).then_some(value)
+        (name == wanted && !value.is_empty()).then_some(value)
     })
+}
+
+#[cfg(any(feature = "server", test))]
+fn session_token_from_cookie(cookie: &str) -> Option<&str> {
+    cookie_value(cookie, "lirox_session")
+}
+
+/// Whether the request carries the token the desktop app started its
+/// embedded server with. An empty token never matches.
+#[cfg(any(feature = "server", test))]
+fn desktop_cookie_matches(cookie: &str, token: &str) -> bool {
+    !token.is_empty()
+        && cookie_value(cookie, "lirox_desktop").is_some_and(|value| {
+            value.len() == token.len()
+                && value
+                    .bytes()
+                    .zip(token.bytes())
+                    .fold(0, |diff, (a, b)| diff | (a ^ b))
+                    == 0
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{client_bootstrap_state, session_token_from_cookie};
+    use super::{client_bootstrap_state, desktop_cookie_matches, session_token_from_cookie};
+
+    #[test]
+    fn desktop_cookie_must_match_the_launch_token_exactly() {
+        assert!(desktop_cookie_matches(
+            "a=1; lirox_desktop=tok123",
+            "tok123"
+        ));
+        assert!(!desktop_cookie_matches("lirox_desktop=tok12", "tok123"));
+        assert!(!desktop_cookie_matches("lirox_desktop=tok124", "tok123"));
+        assert!(!desktop_cookie_matches("lirox_desktop_x=tok123", "tok123"));
+        assert!(!desktop_cookie_matches("lirox_desktop=", ""));
+    }
 
     #[test]
     fn session_cookie_parser_requires_the_exact_session_cookie_name() {

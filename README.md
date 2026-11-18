@@ -16,9 +16,27 @@ bun install --cwd packages/editor
 just dev
 ```
 
-The default target is web. For desktop, run `just dev 8989 desktop`; this starts
-the local Dioxus server beside the desktop WebView client. Desktop server
-auto-launch and bundling are not included.
+The default target is web. `just dev 8989 desktop` starts the Dioxus server
+beside the native desktop renderer, for development against a separate server.
+
+## Desktop app
+
+`crates/desktop` is the macOS desktop app. It runs the same server in-process,
+bound to a random loopback port, and shows the same web client in a native
+window, so web and desktop share all UI and backend code. There is no passkey
+step: at launch the window gets a per-launch secret cookie that the server
+accepts in place of a session. Onboarding then continues at the workspace
+step, exactly as on the web.
+
+```bash
+just desktop          # debug build, runs immediately
+just desktop-bundle   # release build: dist/desktop/LiroxNotes.app
+```
+
+Config and workspaces live in `~/Library/Application Support/LiroxNotes`
+(override with `LIROX_DESKTOP_DATA_DIR`). Git uses this machine's ssh-agent and
+SSH keys. Connecting the desktop app to a remote LiroxNotes server is planned
+but not built yet.
 
 The app uses passkey onboarding when no workspace is configured. Setup can
 create a local/remote repository workspace or select a non-empty subpath within

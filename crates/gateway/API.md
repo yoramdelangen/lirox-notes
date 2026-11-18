@@ -20,6 +20,17 @@ passkey functions fail with a 500 until onboarding stores domains.
 Logout deletes the stored session and clears the cookie. Protected functions
 authorize from that request cookie; they do not accept a user ID or auth flag.
 
+Desktop mode: when the server runs inside the desktop app, the process has
+`LIROX_DESKTOP_TOKEN` set to a per-launch secret. Requests whose
+`lirox_desktop` cookie equals it are authorized like a session (an unset or
+empty token never matches). `bootstrap_server_function` then reports
+`authenticated: true` (user `local` unless a session exists) and marks the
+installation done if needed, so onboarding resumes at `WorkspaceRequired`
+without a passkey. `setup_installation_server_function` skips its passkey
+requirement for such requests. The desktop app sets this cookie itself through
+`GET /__desktop/enter?token=…` (403 on a wrong token), which only the desktop
+binary serves.
+
 Functions return `Result<T, ServerFnError>`. Error messages are stable,
 user-safe summaries; filesystem paths, Git stderr, tokens, and credential
 material are not returned. Callers should treat connection and server errors as
@@ -39,7 +50,7 @@ are async and return `Result<result, ServerFnError>`.
 | `passkey_login_options_server_function` | No | — | JSON object with `challenge_id` and WebAuthn `publicKey` request options. |
 | `passkey_login_verify_server_function` | No | `challenge_id: String`, `credential: JSON` | `bool`; consumes a valid login challenge, rotates the session, and sets the session cookie. |
 | `logout_server_function` | No | — | `()`; deletes the session and clears the cookie. |
-| `setup_installation_server_function` | Yes | `user_name: Option<String>` | `()`; idempotently persists installation/name after passkey registration; safe to retry. |
+| `setup_installation_server_function` | Yes | `user_name: Option<String>` | `()`; idempotently persists installation/name after passkey registration (or for a desktop request, without one); safe to retry. The name survives the later workspace setup. |
 | `inspect_repository_server_function` | Yes | `repo_url: String`, `branch: Option<String>` | `RepositoryMetadata { name, slug }`; inspects a remote without exposing server paths. `name`/`slug` come from the repository's `.lirox.toml`; when it sets none, they fall back to the repository name from the URL (`git@github.com:owner/my-notes.git` → `my-notes`). |
 | `existing_workspaces_server_function` | Yes | — | `Vec<ExistingWorkspace>`: the top-level, non-hidden folders of each cloned repository below the app workspace root that are not yet registered as a workspace (nested folders and repository roots are omitted). |
 | `registered_workspaces_server_function` | Yes | — | `Vec<RegisteredWorkspace { slug, name, repository, path, active }>`: every workspace registered in the application. `repository` is the repository folder relative to the app workspace root and `path` the workspace folder relative to the git root (empty for the root); no server paths are exposed. |

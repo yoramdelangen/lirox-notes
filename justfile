@@ -69,6 +69,29 @@ dev port="8989" platform="web":
             --features server --open false
     fi
 
+# Run the desktop app: the web client plus an embedded server, in a native
+# window. dx builds the desktop crate as the "server" so the client's asset
+# paths are patched into it.
+desktop:
+    dx build -p liroxnotes-app @client --web @server -p liroxnotes-desktop --server
+    target/dx/liroxnotes-app/debug/web/server
+
+# Build dist/LiroxNotes.app (macOS) with libgit2 and OpenSSL linked in.
+desktop-bundle out="dist/desktop":
+    #!/bin/sh
+    set -eu
+    dx bundle --release -p liroxnotes-app --out-dir "{{out}}/build" \
+        @client --web \
+        @server -p liroxnotes-desktop --server --features static
+    app="{{out}}/LiroxNotes.app"
+    version=$(sed -n 's/^version = "\(.*\)".*/\1/p' Cargo.toml | head -n1)
+    rm -rf "$app"
+    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+    cp "{{out}}/build/server" "$app/Contents/MacOS/LiroxNotes"
+    cp -R "{{out}}/build/public" "$app/Contents/Resources/public"
+    sed "s/@VERSION@/$version/g" crates/desktop/Info.plist > "$app/Contents/Info.plist"
+    printf '%s\n' "built $app"
+
 # Build the distroless server image (docker or podman).
 image tag="lirox-notes:dev" engine="docker":
     {{engine}} build -t {{tag}} .
