@@ -28,6 +28,10 @@ pub enum AuthEvent {
     BootstrapRequested,
     BootstrapLoaded(BootstrapState),
     ConfigureDomains(Vec<String>),
+    /// Back to the domain step, before the first passkey.
+    EditDomains,
+    ChangePublicUrl(String),
+    PublicUrlChanged(liroxnotes_shared::DomainsResponse),
     RegisterPasskey,
     Login,
     AutoLogin,
@@ -83,6 +87,9 @@ pub enum StatusEvent {
 #[derive(Clone, PartialEq, Eq)]
 pub enum AuthCommand {
     ConfigureDomains(Vec<String>),
+    /// Back to the domain step, before the first passkey.
+    EditDomains,
+    ChangePublicUrl(String),
     RegisterPasskey,
     Login,
     AutoLogin,
@@ -92,7 +99,10 @@ pub enum AuthCommand {
     SelectExistingWorkspace(ExistingWorkspace),
     LoadExistingWorkspaces,
     SwitchWorkspace(String),
-    InspectRepository { repo_url: String, branch: String },
+    InspectRepository {
+        repo_url: String,
+        branch: String,
+    },
     Retry,
 }
 

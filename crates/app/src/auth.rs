@@ -92,6 +92,7 @@ pub enum AuthOperation {
     CreatingWorkspace,
     InspectingRepository,
     ConfiguringDomains,
+    ChangingPublicUrl,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -214,6 +215,14 @@ pub fn includes_origin(domains: &[String], origin: &str) -> bool {
     domains.iter().any(|domain| normalize(domain) == origin)
 }
 
+/// The public URL to open instead, when this page (`current`) is not one of
+/// the configured domains: a passkey cannot be created or used here.
+pub fn passkey_address(bootstrap: &BootstrapState, current: &str) -> Option<String> {
+    let origins = &bootstrap.domains.origins;
+    (!current.is_empty() && !origins.is_empty() && !includes_origin(origins, current))
+        .then(|| origins[0].clone())
+}
+
 pub fn slug_from_name(value: &str) -> String {
     let mut slug = String::new();
     let mut last_dash = false;
@@ -279,6 +288,108 @@ mod tests {
         assert!(includes_origin(&domains, "https://notes.example.com"));
         assert!(!includes_origin(&domains, "https://notes.example.com:6789"));
         assert!(!includes_origin(&[], "http://localhost:8989"));
+    }
+
+    #[test]
+    fn another_address_is_sent_to_the_public_url() {
+        let mut bootstrap = BootstrapState::not_started();
+        bootstrap.domains.origins = vec!["https://notes.example.com".into()];
+
+        assert_eq!(
+            passkey_address(&bootstrap, "http://localhost:8080").as_deref(),
+            Some("https://notes.example.com")
+        );
+        assert_eq!(
+            passkey_address(&bootstrap, "https://notes.example.com"),
+            None
+        );
+        assert_eq!(passkey_address(&bootstrap, ""), None);
+        bootstrap.domains.source = liroxnotes_shared::DomainSource::None;
+        bootstrap.domains.origins.clear();
+        assert_eq!(passkey_address(&bootstrap, "http://localhost:8080"), None);
+    }
+
+    #[test]
+    fn changing_the_public_url_reopens_the_domain_step_prefilled() {
+        let mut state = crate::app::ApplicationState::empty();
+        let mut bootstrap = BootstrapState::not_started();
+        bootstrap.domains.origins = vec!["https://notes.example.com".into()];
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::BootstrapLoaded(bootstrap)),
+        );
+
+        let effects =
+            crate::app::apply_event(&mut state, ApplicationEvent::Auth(AuthEvent::EditDomains));
+
+        assert!(effects.is_empty());
+        assert_eq!(state.auth.screen, Screen::ConfigureDomains);
+        assert_eq!(state.auth.setup.domains, vec!["https://notes.example.com"]);
+    }
+
+    fn signed_in_workbench() -> crate::app::ApplicationState {
+        let mut state = crate::app::ApplicationState::empty();
+        state.auth.bootstrap = Some(BootstrapState::authenticated_complete());
+        state.auth.screen = Screen::Workbench;
+        state
+    }
+
+    #[test]
+    fn changing_the_public_url_schedules_the_change() {
+        let mut state = signed_in_workbench();
+
+        let effects = crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::ChangePublicUrl("http://localhost:9090".into())),
+        );
+
+        assert_eq!(
+            effects,
+            vec![crate::app::Effect::ChangePublicUrl(
+                "http://localhost:9090".into()
+            )]
+        );
+        assert_eq!(state.auth.operation, AuthOperation::ChangingPublicUrl);
+    }
+
+    #[test]
+    fn a_refused_public_url_stays_in_the_workbench_with_the_reason() {
+        let mut state = signed_in_workbench();
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::ChangePublicUrl("https://other.example".into())),
+        );
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::OperationFailed("needs a new passkey".into())),
+        );
+
+        assert_eq!(state.auth.screen, Screen::Workbench);
+        assert_eq!(state.auth.failure.as_deref(), Some("needs a new passkey"));
+        assert_eq!(state.auth.operation, AuthOperation::None);
+    }
+
+    #[test]
+    fn a_changed_public_url_updates_the_known_domains() {
+        let mut state = signed_in_workbench();
+        let domains = liroxnotes_shared::DomainsResponse {
+            rp_id: Some("localhost".into()),
+            origins: vec![
+                "http://localhost:9090".into(),
+                "http://localhost:8989".into(),
+            ],
+            source: liroxnotes_shared::DomainSource::Stored,
+        };
+
+        crate::app::apply_event(
+            &mut state,
+            ApplicationEvent::Auth(AuthEvent::PublicUrlChanged(domains.clone())),
+        );
+
+        assert_eq!(state.auth.bootstrap.unwrap().domains, domains);
+        assert_eq!(state.auth.operation, AuthOperation::None);
+        assert_eq!(state.auth.screen, Screen::Workbench);
     }
 
     #[test]

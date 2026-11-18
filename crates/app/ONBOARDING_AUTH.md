@@ -70,11 +70,18 @@ and every network connect/read times out (15 s / 60 s); push is bounded only
 by those connect/read timeouts. Errors
 reaching the client stay generic (see `crates/gateway/API.md`).
 
-Before the first passkey, onboarding asks for the domains (origins) the app is
-opened on, prefilled with the browser's own origin. They are stored in
-`<config dir>/domains`; the first origin's host is the passkey RP ID and
-further origins must be that host or a subdomain. They can only be set while no
-passkey exists and when the request comes from one of them, and
-`LIROX_RP_ORIGIN` / `LIROX_RP_ID` override them (the step is skipped then).
+Before the first passkey, onboarding asks for the public URL used to open the
+app, prefilled with the browser's own origin. For a Cloudflare Tunnel or reverse
+proxy, use its public URL. It is stored in `<config dir>/domains` as the
+canonical app URL and its host becomes the passkey RP ID. It may differ from
+the page's address: the server accepts it from a same-origin request
+(`Sec-Fetch-Site`) or from the URL itself, and the passkey/login screens on
+any other address send the owner to it (with "Change URL" until the first
+passkey exists). `LIROX_RP_ORIGIN` / `LIROX_RP_ID` remain optional overrides
+and skip this step.
+After onboarding, Settings → Account → Public URL changes it in place
+(`change_public_url_server_function`). Passkeys are bound to the RP ID, so the
+new URL must be that host or a subdomain; the old URLs stay allowed. A
+different host needs a passkey per domain (planned).
 Unrelated domains and changing domains after onboarding are scheduled in
-`docs/superpowers/specs/2026-11-02-hosted-frontend-design.md`.
+`docs/superpowers/specs/2026-11-18-public-url-and-domains-design.md`.

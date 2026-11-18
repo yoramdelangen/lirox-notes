@@ -51,14 +51,15 @@ podman run -d --name liroxnotes -p 8080:8080 \
 setup with secrets. Build the image yourself with `just image` (and run it with
 `just image-run`).
 
-The first onboarding screen asks where you open LiroxNotes, prefilled with the
-address in your browser (port included), and stores it in `/config`. Your
-passkey only works on those domains. Passkeys need HTTPS, except on
-`http://localhost`; behind a tunnel or reverse proxy, open the public
-`https://` URL for onboarding. Extra domains must be the first domain's host
-(another port) or one of its subdomains. To pin the domains from the outside
-instead, set `LIROX_RP_ORIGIN` (and optionally `LIROX_RP_ID`); onboarding then
-skips the domain step.
+The first onboarding screen asks for the public URL where you open
+LiroxNotes, prefilled with the address in your browser (port included), and
+stores it in `/config`. It is the canonical app URL and the address your
+passkey works on. Behind a Cloudflare Tunnel or reverse proxy, enter its public
+`https://` URL; if you are setting up from another address (e.g.
+`http://localhost:8080`), onboarding sends you there to create the passkey.
+Passkeys need HTTPS except on `http://localhost`. `LIROX_RP_ORIGIN` (and
+optionally `LIROX_RP_ID`) remain available as overrides; setting them skips
+this step.
 
 | Variable | Default | Purpose |
 |---|---|---|

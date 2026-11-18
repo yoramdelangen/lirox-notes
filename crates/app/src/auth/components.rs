@@ -1,5 +1,5 @@
 use super::{
-    dispatch_auth, includes_origin, slug_from_name, AuthOperation, AuthState, Screen, SetupStep,
+    dispatch_auth, passkey_address, slug_from_name, AuthOperation, AuthState, Screen, SetupStep,
 };
 use crate::{app::AuthCommand, AppContext};
 use dioxus::prelude::*;
@@ -60,71 +60,37 @@ fn current_origin() -> String {
     String::new()
 }
 
-/// First onboarding step: where LiroxNotes is opened, which decides where the
-/// passkey works. Prefilled with the browser's own address.
+/// First onboarding step: the public URL LiroxNotes is opened on, which is
+/// where the passkey works. Prefilled with the browser's own address; it may
+/// differ from it (set up on localhost, served through a tunnel).
 #[component]
 fn DomainsForm(auth: AuthState) -> Element {
     let context = use_context::<AppContext>();
     let state = context.state;
     let dispatcher = context.dispatcher.clone();
-    let current = use_hook(current_origin);
-    let initial = auth.setup.domains.clone();
-    let prefill = current.clone();
-    let mut domains = use_signal(move || {
-        if initial.is_empty() {
-            vec![prefill]
-        } else {
-            initial
-        }
-    });
+    let initial = auth.setup.domains.first().cloned();
+    let mut url = use_signal(move || initial.unwrap_or_else(current_origin));
     let busy = auth.operation != AuthOperation::None;
-    let includes_current = current.is_empty() || includes_origin(&domains(), &current);
-    let rows = domains().len();
     rsx! {
-        OnboardingFrame { title: "Lirox Notes", legend: "Onboarding ─ Domains",
+        OnboardingFrame { title: "Lirox Notes", legend: "Onboarding ─ Public URL",
             form {
                 class: "flex flex-col gap-[14px]",
                 onsubmit: move |event| {
                     event.prevent_default();
-                    dispatch_auth(state, dispatcher.clone(), AuthCommand::ConfigureDomains(domains()));
+                    dispatch_auth(state, dispatcher.clone(), AuthCommand::ConfigureDomains(vec![url()]));
                 },
-                p { "Where will you open LiroxNotes? Your passkey only works on these addresses." }
-                for (index, origin) in domains().into_iter().enumerate() {
-                    div { key: "{index}", class: "flex gap-2",
-                        input {
-                            class: "lx-input flex-1",
-                            style: "font-size: 12.5px",
-                            required: true,
-                            autofocus: index == 0,
-                            autocomplete: "off",
-                            spellcheck: "false",
-                            aria_label: "Domain {index + 1}",
-                            placeholder: "https://notes.example.com",
-                            value: "{origin}",
-                            oninput: move |event: FormEvent| domains.write()[index] = event.value(),
-                        }
-                        button {
-                            class: "lx-btn",
-                            r#type: "button",
-                            disabled: busy || rows == 1,
-                            aria_label: "Remove domain {index + 1}",
-                            onclick: move |_| {
-                                domains.write().remove(index);
-                            },
-                            "×"
-                        }
-                    }
-                }
-                button {
-                    class: "lx-btn",
-                    r#type: "button",
-                    disabled: busy,
-                    onclick: move |_| domains.write().push(String::new()),
-                    "+ add domain"
-                }
-                if !includes_current {
-                    div { class: "lx-error", role: "alert",
-                        "! keep {current} in the list: your passkey is created on this address"
+                label { class: "lx-field",
+                    span { class: "lx-field-label", "Where will you open LiroxNotes?" }
+                    input {
+                        class: "lx-input",
+                        style: "font-size: 12.5px",
+                        required: true,
+                        autofocus: true,
+                        autocomplete: "off",
+                        spellcheck: "false",
+                        placeholder: "https://notes.example.com",
+                        value: "{url}",
+                        oninput: move |event: FormEvent| url.set(event.value()),
                     }
                 }
                 if let Some(error) = auth.failure.as_deref() {
@@ -133,11 +99,34 @@ fn DomainsForm(auth: AuthState) -> Element {
                 button {
                     class: "lx-btn-primary",
                     r#type: "submit",
-                    disabled: busy || !includes_current,
+                    disabled: busy,
                     if auth.operation == AuthOperation::ConfiguringDomains { "saving…" } else { "Continue" }
                 }
                 div { class: "lx-hint",
-                    "Use https:// for anything but localhost. Extra domains must be the first one's host or its subdomains."
+                    "Behind a Cloudflare Tunnel or reverse proxy, enter its public https:// address. Your passkey is created there."
+                }
+            }
+        }
+    }
+}
+
+/// Shown on an address that is not one of the domains: the passkey belongs
+/// to `url`, so the owner continues there.
+#[component]
+fn OpenPublicUrl(url: String, can_change: bool) -> Element {
+    let context = use_context::<AppContext>();
+    let state = context.state;
+    let dispatcher = context.dispatcher.clone();
+    rsx! {
+        OnboardingFrame { title: "Lirox Notes", legend: "Open your public URL",
+            p { "Your passkey lives on {url}. Open it there to continue." }
+            a { class: "lx-btn-primary", style: "text-decoration: none", href: "{url}", autofocus: true, "Open {url}" }
+            if can_change {
+                button {
+                    class: "lx-btn",
+                    r#type: "button",
+                    onclick: move |_| dispatch_auth(state, dispatcher.clone(), AuthCommand::EditDomains),
+                    "Change URL"
                 }
             }
         }
@@ -450,10 +439,19 @@ pub fn AuthShell() -> Element {
     let failure = auth.failure.clone().unwrap_or_else(|| "Try again.".into());
     let auto_login = context.dispatcher.clone();
     let mut auto_login_attempted = use_signal(|| false);
+    let current = use_hook(current_origin);
+    // On an address that is not one of the domains no passkey can work here.
+    let elsewhere = auth
+        .bootstrap
+        .as_ref()
+        .and_then(|bootstrap| passkey_address(bootstrap, &current))
+        .filter(|_| matches!(auth.screen, Screen::RegisterPasskey | Screen::Login));
+    let wrong_address = elsewhere.is_some();
     use_effect(move || {
         let should_check = {
             let state = state.read();
-            matches!(state.auth.screen, Screen::RegisterPasskey | Screen::Login)
+            !wrong_address
+                && matches!(state.auth.screen, Screen::RegisterPasskey | Screen::Login)
                 && state.auth.operation == AuthOperation::None
                 && !auto_login_attempted()
                 && state
@@ -468,7 +466,14 @@ pub fn AuthShell() -> Element {
         }
     });
     let busy = auth.operation != AuthOperation::None;
+    let can_change_url = auth.bootstrap.as_ref().is_some_and(|bootstrap| {
+        !bootstrap.passkey_exists
+            && bootstrap.domains.source == liroxnotes_shared::DomainSource::Stored
+    });
     let content = match auth.screen {
+        _ if elsewhere.is_some() => rsx! {
+            OpenPublicUrl { url: elsewhere.clone().unwrap_or_default(), can_change: can_change_url }
+        },
         Screen::Loading => rsx! {
             OnboardingFrame { title: "Lirox Notes", legend: "Lirox",
                 div { class: "lx-loading", aria_live: "polite", "checking secure access" }

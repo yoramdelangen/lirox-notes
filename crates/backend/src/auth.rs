@@ -809,12 +809,15 @@ fn unix_seconds() -> u64 {
 }
 
 /// Stores the domains chosen during onboarding. Only allowed before the first
-/// passkey exists, never when the environment sets them, and only when the
-/// requesting page's origin is one of them (the passkey is created there).
+/// passkey exists, never when the environment sets them, and only from a
+/// same-origin page or one of the domains themselves, so a cross-site page
+/// cannot pick them. The domains may differ from the page's own address (e.g.
+/// set up on localhost, served through a tunnel).
 pub fn configure_domains(
     paths: &RuntimePaths,
     inputs: &[String],
     request_origin: Option<&str>,
+    same_origin_request: bool,
     environment: Option<(String, String)>,
 ) -> Result<crate::domains::DomainConfig, crate::domains::DomainError> {
     let refuse = |message: &str| Err(crate::domains::DomainError::new(message));
@@ -830,11 +833,55 @@ pub fn configure_domains(
     }
     let domains = crate::domains::normalize_domains(inputs)?;
     let request_origin = request_origin.map(|origin| origin.trim_end_matches('/'));
-    if !request_origin.is_some_and(|origin| domains.origins.iter().any(|known| known == origin)) {
+    if !same_origin_request
+        && !request_origin.is_some_and(|origin| domains.origins.iter().any(|known| known == origin))
+    {
         return refuse("the address you are using must be one of the domains");
     }
     crate::domains::save_domains(paths, &domains)
         .map_err(|_| crate::domains::DomainError::new("could not save domains"))?;
+    Ok(domains)
+}
+
+/// Makes `input` the public (first) URL after onboarding. Existing passkeys are
+/// bound to the RP ID, so the new URL must be that host or a subdomain of it;
+/// the previous URLs stay allowed so the address in use keeps working. The
+/// caller checks that the request is signed in.
+pub fn change_public_url(
+    paths: &RuntimePaths,
+    input: &str,
+    environment: Option<(String, String)>,
+) -> Result<crate::domains::DomainConfig, crate::domains::DomainError> {
+    let refuse = |message: String| Err(crate::domains::DomainError::new(&message));
+    if environment.is_some() {
+        return refuse("the URL is set by LIROX_RP_ID / LIROX_RP_ORIGIN on the server".into());
+    }
+    let current = effective_domains(paths, None)
+        .ok()
+        .and_then(|(domains, _)| domains)
+        .ok_or_else(|| crate::domains::DomainError::new("no public URL is configured yet"))?;
+    let requested = crate::domains::normalize_domains(&[input.to_string()])?;
+    let rp_id = &current.rp_id;
+    if requested.rp_id != *rp_id && !requested.rp_id.ends_with(&format!(".{rp_id}")) {
+        return refuse(format!(
+            "`{}` needs a new passkey: yours works on {rp_id} and its subdomains",
+            requested.origins[0]
+        ));
+    }
+    let primary = requested.origins[0].clone();
+    let mut origins = vec![primary.clone()];
+    origins.extend(
+        current
+            .origins
+            .into_iter()
+            .filter(|origin| *origin != primary),
+    );
+    let domains = crate::domains::DomainConfig {
+        rp_id: current.rp_id,
+        origins,
+    };
+    crate::domains::save_domains(paths, &domains)
+        .map_err(|_| crate::domains::DomainError::new("could not save the public URL"))?;
     Ok(domains)
 }
 
@@ -1027,6 +1074,7 @@ mod tests {
                 "https://notes.example.com:6789".into(),
             ],
             Some("https://notes.example.com:6789"),
+            false,
             None,
         )
         .unwrap();
@@ -1040,12 +1088,34 @@ mod tests {
     fn configuring_domains_requires_the_requesting_origin_in_the_list() {
         let paths = domain_paths("configure-origin");
         for origin in [Some("https://evil.example"), None] {
-            let error =
-                configure_domains(&paths, &["https://notes.example.com".into()], origin, None)
-                    .unwrap_err();
+            let error = configure_domains(
+                &paths,
+                &["https://notes.example.com".into()],
+                origin,
+                false,
+                None,
+            )
+            .unwrap_err();
             assert!(error.to_string().contains("address"), "{error}");
         }
         assert_eq!(crate::domains::load_domains(&paths).unwrap(), None);
+    }
+
+    #[test]
+    fn a_same_origin_page_may_store_another_public_url() {
+        let paths = domain_paths("configure-public");
+        let domains = configure_domains(
+            &paths,
+            &["https://notes.example.com".into()],
+            Some("http://localhost:8080"),
+            true,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(domains.origins, vec!["https://notes.example.com"]);
+        assert_eq!(crate::domains::load_domains(&paths).unwrap(), Some(domains));
+        let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
     }
 
     #[test]
@@ -1055,6 +1125,7 @@ mod tests {
             &paths,
             &["http://localhost:8989".into()],
             Some("http://localhost:8989"),
+            false,
             Some(("localhost".into(), "http://localhost:8080".into())),
         )
         .unwrap_err();
@@ -1068,10 +1139,80 @@ mod tests {
             &paths,
             &["http://localhost:8989".into()],
             Some("http://localhost:8989"),
+            false,
             None,
         )
         .unwrap_err();
         assert!(error.to_string().contains("passkey"), "{error}");
+        let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
+    }
+
+    #[test]
+    fn the_public_url_can_move_within_the_passkey_domain() {
+        let paths = domain_paths("change-url");
+        let stored =
+            crate::domains::normalize_domains(&["https://notes.example.com".into()]).unwrap();
+        crate::domains::save_domains(&paths, &stored).unwrap();
+
+        let changed =
+            change_public_url(&paths, "https://beta.notes.example.com:8443", None).unwrap();
+
+        assert_eq!(changed.rp_id, "notes.example.com");
+        assert_eq!(
+            changed.origins,
+            vec![
+                "https://beta.notes.example.com:8443",
+                "https://notes.example.com"
+            ]
+        );
+        assert_eq!(crate::domains::load_domains(&paths).unwrap(), Some(changed));
+        let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
+    }
+
+    #[test]
+    fn a_public_url_on_another_host_is_refused() {
+        let paths = domain_paths("change-url-host");
+        let stored = crate::domains::normalize_domains(&["http://localhost:8080".into()]).unwrap();
+        crate::domains::save_domains(&paths, &stored).unwrap();
+
+        let error = change_public_url(&paths, "https://notes.example.com", None).unwrap_err();
+
+        assert!(error.to_string().contains("new passkey"), "{error}");
+        assert_eq!(crate::domains::load_domains(&paths).unwrap(), Some(stored));
+        let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
+    }
+
+    #[test]
+    fn the_public_url_is_locked_by_the_environment() {
+        let paths = domain_paths("change-url-env");
+        let error = change_public_url(
+            &paths,
+            "http://localhost:9090",
+            Some(("localhost".into(), "http://localhost:8080".into())),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("LIROX_RP"), "{error}");
+    }
+
+    #[test]
+    fn changing_the_public_url_of_a_legacy_install_keeps_its_origins() {
+        let paths = domain_paths("change-url-legacy");
+        AuthStore::new(paths.clone())
+            .save_account(&AccountRecord::with_credential(credential("one")))
+            .unwrap();
+
+        let changed = change_public_url(&paths, "http://localhost:8080", None).unwrap();
+
+        assert_eq!(changed.rp_id, "localhost");
+        assert_eq!(
+            changed.origins,
+            vec![
+                "http://localhost:8080",
+                "http://localhost:8989",
+                "http://localhost:3010"
+            ]
+        );
         let _ = fs::remove_dir_all(paths.config_file.parent().unwrap());
     }
 

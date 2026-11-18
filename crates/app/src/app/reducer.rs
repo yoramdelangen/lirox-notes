@@ -26,6 +26,8 @@ pub enum Effect {
     LoadWorkspace,
     LoadWorkspaceNote(String),
     ConfigureDomains(Vec<String>),
+    /// Makes a URL the public URL after onboarding.
+    ChangePublicUrl(String),
     RegisterPasskey,
     SetupInstallation(String),
     Login,
@@ -184,6 +186,26 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
             auth.failure = None;
             vec![Effect::ConfigureDomains(origins)]
         }
+        AuthEvent::ChangePublicUrl(url) => {
+            auth.operation = AuthOperation::ChangingPublicUrl;
+            auth.failure = None;
+            vec![Effect::ChangePublicUrl(url)]
+        }
+        AuthEvent::PublicUrlChanged(domains) => {
+            if let Some(bootstrap) = auth.bootstrap.as_mut() {
+                bootstrap.domains = domains;
+            }
+            auth.operation = AuthOperation::None;
+            vec![]
+        }
+        AuthEvent::EditDomains => {
+            if let Some(bootstrap) = auth.bootstrap.as_ref() {
+                auth.setup.domains = bootstrap.domains.origins.iter().take(1).cloned().collect();
+            }
+            auth.screen = Screen::ConfigureDomains;
+            auth.failure = None;
+            vec![]
+        }
         AuthEvent::RegisterPasskey => {
             auth.operation = AuthOperation::Registering;
             vec![Effect::RegisterPasskey]
@@ -260,7 +282,9 @@ fn apply_auth_event(state: &mut ApplicationState, event: AuthEvent) -> Vec<Effec
         AuthEvent::OperationFailed(message) => {
             let keep_setup_open = matches!(
                 auth.operation,
-                AuthOperation::InspectingRepository | AuthOperation::ConfiguringDomains
+                AuthOperation::InspectingRepository
+                    | AuthOperation::ConfiguringDomains
+                    | AuthOperation::ChangingPublicUrl
             );
             auth.failure = Some(message);
             auth.operation = AuthOperation::None;

@@ -179,6 +179,14 @@ async fn platform_effect(effect: Effect) -> Result<Option<ApplicationEvent>, Str
                     .map_err(server_error_message)?,
             ))))
         }
+        Effect::ChangePublicUrl(url) => {
+            let domains = server::change_public_url_server_function(url)
+                .await
+                .map_err(server_error_message)?;
+            Ok(Some(ApplicationEvent::Auth(AuthEvent::PublicUrlChanged(
+                domains,
+            ))))
+        }
         Effect::RegisterPasskey => {
             let options = server::passkey_registration_options_server_function()
                 .await

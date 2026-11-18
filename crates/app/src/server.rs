@@ -405,20 +405,45 @@ fn repository_summary(
 }
 
 /// Stores the passkey domains during onboarding (before any passkey exists).
-/// The requesting page's `Origin` must be one of them.
+/// The request must be same-origin or come from one of them.
 #[server]
 pub async fn configure_domains_server_function(origins: Vec<String>) -> Result<(), ServerFnError> {
-    let request_origin = FullstackContext::current()
-        .and_then(|context| context.parts_mut().headers.get("origin").cloned())
-        .and_then(|value| value.to_str().ok().map(str::to_owned));
+    let header = |name: &str| {
+        FullstackContext::current()
+            .and_then(|context| context.parts_mut().headers.get(name).cloned())
+            .and_then(|value| value.to_str().ok().map(str::to_owned))
+    };
+    let request_origin = header("origin");
+    let same_origin = header("sec-fetch-site").as_deref() == Some("same-origin");
     backend_auth::configure_domains(
         &runtime_paths(),
         &origins,
         request_origin.as_deref(),
+        same_origin,
         liroxnotes_backend::domains::environment_domains(),
     )
     .map(|_| ())
     .map_err(|error| client_error(400, &error.to_string()))
+}
+
+/// Changes the public URL after onboarding (signed in); see
+/// `backend_auth::change_public_url`.
+#[server]
+pub async fn change_public_url_server_function(
+    url: String,
+) -> Result<liroxnotes_shared::DomainsResponse, ServerFnError> {
+    let paths = authenticated_paths()?;
+    let domains = backend_auth::change_public_url(
+        &paths,
+        &url,
+        liroxnotes_backend::domains::environment_domains(),
+    )
+    .map_err(|error| client_error(400, &error.to_string()))?;
+    Ok(liroxnotes_shared::DomainsResponse {
+        rp_id: Some(domains.rp_id),
+        origins: domains.origins,
+        source: liroxnotes_shared::DomainSource::Stored,
+    })
 }
 
 #[server]

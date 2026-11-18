@@ -600,10 +600,118 @@ fn SettingsPanel(view: WorkspaceView) -> Element {
                     span { class: "lx-setting-label", "{display_name}" }
                     span { class: "lx-setting-value", "passkey" }
                 }
+                PublicUrlSetting {}
                 LogoutRow {}
             }
             div { class: "lx-settings-note",
                 "A physical keypress switches to keyboard mode (Vim, status line, floating action bar). A touch on the text switches back."
+            }
+        }
+    }
+}
+
+/// The public URL, editable in place. Only moves within the passkey's
+/// domain; the server explains anything else.
+#[component]
+fn PublicUrlSetting() -> Element {
+    let context = use_context::<AppContext>();
+    let state = context.state;
+    let dispatcher = context.dispatcher.clone();
+    let (url, locked, saving, failure) = {
+        let state = state.read();
+        let domains = state
+            .auth
+            .bootstrap
+            .as_ref()
+            .map(|bootstrap| &bootstrap.domains);
+        (
+            domains
+                .and_then(|domains| domains.origins.first().cloned())
+                .unwrap_or_default(),
+            domains.is_some_and(|domains| {
+                domains.source == liroxnotes_shared::DomainSource::Environment
+            }),
+            state.auth.operation == crate::auth::AuthOperation::ChangingPublicUrl,
+            state.auth.failure.clone(),
+        )
+    };
+    let mut draft = use_signal(|| None::<String>);
+    let mut submitted = use_signal(|| false);
+    let mut tried = use_signal(|| false);
+    // Close the editor once a submitted change has been saved.
+    use_effect(move || {
+        let state = state.read();
+        if submitted() && state.auth.operation == crate::auth::AuthOperation::None {
+            submitted.set(false);
+            if state.auth.failure.is_none() {
+                draft.set(None);
+            }
+        }
+    });
+
+    let Some(value) = draft() else {
+        let current = url.clone();
+        return rsx! {
+            button {
+                r#type: "button",
+                class: "lx-setting",
+                disabled: locked,
+                title: if locked { "set by LIROX_RP_ORIGIN on the server" } else { "change the public URL" },
+                onclick: move |_| {
+                    tried.set(false);
+                    draft.set(Some(current.clone()));
+                },
+                span { class: "lx-setting-mark", "   " }
+                span { class: "lx-setting-label", "Public URL" }
+                span { class: "lx-setting-value", "{url}" }
+            }
+        };
+    };
+    rsx! {
+        form {
+            class: "flex flex-col gap-2",
+            style: "padding: 6px 12px",
+            onsubmit: move |event| {
+                event.prevent_default();
+                tried.set(true);
+                submitted.set(true);
+                crate::auth::dispatch_auth(
+                    state,
+                    dispatcher.clone(),
+                    AuthCommand::ChangePublicUrl(draft().unwrap_or_default()),
+                );
+            },
+            label { class: "lx-field",
+                span { class: "lx-field-label", "Public URL" }
+                input {
+                    class: "lx-input",
+                    style: "font-size: 12.5px",
+                    required: true,
+                    autofocus: true,
+                    autocomplete: "off",
+                    spellcheck: "false",
+                    value: "{value}",
+                    oninput: move |event: FormEvent| draft.set(Some(event.value())),
+                }
+            }
+            if tried() && !saving {
+                if let Some(error) = failure {
+                    div { class: "lx-error", role: "alert", "! {error}" }
+                }
+            }
+            div { class: "flex gap-2",
+                button { class: "lx-btn-primary", r#type: "submit", disabled: saving,
+                    if saving { "saving…" } else { "Save" }
+                }
+                button {
+                    class: "lx-btn",
+                    r#type: "button",
+                    onclick: move |_| draft.set(None),
+                    "Cancel"
+                }
+            }
+            div { class: "lx-settings-note",
+                "Your passkey keeps working on this host and its subdomains; the current URL stays allowed too."
             }
         }
     }
