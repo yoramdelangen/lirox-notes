@@ -488,10 +488,13 @@ pub fn read_notes(root: &Path, dir: &Path, notes: &mut Vec<WorkspaceNote>) -> st
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+        // Hidden entries (`.git`, config) are not notes, and symlinks could
+        // point outside the workspace; `file_type` does not follow links.
+        let file_type = entry.file_type()?;
+        if entry.file_name().to_string_lossy().starts_with('.') || file_type.is_symlink() {
             continue;
         }
-        if path.is_dir() {
+        if file_type.is_dir() {
             read_notes(root, &path, notes)?;
             continue;
         }
@@ -564,15 +567,12 @@ pub fn pull_workspace(config: &GatewayConfig) -> std::io::Result<bool> {
 }
 
 pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::io::Result<bool> {
-    let Some(relative) = safe_note_path(path) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "invalid note path",
-        ));
-    };
-
-    let notes = notes_root(config)?;
+    let (notes, relative, absolute) = note_location(config, path)?;
     let mut changed_paths = vec![relative.clone()];
+
+    // A note saved below `ideas/` turns a sibling `ideas.md` into
+    // `ideas/README.md`. Every move is checked before anything changes.
+    let mut moves = Vec::new();
     let mut directory = relative.parent();
     while let Some(directory_path) = directory {
         if directory_path.as_os_str().is_empty() {
@@ -585,9 +585,9 @@ pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::
             .unwrap_or_else(|| Path::new(""))
             .join(format!("{}.md", name.to_string_lossy()));
         let readme = directory_path.join("README.md");
-        let legacy_absolute = notes.join(&legacy);
+        let legacy_absolute = resolve_note_path(&notes, &legacy)?;
         if legacy_absolute.is_file() {
-            let readme_absolute = notes.join(&readme);
+            let readme_absolute = resolve_note_path(&notes, &readme)?;
             if readme_absolute.exists() {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AlreadyExists,
@@ -598,8 +598,7 @@ pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::
                     ),
                 ));
             }
-            fs::create_dir_all(notes.join(directory_path))?;
-            fs::rename(legacy_absolute, readme_absolute)?;
+            moves.push((legacy_absolute, readme_absolute));
             changed_paths.push(legacy);
             changed_paths.push(readme);
         }
@@ -607,7 +606,12 @@ pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::
         directory = directory_path.parent();
     }
 
-    let absolute = notes.join(&relative);
+    for (legacy, readme) in moves {
+        if let Some(parent) = readme.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(legacy, readme)?;
+    }
     if let Some(parent) = absolute.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -615,16 +619,43 @@ pub fn save_note_body(config: &GatewayConfig, path: &str, body: String) -> std::
     commit_note_paths(&notes, &changed_paths)
 }
 
-pub fn delete_note_file(config: &GatewayConfig, path: &str) -> std::io::Result<bool> {
-    let Some(relative) = safe_note_path(path) else {
+/// Writes a new note, refusing to overwrite a note or to sit next to a
+/// folder of the same name. The file name must be a slug (`my-note.md`);
+/// folders on the way may have any safe name.
+pub fn create_note(config: &GatewayConfig, path: &str, body: String) -> std::io::Result<bool> {
+    let (_, relative, absolute) = note_location(config, path)?;
+    let name = relative
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !is_slug(name.trim_end_matches(".md")) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "invalid note path",
+            "note names use lowercase letters, numbers and dashes",
         ));
-    };
+    }
+    if fs::symlink_metadata(&absolute).is_ok() || absolute.with_extension("").exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("`{path}` already exists"),
+        ));
+    }
+    save_note_body(config, path, body)
+}
 
-    let notes = notes_root(config)?;
-    let absolute = notes.join(&relative);
+/// `[a-z0-9]+(-[a-z0-9]+)*`
+fn is_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+pub fn delete_note_file(config: &GatewayConfig, path: &str) -> std::io::Result<bool> {
+    let (notes, relative, absolute) = note_location(config, path)?;
     if !absolute.is_file() {
         return Ok(false);
     }
@@ -634,13 +665,45 @@ pub fn delete_note_file(config: &GatewayConfig, path: &str) -> std::io::Result<b
 }
 
 pub fn read_note_body(config: &GatewayConfig, path: &str) -> std::io::Result<String> {
+    let (_, _, absolute) = note_location(config, path)?;
+    fs::read_to_string(absolute)
+}
+
+/// The notes root, the checked relative path and its absolute location.
+fn note_location(
+    config: &GatewayConfig,
+    path: &str,
+) -> std::io::Result<(PathBuf, PathBuf, PathBuf)> {
     let Some(relative) = safe_note_path(path) else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "invalid note path",
-        ));
+        return Err(invalid_note_path());
     };
-    fs::read_to_string(notes_root(config)?.join(relative))
+    let notes = notes_root(config)?;
+    let absolute = resolve_note_path(&notes, &relative)?;
+    Ok((notes, relative, absolute))
+}
+
+/// Joins a `safe_note_path` result to the notes root, refusing it when any
+/// existing component below the root is a symlink, so the result can never
+/// lead outside the root.
+fn resolve_note_path(notes: &Path, relative: &Path) -> std::io::Result<PathBuf> {
+    let mut path = notes.to_path_buf();
+    for component in relative.components() {
+        path.push(component);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(invalid_note_path());
+            }
+            Ok(_) => {}
+            // Nothing below a missing component can exist either.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(notes.join(relative))
+}
+
+fn invalid_note_path() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid note path")
 }
 
 pub fn configure_git_remote(config: &GatewayConfig) -> std::io::Result<()> {

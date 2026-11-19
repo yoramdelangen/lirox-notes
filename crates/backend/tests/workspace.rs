@@ -1,7 +1,8 @@
 use liroxnotes_backend::{
-    create_configured_workspace, create_workspace, existing_workspaces, load_app_config,
-    load_config, load_repository_config, read_note_body, save_note_body, save_workspace_theme,
-    GatewayConfig, RepositoryWorkspace, RuntimePaths, WorkspaceSetup,
+    auth::save_install_user_name, create_configured_workspace, create_workspace,
+    existing_workspaces, load_app_config, load_config, load_repository_config, mark_installed,
+    read_note_body, save_note_body, save_workspace_theme, GatewayConfig, RepositoryWorkspace,
+    RuntimePaths, WorkspaceSetup,
 };
 use liroxnotes_shared::WorkspaceTheme;
 use std::{fs, path::PathBuf};
@@ -145,6 +146,35 @@ fn workspace_setup_persists_config_and_marks_onboarding_complete() {
     assert!(std::fs::read_to_string(root.join("install"))
         .unwrap()
         .contains("onboarding_complete=true"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn finishing_workspace_setup_keeps_the_saved_display_name() {
+    let root: PathBuf = std::env::temp_dir().join(format!("lirox-setup-name-{}", Uuid::new_v4()));
+    let paths = RuntimePaths {
+        config_file: root.join("config"),
+        default_workspace: root.join("data"),
+    };
+    mark_installed(&paths, &paths.default_workspace).unwrap();
+    save_install_user_name(&paths, "Ada").unwrap();
+
+    create_configured_workspace(
+        &paths,
+        &GatewayConfig {
+            workspace_slug: "notes".into(),
+            workspace_name: "Notes".into(),
+            workspace_path: root.join("data/notes"),
+            relative_path: String::new(),
+            repo_url: String::new(),
+            branch: "main".into(),
+        },
+    )
+    .unwrap();
+
+    let install = fs::read_to_string(root.join("install")).unwrap();
+    assert!(install.contains("onboarding_complete=true"), "{install}");
+    assert!(install.contains("user_name=Ada"), "{install}");
     let _ = fs::remove_dir_all(root);
 }
 
