@@ -38,7 +38,7 @@ FROM scratch AS artifact
 COPY --from=builder /out/server /server
 COPY --from=builder /out/public /public
 
-FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329 AS runtime
+FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931 AS runtime
 
 ARG VERSION=dev
 # GHCR shows the README of the `source` repo on the package page, so it points
