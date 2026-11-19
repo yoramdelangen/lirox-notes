@@ -76,21 +76,25 @@ desktop:
     dx build -p liroxnotes-app @client --web @server -p liroxnotes-desktop --server
     target/dx/liroxnotes-app/debug/web/server
 
-# Build dist/LiroxNotes.app (macOS) with libgit2 and OpenSSL linked in.
-desktop-bundle out="dist/desktop":
+# Build dist/desktop/LiroxNotes.app (macOS); pass --dmg for a disk image too.
+desktop-bundle *args:
+    crates/desktop/bundle.sh {{args}}
+
+# Regenerate crates/desktop/icon/LiroxNotes.icns from icon.svg (needs
+# ImageMagick and macOS iconutil).
+desktop-icon:
     #!/bin/sh
     set -eu
-    dx bundle --release -p liroxnotes-app --out-dir "{{out}}/build" \
-        @client --web \
-        @server -p liroxnotes-desktop --server --features static
-    app="{{out}}/LiroxNotes.app"
-    version=$(sed -n 's/^version = "\(.*\)".*/\1/p' Cargo.toml | head -n1)
-    rm -rf "$app"
-    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-    cp "{{out}}/build/server" "$app/Contents/MacOS/LiroxNotes"
-    cp -R "{{out}}/build/public" "$app/Contents/Resources/public"
-    sed "s/@VERSION@/$version/g" crates/desktop/Info.plist > "$app/Contents/Info.plist"
-    printf '%s\n' "built $app"
+    dir=$(mktemp -d)/LiroxNotes.iconset
+    mkdir -p "$dir"
+    for size in 16 32 128 256 512; do
+        magick -background none -density 288 crates/desktop/icon/icon.svg \
+            -resize "${size}x${size}" "$dir/icon_${size}x${size}.png"
+        double=$((size * 2))
+        magick -background none -density 288 crates/desktop/icon/icon.svg \
+            -resize "${double}x${double}" "$dir/icon_${size}x${size}@2x.png"
+    done
+    iconutil -c icns "$dir" -o crates/desktop/icon/LiroxNotes.icns
 
 # Build the distroless server image (docker or podman).
 image tag="lirox-notes:dev" engine="docker":

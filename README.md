@@ -29,9 +29,15 @@ accepts in place of a session. Onboarding then continues at the workspace
 step, exactly as on the web.
 
 ```bash
-just desktop          # debug build, runs immediately
-just desktop-bundle   # release build: dist/desktop/LiroxNotes.app
+just desktop                # debug build, runs immediately
+just desktop-bundle         # release build: dist/desktop/LiroxNotes.app
+just desktop-bundle --dmg   # also a drag-to-Applications .dmg
+just desktop-icon           # regenerate the .icns after editing icon/icon.svg
 ```
+
+Each release attaches `liroxnotes-desktop-<version>-{aarch64,x86_64}-macos.dmg`.
+The app is ad-hoc signed but not notarized yet, so macOS blocks the first
+launch: right-click the app, choose Open, and confirm.
 
 Config and workspaces live in `~/Library/Application Support/LiroxNotes`
 (override with `LIROX_DESKTOP_DATA_DIR`). Git uses this machine's ssh-agent and

@@ -10,6 +10,8 @@
     <string>com.liroxnotes.desktop</string>
     <key>CFBundleExecutable</key>
     <string>LiroxNotes</string>
+    <key>CFBundleIconFile</key>
+    <string>LiroxNotes</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

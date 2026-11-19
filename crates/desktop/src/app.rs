@@ -26,6 +26,8 @@ use wry::{NewWindowResponse, WebViewBuilder};
 /// itself never has to live in the page.
 const ENTER_PATH: &str = "/__desktop/enter";
 
+const PREFERRED_PORT: u16 = 47_631;
+
 pub fn run() {
     // Debug builds accept a preset token so a test browser can sign in too.
     let token = env::var(DESKTOP_TOKEN_ENV)
@@ -38,7 +40,10 @@ pub fn run() {
                 uuid::Uuid::new_v4().simple()
             )
         });
-    let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+    // A stable port keeps the page's origin, and so its local storage (the
+    // cached theme), the same across launches; any free port is the fallback.
+    let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, PREFERRED_PORT)))
+        .or_else(|_| TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))))
         .expect("bind a loopback port for the embedded server");
     let port = listener.local_addr().expect("loopback address").port();
 
