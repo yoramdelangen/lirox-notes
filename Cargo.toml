@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.1.1" # x-release-please-version
+version = "0.2.0" # x-release-please-version
 
 [workspace.dependencies]
 dioxus = { version = "0.7.9", features = ["macro"] }
