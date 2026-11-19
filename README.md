@@ -16,9 +16,33 @@ bun install --cwd packages/editor
 just dev
 ```
 
-The default target is web. For desktop, run `just dev 8989 desktop`; this starts
-the local Dioxus server beside the desktop WebView client. Desktop server
-auto-launch and bundling are not included.
+The default target is web. `just dev 8989 desktop` starts the Dioxus server
+beside the native desktop renderer, for development against a separate server.
+
+## Desktop app
+
+`crates/desktop` is the macOS desktop app. It runs the same server in-process,
+bound to a random loopback port, and shows the same web client in a native
+window, so web and desktop share all UI and backend code. There is no passkey
+step: at launch the window gets a per-launch secret cookie that the server
+accepts in place of a session. Onboarding then continues at the workspace
+step, exactly as on the web.
+
+```bash
+just desktop                # debug build, runs immediately
+just desktop-bundle         # release build: dist/desktop/LiroxNotes.app
+just desktop-bundle --dmg   # also a drag-to-Applications .dmg
+just desktop-icon           # regenerate the .icns after editing icon/icon.svg
+```
+
+Each release attaches `liroxnotes-desktop-<version>-{aarch64,x86_64}-macos.dmg`.
+The app is ad-hoc signed but not notarized yet, so macOS blocks the first
+launch: right-click the app, choose Open, and confirm.
+
+Config and workspaces live in `~/Library/Application Support/LiroxNotes`
+(override with `LIROX_DESKTOP_DATA_DIR`). Git uses this machine's ssh-agent and
+SSH keys. Connecting the desktop app to a remote LiroxNotes server is planned
+but not built yet.
 
 The app uses passkey onboarding when no workspace is configured. Setup can
 create a local/remote repository workspace or select a non-empty subpath within
@@ -48,7 +72,8 @@ podman run -d --name liroxnotes -p 8080:8080 \
 ```
 
 `docker` works the same way; see [`compose.yaml`](compose.yaml) for a Compose
-setup with secrets. Build the image yourself with `just image` (and run it with
+setup with secrets. The image's own README, shown on the package page, lives in
+[lirox-notes-docker](https://github.com/yoramdelangen/lirox-notes-docker). Build the image yourself with `just image` (and run it with
 `just image-run`).
 
 The first onboarding screen asks where you open LiroxNotes, prefilled with the

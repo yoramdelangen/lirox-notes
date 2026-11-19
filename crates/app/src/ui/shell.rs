@@ -161,10 +161,14 @@ fn WorkspaceShellContent(
         let Some(InputEvent::Key(stroke)) = keyboard::normalize_keyboard_event(&event) else {
             return;
         };
-        if !keyboard::should_intercept(&event) {
+        let mut state = context.state;
+        // The new-note row's input also counts as typing: desktop key events
+        // carry no DOM target for `should_intercept` to see.
+        if !keyboard::should_intercept(&event)
+            || (state.read().ui.new_note.is_some() && !keyboard::routes_to_keymap(&stroke, true))
+        {
             return;
         }
-        let mut state = context.state;
         let result = {
             let mut state = state.write();
             let bindings = state.config.keymaps.bindings.clone();
