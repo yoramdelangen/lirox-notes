@@ -5,7 +5,7 @@
 #   artifact – just /server and /public, for `--output type=local`
 #   runtime  – distroless/static:nonroot image (default)
 
-FROM docker.io/library/rust:1.98-alpine@sha256:7cc1c22d77d9432f7fe012a70e6d3e555af54c2a6832700ed7d553f1769ae89f AS builder
+FROM docker.io/library/rust:1.99-alpine@sha256:44819b27be4c97b0e4d7203bd2e02c4820f97700211b6a37fb4c246a2de59383 AS builder
 
 RUN apk add --no-cache musl-dev perl make file pkgconf openssl-dev openssl-libs-static binaryen esbuild
 RUN rustup target add wasm32-unknown-unknown
@@ -38,7 +38,7 @@ FROM scratch AS artifact
 COPY --from=builder /out/server /server
 COPY --from=builder /out/public /public
 
-FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329 AS runtime
+FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931 AS runtime
 
 ARG VERSION=dev
 # GHCR shows the README of the `source` repo on the package page, so it points

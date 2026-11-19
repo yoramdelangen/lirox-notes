@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/yoramdelangen/lirox-notes/compare/v0.1.1...v0.2.0) (2026-11-19)
+
+
+### Features
+
+* **app:** create notes from the file tree ([#25](https://github.com/yoramdelangen/lirox-notes/issues/25)) ([69eb4e9](https://github.com/yoramdelangen/lirox-notes/commit/69eb4e9a8e2e9ccd8fc5f9a1d6e1c8c2ee1f4d51))
+* **desktop:** macOS desktop app ([#26](https://github.com/yoramdelangen/lirox-notes/issues/26)) ([d68c6ea](https://github.com/yoramdelangen/lirox-notes/commit/d68c6ea8a4626b5f080fe6c883b82154cc97d21d))
+* **editor:** start the cursor after the first line's heading marker ([d9a7074](https://github.com/yoramdelangen/lirox-notes/commit/d9a7074fd2344b04750b8fa52dd3ce209e583953))
+
+
+### Bug Fixes
+
+* **deps:** update libz-sys to address heap overflow advisory ([#27](https://github.com/yoramdelangen/lirox-notes/issues/27)) ([8fdef98](https://github.com/yoramdelangen/lirox-notes/commit/8fdef98af5d967f9cce53a28a628694904b93cf1))
+
 ## [0.1.1](https://github.com/yoramdelangen/lirox-notes/compare/v0.1.0...v0.1.1) (2026-11-02)
 
 
