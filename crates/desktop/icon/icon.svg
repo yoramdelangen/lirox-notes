@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The editor's first line: a heading marker and the block cursor. -->
+  <!-- macOS icon grid: 824px body inset 100px, corner radius ~185px. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1e1e2e"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#45475a" stroke-width="3"/>
+  <g fill="#89b4fa" transform="translate(440 512) skewX(-12)">
+    <rect x="-118" y="-190" width="46" height="380" rx="10"/>
+    <rect x="12" y="-190" width="46" height="380" rx="10"/>
+    <rect x="-190" y="-98" width="320" height="46" rx="10"/>
+    <rect x="-190" y="52" width="320" height="46" rx="10"/>
+  </g>
+  <rect x="648" y="322" width="140" height="380" rx="14" fill="#f38ba8"/>
+</svg>
