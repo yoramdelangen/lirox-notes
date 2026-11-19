@@ -6,7 +6,7 @@ import { getCM, Vim, vim } from "@replit/codemirror-vim";
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, lineNumbers } from "@codemirror/view";
 import { styleTags, Tag, tags as t } from "@lezer/highlight";
-import { headingDecorationClass } from "./heading";
+import { headingDecorationClass, headingMarkerLength, initialCursor } from "./heading";
 
 type EditorRoot = HTMLElement & {
 	dataset: {
@@ -382,7 +382,7 @@ export const gotoLine = (lineNumber: number) => {
 	const view = activeView;
 	if (!view) return;
 	const line = view.state.doc.line(Math.max(1, Math.min(lineNumber, view.state.doc.lines)));
-	const marker = line.text.match(/^#{1,6} /)?.[0].length ?? 0;
+	const marker = headingMarkerLength(line.text);
 	view.dispatch({
 		selection: EditorSelection.cursor(line.from + marker),
 		effects: EditorView.scrollIntoView(line.from, { y: "start", yMargin: 12 })
@@ -528,7 +528,11 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
 	}
 
 	const view = new EditorView({
-		state: EditorState.create({ doc: source, extensions }),
+		state: EditorState.create({
+			doc: source,
+			extensions,
+			selection: EditorSelection.cursor(initialCursor(source))
+		}),
 		parent: root
 	});
 	activeView = view;
@@ -544,7 +548,13 @@ export const mountLiroxNotesEditor = (root: EditorRoot, initialDoc?: string) => 
 	new MutationObserver(() => {
 		const next = root.dataset.initialDoc ?? "";
 		if (next === view.state.doc.toString()) return;
-		view.setState(EditorState.create({ doc: next, extensions }));
+		view.setState(
+			EditorState.create({
+				doc: next,
+				extensions,
+				selection: EditorSelection.cursor(initialCursor(next))
+			})
+		);
 		view.dispatch({ effects: vimMode.reconfigure(vimModeEnabled ? vim() : []) });
 		view.scrollDOM.scrollTop = 0;
 		emitEditorState(root, view);
