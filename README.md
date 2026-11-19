@@ -48,7 +48,8 @@ podman run -d --name liroxnotes -p 8080:8080 \
 ```
 
 `docker` works the same way; see [`compose.yaml`](compose.yaml) for a Compose
-setup with secrets. Build the image yourself with `just image` (and run it with
+setup with secrets. The image's own README, shown on the package page, lives in
+[lirox-notes-docker](https://github.com/yoramdelangen/lirox-notes-docker). Build the image yourself with `just image` (and run it with
 `just image-run`).
 
 The first onboarding screen asks where you open LiroxNotes, prefilled with the
