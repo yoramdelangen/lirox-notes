@@ -20,6 +20,17 @@ passkey functions fail with a 500 until onboarding stores domains.
 Logout deletes the stored session and clears the cookie. Protected functions
 authorize from that request cookie; they do not accept a user ID or auth flag.
 
+Desktop mode: when the server runs inside the desktop app, the process has
+`LIROX_DESKTOP_TOKEN` set to a per-launch secret. Requests whose
+`lirox_desktop` cookie equals it are authorized like a session (an unset or
+empty token never matches). `bootstrap_server_function` then reports
+`authenticated: true` (user `local` unless a session exists) and marks the
+installation done if needed, so onboarding resumes at `WorkspaceRequired`
+without a passkey. `setup_installation_server_function` skips its passkey
+requirement for such requests. The desktop app sets this cookie itself through
+`GET /__desktop/enter?token=…` (403 on a wrong token), which only the desktop
+binary serves.
+
 Functions return `Result<T, ServerFnError>`. Error messages are stable,
 user-safe summaries; filesystem paths, Git stderr, tokens, and credential
 material are not returned. Callers should treat connection and server errors as
@@ -39,7 +50,7 @@ are async and return `Result<result, ServerFnError>`.
 | `passkey_login_options_server_function` | No | — | JSON object with `challenge_id` and WebAuthn `publicKey` request options. |
 | `passkey_login_verify_server_function` | No | `challenge_id: String`, `credential: JSON` | `bool`; consumes a valid login challenge, rotates the session, and sets the session cookie. |
 | `logout_server_function` | No | — | `()`; deletes the session and clears the cookie. |
-| `setup_installation_server_function` | Yes | `user_name: Option<String>` | `()`; idempotently persists installation/name after passkey registration; safe to retry. |
+| `setup_installation_server_function` | Yes | `user_name: Option<String>` | `()`; idempotently persists installation/name after passkey registration (or for a desktop request, without one); safe to retry. The name survives the later workspace setup. |
 | `inspect_repository_server_function` | Yes | `repo_url: String`, `branch: Option<String>` | `RepositoryMetadata { name, slug }`; inspects a remote without exposing server paths. `name`/`slug` come from the repository's `.lirox.toml`; when it sets none, they fall back to the repository name from the URL (`git@github.com:owner/my-notes.git` → `my-notes`). |
 | `existing_workspaces_server_function` | Yes | — | `Vec<ExistingWorkspace>`: the top-level, non-hidden folders of each cloned repository below the app workspace root that are not yet registered as a workspace (nested folders and repository roots are omitted). |
 | `registered_workspaces_server_function` | Yes | — | `Vec<RegisteredWorkspace { slug, name, repository, path, active }>`: every workspace registered in the application. `repository` is the repository folder relative to the app workspace root and `path` the workspace folder relative to the git root (empty for the root); no server paths are exposed. |
@@ -47,6 +58,7 @@ are async and return `Result<result, ServerFnError>`.
 | `create_workspace_server_function` | Yes | `remote: bool`, `slug: String`, `name: String`, `repo_url: String`, `repository_path: String`, `workspace_path: String`, `branch: String` | `WorkspaceView`; registers a local/remote or existing-repository workspace, makes it active (other registered workspaces are kept) and completes onboarding only after persistence succeeds. `workspace_path` is a subpath relative to the git root (required for an existing repository, optional for a new one). Registration is application-level: the app config stores the git root and this relative path; nothing is written to the repository's `.lirox.toml`. A slug already registered for a different folder is rejected (409). |
 | `workspace_server_function` | Yes | `selected_note_path: Option<String>` | `WorkspaceView` for the active workspace; notes are read from `<git root>/<relative path>`. |
 | `save_document_server_function` | Yes | `path: String`, `content: String` | `WorkspaceView`; validates a relative Markdown note path, writes and commits it. |
+| `create_note_server_function` | Yes | `path: String`, `content: String` | `WorkspaceView` with the new note selected; writes and commits a new note. The file name must be a slug (`[a-z0-9]+(-[a-z0-9]+)*.md`; folders on the path may have any valid name) else 400 "Use lowercase letters, numbers and dashes". Never overwrites: an existing note, a folder with the note's name (`x/` for `x.md`), or an existing `README.md` for the child-note conversion is a 409 whose message names the relative path (e.g. "`plan.md` already exists"). Creating `ideas/plan.md` while `ideas.md` exists moves `ideas.md` to `ideas/README.md` in the same commit. |
 | `read_workspace_file_server_function` | Yes | `path: String` | `WorkspaceFile { path, body }`; only safe Markdown note paths are accepted. |
 | `delete_workspace_file_server_function` | Yes | `path: String` | `bool`; validates the note path, deletes if present, and commits the change. |
 | `app_config_server_function` | Yes | none | `String`: the raw TOML of the user's app config (keymaps, `[editor]` options), or empty when the file does not exist. Read from `$LIROX_APP_CONFIG`, else `$XDG_CONFIG_HOME/lirox-notes/config.toml`, else `~/.config/lirox-notes/config.toml`; the client parses and validates it and keeps its built-in keymap on errors. An unreadable file returns 500. |
@@ -64,7 +76,17 @@ are async and return `Result<result, ServerFnError>`.
 
 Protected workspace functions return an authentication error before reading or
 mutating workspace data. Invalid note paths are rejected before filesystem
-access. Invalid setup, repository, contrast, or challenge inputs return a
+access.
+
+A valid note path (for `save_document`, `read_workspace_file`,
+`delete_workspace_file`) is relative, ends in `.md`, and is made of plain
+`/`-separated segments: no empty, `.` or `..` segments, no segment starting
+with `.` (so `.git/` and config files are unreachable), no backslashes and no
+control characters. It is resolved inside the active workspace's folder, and
+the request is refused if the note or any folder on its path is a symlink.
+`read_workspace_file` and `delete_workspace_file` refuse with 400 "invalid
+note path"; `save_document` refuses with 400 "could not save note". The
+workspace view and tree skip hidden entries and symlinks. Invalid setup, repository, contrast, or challenge inputs return a
 client-safe error; storage and configuration failures return a generic server
 error. Challenge records remain short-lived, single-use, and persisted in the
 existing format.

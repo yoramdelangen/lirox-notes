@@ -41,9 +41,12 @@ COPY --from=builder /out/public /public
 FROM gcr.io/distroless/static:nonroot@sha256:25ac8f0c3b2334a9eb05452266bd4697864a8c8ef0ef71e5e6480d7f92868329 AS runtime
 
 ARG VERSION=dev
+# GHCR shows the README of the `source` repo on the package page, so it points
+# at lirox-notes-docker, which only holds the image README.
 LABEL org.opencontainers.image.title="LiroxNotes" \
       org.opencontainers.image.description="Keyboard-first notes workbench (server)" \
-      org.opencontainers.image.source="https://github.com/yoramdelangen/lirox-notes" \
+      org.opencontainers.image.source="https://github.com/yoramdelangen/lirox-notes-docker" \
+      org.opencontainers.image.url="https://github.com/yoramdelangen/lirox-notes" \
       org.opencontainers.image.version="${VERSION}"
 
 COPY --from=builder --chown=65532:65532 /out/server /app/server

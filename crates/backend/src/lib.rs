@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     env, fs,
     io::Write,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 
@@ -13,12 +13,17 @@ pub mod user_config;
 pub mod workspace;
 pub use workspace::{
     changed_count, commit_note, configure_git_remote, configured_profile,
-    create_configured_workspace, create_workspace, delete_note_file, disconnect_git_remote,
-    ensure_workspace, ensure_workspace_for_config, existing_workspaces, inspect_repository,
-    load_repository_config, notes_root, pull_workspace, push_workspace, read_note_body,
-    save_note_body, save_workspace_theme, unpushed_commit_count, workspace_view_for_config,
-    ExistingWorkspace, RepositoryConfig, RepositoryMetadata, RepositoryWorkspace, WorkspaceSetup,
+    create_configured_workspace, create_note, create_workspace, delete_note_file,
+    disconnect_git_remote, ensure_workspace, ensure_workspace_for_config, existing_workspaces,
+    inspect_repository, load_repository_config, notes_root, pull_workspace, push_workspace,
+    read_note_body, save_note_body, save_workspace_theme, unpushed_commit_count,
+    workspace_view_for_config, ExistingWorkspace, RepositoryConfig, RepositoryMetadata,
+    RepositoryWorkspace, WorkspaceSetup,
 };
+
+/// Set by the desktop app to the per-launch secret its window presents as
+/// the `lirox_desktop` cookie; requests carrying it skip passkey sign-in.
+pub const DESKTOP_TOKEN_ENV: &str = "LIROX_DESKTOP_TOKEN";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimePaths {
@@ -311,20 +316,27 @@ fn mark_installed_unlocked(paths: &RuntimePaths, workspace_root: &Path) -> std::
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let completed = match fs::read_to_string(&path) {
-        Ok(contents) => contents
-            .lines()
-            .any(|line| line.trim() == "onboarding_complete=true"),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error),
     };
-    if completed {
+    if contents
+        .lines()
+        .any(|line| line.trim() == "onboarding_complete=true")
+    {
         return Ok(());
     }
+    // The display name is saved before the workspace exists; keep it.
+    let user_name = contents
+        .lines()
+        .find(|line| line.trim_start().starts_with("user_name="))
+        .map(|line| format!("{}\n", line.trim()))
+        .unwrap_or_default();
     fs::write(
         path,
         format!(
-            "installed=true\nworkspace_root={}\n",
+            "installed=true\nworkspace_root={}\n{user_name}",
             workspace_root.display()
         ),
     )
@@ -351,22 +363,21 @@ fn mark_onboarding_complete_unlocked(paths: &RuntimePaths) -> std::io::Result<()
     writeln!(file, "onboarding_complete=true")
 }
 
+/// A relative `.md` path whose segments are all plain names: no `..`, `.`,
+/// hidden (`.git`, `.lirox.toml`) or empty segments, backslashes or control
+/// characters. This is lexical only; `workspace::resolve_note_path` also
+/// refuses symlinks on disk.
 pub fn safe_note_path(path: &str) -> Option<PathBuf> {
-    if path.is_empty() || !path.ends_with(".md") {
-        return None;
-    }
-
-    let path = Path::new(path);
-    if path.is_absolute() {
+    if !path.ends_with(".md") || path.contains('\\') || path.chars().any(char::is_control) {
         return None;
     }
 
     let mut clean = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => clean.push(part),
-            _ => return None,
+    for segment in path.split('/') {
+        if segment.is_empty() || segment.starts_with('.') {
+            return None;
         }
+        clean.push(segment);
     }
 
     Some(clean)
