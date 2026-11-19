@@ -90,6 +90,8 @@ pub struct UiState {
     pub sticky_heading: String,
     /// 1-based line and column of the editor cursor.
     pub cursor: (usize, usize),
+    /// The note being named in the file tree's inline row.
+    pub new_note: Option<super::NoteDraft>,
     /// Folder paths folded in the file tree.
     pub collapsed: std::collections::BTreeSet<String>,
     /// Whether the user's config.toml has been asked for this session.
@@ -112,6 +114,7 @@ impl Default for UiState {
             touch: false,
             sticky_heading: String::new(),
             cursor: (1, 1),
+            new_note: None,
             collapsed: Default::default(),
             config_requested: false,
         }
@@ -121,6 +124,9 @@ impl Default for UiState {
 impl UiState {
     /// Closes the topmost overlay, popover or menu; false if nothing was open.
     pub fn close_top(&mut self) -> bool {
+        if self.new_note.take().is_some() {
+            return true;
+        }
         if self.palette.take().is_some() {
             return true;
         }

@@ -54,6 +54,30 @@ pub async fn save_document_server_function(
         .map_err(|_| internal_error("could not load workspace"))
 }
 
+/// Creates a new note; refuses to overwrite (409) or a non-slug name (400).
+#[server]
+pub async fn create_note_server_function(
+    path: String,
+    content: String,
+) -> Result<liroxnotes_shared::WorkspaceView, ServerFnError> {
+    let (_, config) = authenticated_workspace()?;
+    liroxnotes_backend::create_note(&config, &path, content).map_err(create_note_error)?;
+    workspace_view_for_config(&config, &path)
+        .map_err(|_| internal_error("could not load workspace"))
+}
+
+/// Keeps the reason for a refused create (it names only the relative path).
+#[cfg(feature = "server")]
+fn create_note_error(error: std::io::Error) -> ServerFnError {
+    match error.kind() {
+        std::io::ErrorKind::AlreadyExists => client_error(409, &error.to_string()),
+        std::io::ErrorKind::InvalidInput => {
+            client_error(400, "Use lowercase letters, numbers and dashes")
+        }
+        _ => internal_error("could not create note"),
+    }
+}
+
 #[server]
 pub async fn save_workspace_theme_server_function(
     slug: String,
@@ -603,6 +627,28 @@ fn session_token_from_cookie(cookie: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{client_bootstrap_state, session_token_from_cookie};
+
+    #[cfg(feature = "server")]
+    #[test]
+    fn create_errors_keep_the_reason() {
+        use dioxus::prelude::ServerFnError;
+        use std::io::{Error, ErrorKind};
+
+        match super::create_note_error(Error::new(
+            ErrorKind::AlreadyExists,
+            "`b.md` already exists",
+        )) {
+            ServerFnError::ServerError { code, message, .. } => {
+                assert_eq!(code, 409);
+                assert_eq!(message, "`b.md` already exists");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        match super::create_note_error(Error::new(ErrorKind::InvalidInput, "bad")) {
+            ServerFnError::ServerError { code, .. } => assert_eq!(code, 400),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
 
     #[test]
     fn session_cookie_parser_requires_the_exact_session_cookie_name() {
