@@ -17,7 +17,7 @@ liroxnotes-app = { path = "../app", default-features = false, features = ["serve
 liroxnotes-backend = { path = "../backend" }
 muda = "0.17"
 serde = { version = "1", features = ["derive"] }
-tao = "0.34"
+tao = "0.37"
 tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 uuid.workspace = true
 wry = "0.53"
